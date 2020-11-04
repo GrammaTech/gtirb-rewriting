@@ -20,11 +20,99 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import logging
-from typing import Iterator, Sequence
+from typing import (
+    Iterator,
+    Mapping,
+    MutableMapping,
+    Sequence,
+    TypeVar,
+    Union,
+    overload,
+)
 
 import capstone
 import gtirb
 from gtirb_capstone.instructions import GtirbInstructionDecoder
+
+T = TypeVar("T")
+
+
+class OffsetMapping(MutableMapping[gtirb.Offset, T]):
+    """Mapping that allows looking up groups of items by their offset element.
+
+    The keys in this mapping are required to be Offsets. If a non-Offset is
+    used as a key, it is assumed to be the element_id of an Offset. In that
+    case, the corresponding element is a MutableMapping[int, T] of
+    displacements to values for every Offset that has the given element_id. For
+    example,
+        m = OffsetMapping[str]()
+        m[Offset(x, 0)] = "a"     # insert an offset into the map
+        m[x] = {1: "b", 2: "c"}   # insert two offsets into the map
+        m[x][0] = "d"             # change the value for Offset(x, 0)
+        print(m[Offset(x, 1)])    # get the value for Offset(x, 1)
+        del m[Offset(x, 2)]       # delete Offset(x, 2) from the map
+    """
+
+    def __init__(self, *args, **kw):
+        """Create a new OffsetMapping from an iterable and/or keywords."""
+        self._data = {}
+        self.update(*args, **kw)
+
+    def __len__(self) -> int:
+        """Get the number of Offsets stored in this mapping."""
+        return sum(len(subdata) for subdata in self._data.values())
+
+    def __iter__(self) -> Iterator[gtirb.Offset]:
+        """"Yield the Offsets in this mapping."""
+        for elem, subdata in self._data.items():
+            for disp in subdata:
+                yield gtirb.Offset(elem, disp)
+
+    @overload
+    def __getitem__(self, key: gtirb.Offset) -> T:
+        ...
+
+    @overload
+    def __getitem__(self, key: gtirb.Node) -> MutableMapping[int, T]:
+        ...
+
+    def __getitem__(self, key):
+        """Get the value for an Offset or dictionary for an element_id."""
+        if isinstance(key, gtirb.Offset):
+            elem, disp = key
+            if elem in self._data and disp in self._data[elem]:
+                return self._data[elem][disp]
+        return self._data[key]
+
+    @overload
+    def __setitem__(self, key: gtirb.Offset, value: T) -> None:
+        ...
+
+    @overload
+    def __setitem__(self, key: gtirb.Node, value: Mapping[int, T]) -> None:
+        ...
+
+    def __setitem__(self, key, value):
+        """Set the value for an Offset, or several Offsets given an element."""
+        if isinstance(key, gtirb.Offset):
+            elem, disp = key
+            if elem not in self._data:
+                self._data[elem] = {}
+            self._data[elem][disp] = value
+        elif not isinstance(value, Mapping):
+            raise ValueError("not a mapping: %r" % value)
+        else:
+            self._data.setdefault(key, {}).update(value)
+
+    def __delitem__(self, key: Union[gtirb.Offset, gtirb.Node]) -> None:
+        """Delete the mapping for an Offset or all Offsets given an element."""
+        if isinstance(key, gtirb.Offset):
+            elem, disp = key
+            if elem not in self._data or disp not in self._data[elem]:
+                raise KeyError(key)
+                del self._data[elem][disp]
+        else:
+            del self._data[key]
 
 
 def _target_triple(module: gtirb.Module) -> str:
@@ -132,14 +220,15 @@ def _modify_block_insert(
     def update_aux_data_keyed_by_offset(name):
         table = bi.module.aux_data.get(name)
         if table:
-            table.data = {
-                (
-                    gtirb.Offset(bi, k.displacement + n_bytes)
-                    if k.element_id == bi and k.displacement >= offset
-                    else k
-                ): v
-                for k, v in table.data.items()
-            }
+            if not isinstance(table.data, OffsetMapping):
+                table.data = OffsetMapping(table.data)
+            if bi in table.data:
+                displacement_map = table.data[bi]
+                del table.data[bi]
+                table.data[bi] = {
+                    (k + n_bytes if k >= offset else k): v
+                    for k, v in displacement_map.items()
+                }
 
     # TODO: It seems like we _could_ detect any aux data table that is a
     #       mapping using Offset as keys if gtirb.Serialization._parse_type
