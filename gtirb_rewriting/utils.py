@@ -163,6 +163,7 @@ def show_block_asm(
     block: gtirb.CodeBlock,
     arch: gtirb.Module.ISA = None,
     logger=logging.getLogger(),
+    decoder=None,
 ) -> None:
     """
     Disassemble and print the contents of a code block using the given
@@ -170,17 +171,14 @@ def show_block_asm(
     module. If the block is not in a module, the function throws an error.
     """
 
-    if arch is None:
-        if (
-            block.byte_interval is not None
-            and block.byte_interval.section is not None
-            and block.byte_interval.section.module is not None
-        ):
+    if decoder is None:
+        if arch is None:
+            if block.module is None:
+                raise ValueError("Undefined architecture")
             arch = block.byte_interval.section.module.isa
-    if arch is None:
-        raise ValueError("Undefined architecture")
+        decoder = GtirbInstructionDecoder(arch)
 
-    for i in GtirbInstructionDecoder(arch).get_instructions(block):
+    for i in decoder.get_instructions(block):
         logger.debug("\t0x%x:\t%s\t%s", i.address, i.mnemonic, i.op_str)
 
 

@@ -72,6 +72,7 @@ class RewritingContext:
         self._module = module
         self._symbols_by_name = {s.name: s for s in module.symbols}
         self._functions = functions
+        self._decoder = GtirbInstructionDecoder(self._module.isa)
         self._isa = _get_isa(module.isa)
         self._insertions: List[_Insertion] = []
         self._logger = logger
@@ -116,7 +117,9 @@ class RewritingContext:
                 "Applying %s at %s+%s", patch, context.block, context.offset
             )
             self._logger.debug("  Before:")
-            show_block_asm(context.block, logger=self._logger)
+            show_block_asm(
+                context.block, decoder=self._decoder, logger=self._logger
+            )
 
         _modify_block_insert(
             context.block, chunks_encoded, context.offset,
@@ -136,7 +139,9 @@ class RewritingContext:
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
-            show_block_asm(context.block, logger=self._logger)
+            show_block_asm(
+                context.block, decoder=self._decoder, logger=self._logger
+            )
 
     def get_or_insert_extern_symbol(
         self, name: str, libname: str
@@ -251,11 +256,7 @@ class RewritingContext:
         if any(
             insertion.scope._needs_disassembly() for insertion in insertions
         ):
-            instructions = tuple(
-                GtirbInstructionDecoder(self._module.isa).get_instructions(
-                    block
-                )
-            )
+            instructions = tuple(self._decoder.get_instructions(block))
 
         for insertion in insertions:
             # TODO: This is where bubbling will get hooked in, but for now
