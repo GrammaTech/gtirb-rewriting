@@ -19,9 +19,11 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+import contextlib
 import logging
 from typing import (
     Dict,
+    Iterator,
     List,
     Mapping,
     MutableMapping,
@@ -417,51 +419,58 @@ class RewritingContext:
             new_interval.initialized_size = len(contents)
             new_interval.symbolic_expressions = tables[-1][new_interval]
 
-    def apply(self) -> None:
-        """
-        Applies all of the patches to the module.
-        """
+    @contextlib.contextmanager
+    def _prepare_for_rewriting(self, module: gtirb.Module) -> Iterator[None]:
+        """Pre-compute data structure to accelerate rewriting."""
 
         def cast_to_offset_mapping(name):
-            table = self._module.aux_data[name]
+            table = module.aux_data[name]
             if not isinstance(table.data, OffsetMapping):
                 table.data = OffsetMapping(table.data)
             return table.data
 
         alignment = {}
-        if "alignment" in self._module.aux_data:
-            alignment = self._module.aux_data["alignment"].data
+        if "alignment" in module.aux_data:
+            alignment = module.aux_data["alignment"].data
         tables = [
             cast_to_offset_mapping(name)
             for name in ("comments", "padding", "symbolicExpressionSizes")
-            if name in self._module.aux_data
+            if name in module.aux_data
         ]
         # Add an OffsetMapping for symbolic expressions
         tables.append(OffsetMapping())
 
         partitions = self._partition_byte_intervals(alignment, tables)
 
-        for f in self._functions:
-            func_insertions = [
-                insertion
-                for insertion in self._insertions
-                if insertion.scope._function_matches(self._module, f)
-            ]
-            if not func_insertions:
-                continue
-
-            for b in f.get_all_blocks():
-                block_insertions = [
-                    insertion
-                    for insertion in func_insertions
-                    if insertion.scope._block_matches(self._module, f, b)
-                ]
-                if not block_insertions:
-                    continue
-
-                self._apply_insertions(block_insertions, f, b)
+        yield
 
         self._rejoin_byte_intervals(partitions, alignment, tables)
+
+    def apply(self) -> None:
+        """
+        Applies all of the patches to the module.
+        """
+
+        with self._prepare_for_rewriting(self._module):
+            for f in self._functions:
+                func_insertions = [
+                    insertion
+                    for insertion in self._insertions
+                    if insertion.scope._function_matches(self._module, f)
+                ]
+                if not func_insertions:
+                    continue
+
+                for b in f.get_all_blocks():
+                    block_insertions = [
+                        insertion
+                        for insertion in func_insertions
+                        if insertion.scope._block_matches(self._module, f, b)
+                    ]
+                    if not block_insertions:
+                        continue
+
+                    self._apply_insertions(block_insertions, f, b)
 
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.
