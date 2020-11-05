@@ -20,7 +20,15 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import logging
-from typing import Dict, List, NamedTuple, Sequence, Tuple
+from typing import (
+    Dict,
+    List,
+    Mapping,
+    MutableMapping,
+    NamedTuple,
+    Sequence,
+    Tuple,
+)
 
 import gtirb
 import gtirb_functions
@@ -31,9 +39,12 @@ from .assembly import InsertionContext, Patch, X86Syntax, _AsmSnippet
 from .isa import _get_isa
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
+    OffsetMapping,
     _modify_block_insert,
     _target_triple,
+    align_address,
     decorate_extern_symbol,
+    effective_alignment,
     show_block_asm,
 )
 
@@ -273,10 +284,157 @@ class RewritingContext:
             _SpecificLocationScope(function, block, offset), patch
         )
 
+    def _partition_interval(
+        self, interval: gtirb.ByteInterval, tables: List[OffsetMapping[object]]
+    ) -> List[gtirb.ByteBlock]:
+        """Create a new interval for every block in the ByteInterval."""
+        # Last table holds symbolic expressions.
+        tables[-1][interval] = interval.symbolic_expressions
+
+        # We will walk through the blocks and the associated info in the aux
+        # data/symbolic expression tables in order to avoid needing multiple
+        # scans. The aux data/symbolic expression info is reversed to
+        # facilitate poping from the back of the lists.
+
+        old_items: List[List[Tuple[int, object]]] = [
+            sorted(table.get(interval, {}).items(), reverse=True)
+            for table in tables
+        ]
+
+        blocks = sorted(interval.blocks, key=lambda b: b.offset)
+        for block in blocks:
+            new_interval = gtirb.ByteInterval(
+                size=block.size, contents=block.contents
+            )
+            new_interval.section = interval.section
+
+            # Transfer aux data/symbolic expressions to the new interval.
+
+            begin, end = block.offset, block.offset + block.size
+            for table, items in zip(tables, old_items):
+                while items != [] and items[-1][0] < begin:
+                    items.pop()
+                while items != [] and items[-1][0] < end:
+                    off, value = items.pop()
+                    del table[gtirb.Offset(interval, off)]
+                    off -= block.offset
+                    table[gtirb.Offset(new_interval, off)] = value
+
+            if new_interval in tables[-1]:
+                new_interval.symbolic_expressions = tables[-1][new_interval]
+            new_interval.address = block.address
+            block.byte_interval = new_interval
+            block.offset = 0
+        interval.section = None
+        return blocks
+
+    def _partition_byte_intervals(
+        self,
+        alignment: MutableMapping[gtirb.Node, int],
+        tables: List[OffsetMapping[object]],
+    ) -> List[List[gtirb.ByteBlock]]:
+        """Create new byte intervals for every block in the module."""
+        for block in self._module.byte_blocks:
+            if block not in alignment:
+                if block.address is None:
+                    # Align the offset, since we don't know the actual address
+                    alignment[block] = effective_alignment(block.offset)
+                else:
+                    alignment[block] = effective_alignment(block.address)
+
+        partitions = []
+        for interval in tuple(self._module.byte_intervals):
+            if any(isinstance(b, gtirb.CodeBlock) for b in interval.blocks):
+                partitions.append(self._partition_interval(interval, tables))
+        return partitions
+
+    def _rejoin_byte_intervals(
+        self,
+        partitions: List[List[gtirb.ByteBlock]],
+        alignment: Mapping[gtirb.Node, int],
+        tables: List[OffsetMapping[object]],
+    ) -> None:
+        """Recombine blocks that originally shared the same byte intervals."""
+        nop = self._assemble(self._module, "nop", X86Syntax.INTEL)[0]
+
+        for partition in partitions:
+            block = partition[0]
+
+            offset = 0
+            address = block.address
+            if address is not None:
+                address = align_address(address, alignment[block])
+
+            new_interval = gtirb.ByteInterval(address=address)
+            new_interval.section = block.section
+
+            contents = bytearray()
+            for block in partition:
+                if address is None:
+                    padding = align_address(offset, alignment[block]) - offset
+                else:
+                    padding = align_address(address + offset, alignment[block])
+                    padding -= address + offset
+                if padding != 0:
+                    # The pretty-printer won't print the padding bytes unless
+                    # they are contained in blocks.
+                    if isinstance(block, gtirb.DataBlock):
+                        contents += b"\x00" * padding
+                        pad = gtirb.DataBlock(offset=offset, size=padding)
+                    else:
+                        q, r = divmod(padding, len(nop))
+                        assert r == 0, "nop does not fit evenly in padding"
+                        contents += nop * q
+                        pad = gtirb.CodeBlock(offset=offset, size=padding)
+                    pad.byte_interval = new_interval
+                    offset += padding
+                contents += block.contents
+
+                # Re-sync the symbolic expressions table with the byte interval
+                # in case the patches added new symbolic expressions.
+                old_interval = block.byte_interval
+                tables[-1].pop(old_interval, None)
+                tables[-1][old_interval] = old_interval.symbolic_expressions
+
+                # Transfer aux data/symbolic expressions to the new interval.
+                for table in tables:
+                    table[new_interval] = {
+                        k + offset: v
+                        for k, v in table.get(old_interval, {}).items()
+                    }
+                    table.pop(old_interval, None)
+                block.byte_interval = new_interval
+                block.offset = offset
+                offset += block.size
+
+            new_interval.contents = contents
+            new_interval.size = len(contents)
+            new_interval.initialized_size = len(contents)
+            new_interval.symbolic_expressions = tables[-1][new_interval]
+
     def apply(self) -> None:
         """
         Applies all of the patches to the module.
         """
+
+        def cast_to_offset_mapping(name):
+            table = self._module.aux_data[name]
+            if not isinstance(table.data, OffsetMapping):
+                table.data = OffsetMapping(table.data)
+            return table.data
+
+        alignment = {}
+        if "alignment" in self._module.aux_data:
+            alignment = self._module.aux_data["alignment"].data
+        tables = [
+            cast_to_offset_mapping(name)
+            for name in ("comments", "padding", "symbolicExpressionSizes")
+            if name in self._module.aux_data
+        ]
+        # Add an OffsetMapping for symbolic expressions
+        tables.append(OffsetMapping())
+
+        partitions = self._partition_byte_intervals(alignment, tables)
 
         for f in self._functions:
             func_insertions = [
@@ -297,6 +455,8 @@ class RewritingContext:
                     continue
 
                 self._apply_insertions(block_insertions, f, b)
+
+        self._rejoin_byte_intervals(partitions, alignment, tables)
 
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.

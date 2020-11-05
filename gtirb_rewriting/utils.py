@@ -254,3 +254,13 @@ def decorate_extern_symbol(module: gtirb.Module, sym: str) -> str:
     if _is_elf_pie(module):
         return sym + "@PLT"
     return sym
+
+
+def effective_alignment(address: int, max_alignment: int = 8) -> int:
+    """Return the largest power of two to which an address is aligned."""
+    return (~address & (address - 1) & (max_alignment - 1)) + 1
+
+
+def align_address(address: int, alignment: int) -> int:
+    """Increase an address to the next alignment boundary, if necessary."""
+    return (address + alignment - 1) & -alignment
