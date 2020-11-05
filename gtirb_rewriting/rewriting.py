@@ -68,6 +68,7 @@ class RewritingContext:
         logger=logging.Logger("null"),
     ):
         self._module = module
+        self._symbols_by_name = {s.name: s for s in module.symbols}
         self._functions = functions
         self._isa = _get_isa(module.isa)
         self._insertions: List[_Insertion] = []
@@ -193,7 +194,11 @@ class RewritingContext:
         if "variantKind" in expr:
             name += "@" + expr["variantKind"]
 
-        sym = next((sym for sym in module.symbols if sym.name == name), None)
+        sym = self._symbols_by_name.get(name, None)
+        if not sym or sym.module != module:
+            sym = next(
+                (sym for sym in module.symbols if sym.name == name), None
+            )
         assert sym, "Referencing a symbol not present in the module"
 
         return gtirb.SymAddrConst(0, sym)
