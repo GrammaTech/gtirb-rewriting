@@ -1,0 +1,14 @@
+# Python files and directories
+*.pyc
+__pycache__/
+.mypy_cache/
+/*.egg-info/
+/build/
+/dist/
+
+# IDE files and directories
+/.vscode/
+
+# Other files and directories
+core.*
+vgcore.*
