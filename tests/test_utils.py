@@ -25,6 +25,62 @@ import unittest.mock
 import capstone
 import gtirb
 import gtirb_rewriting.utils
+import pytest
+
+
+def test_offset_mapping():
+    m = gtirb_rewriting.utils.OffsetMapping()
+    assert len(m) == 0
+    assert gtirb.Offset(element_id=0, displacement=0) not in m
+
+    m[gtirb.Offset(element_id=0, displacement=0)] = "A"
+    assert len(m) == 1
+    assert gtirb.Offset(element_id=0, displacement=0) in m
+    assert m[gtirb.Offset(element_id=0, displacement=0)] == "A"
+    assert m[0] == {0: "A"}
+    assert list(m.items()) == [
+        (gtirb.Offset(element_id=0, displacement=0), "A")
+    ]
+
+    m[1] = {0: "B", 23: "C"}
+    assert len(m) == 3
+    assert gtirb.Offset(element_id=1, displacement=23) in m
+    assert m[gtirb.Offset(element_id=1, displacement=23)] == "C"
+    assert m == {
+        gtirb.Offset(element_id=0, displacement=0): "A",
+        gtirb.Offset(element_id=1, displacement=0): "B",
+        gtirb.Offset(element_id=1, displacement=23): "C",
+    }
+
+    m[1] = {15: "D", 23: "E"}
+    assert len(m) == 4
+    assert m == {
+        gtirb.Offset(element_id=0, displacement=0): "A",
+        gtirb.Offset(element_id=1, displacement=0): "B",
+        gtirb.Offset(element_id=1, displacement=15): "D",
+        gtirb.Offset(element_id=1, displacement=23): "E",
+    }
+
+    del m[gtirb.Offset(element_id=1, displacement=23)]
+    assert len(m) == 3
+    assert m == {
+        gtirb.Offset(element_id=0, displacement=0): "A",
+        gtirb.Offset(element_id=1, displacement=0): "B",
+        gtirb.Offset(element_id=1, displacement=15): "D",
+    }
+
+    key = gtirb.Offset(element_id=1, displacement=23)
+    with pytest.raises(KeyError) as excinfo:
+        del m[key]
+    assert str(key) == str(excinfo.value)
+
+    del m[1]
+    assert len(m) == 1
+    assert m == {gtirb.Offset(element_id=0, displacement=0): "A"}
+
+    with pytest.raises(ValueError) as excinfo:
+        m[2] = "F"
+    assert "not a mapping" in str(excinfo.value)
 
 
 def test_triples():

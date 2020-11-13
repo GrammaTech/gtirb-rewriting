@@ -110,7 +110,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
             elem, disp = key
             if elem not in self._data or disp not in self._data[elem]:
                 raise KeyError(key)
-                del self._data[elem][disp]
+            del self._data[elem][disp]
         else:
             del self._data[key]
 
