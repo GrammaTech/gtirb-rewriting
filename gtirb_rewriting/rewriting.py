@@ -29,6 +29,7 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .assembly import InsertionContext, Patch, X86Syntax, _AsmSnippet
 from .isa import _get_isa
+from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
     _modify_block_insert,
@@ -57,7 +58,9 @@ class RewritingContext:
         logger=logging.Logger("null"),
     ):
         self._module = module
+        self._symbols_by_name = {s.name: s for s in module.symbols}
         self._functions = functions
+        self._decoder = GtirbInstructionDecoder(self._module.isa)
         self._isa = _get_isa(module.isa)
         self._insertions: List[_Insertion] = []
         self._logger = logger
@@ -102,7 +105,9 @@ class RewritingContext:
                 "Applying %s at %s+%s", patch, context.block, context.offset
             )
             self._logger.debug("  Before:")
-            show_block_asm(context.block, logger=self._logger)
+            show_block_asm(
+                context.block, decoder=self._decoder, logger=self._logger
+            )
 
         _modify_block_insert(
             context.block, chunks_encoded, context.offset,
@@ -122,7 +127,9 @@ class RewritingContext:
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
-            show_block_asm(context.block, logger=self._logger)
+            show_block_asm(
+                context.block, decoder=self._decoder, logger=self._logger
+            )
 
     def get_or_insert_extern_symbol(
         self, name: str, libname: str
@@ -182,7 +189,11 @@ class RewritingContext:
         if "variantKind" in expr:
             name += "@" + expr["variantKind"]
 
-        sym = next((sym for sym in module.symbols if sym.name == name), None)
+        sym = self._symbols_by_name.get(name, None)
+        if not sym or sym.module != module:
+            sym = next(
+                (sym for sym in module.symbols if sym.name == name), None
+            )
         assert sym, "Referencing a symbol not present in the module"
 
         return gtirb.SymAddrConst(0, sym)
@@ -233,11 +244,7 @@ class RewritingContext:
         if any(
             insertion.scope._needs_disassembly() for insertion in insertions
         ):
-            instructions = tuple(
-                GtirbInstructionDecoder(self._module.isa).get_instructions(
-                    block
-                )
-            )
+            instructions = tuple(self._decoder.get_instructions(block))
 
         for insertion in insertions:
             # TODO: This is where bubbling will get hooked in, but for now
@@ -278,25 +285,26 @@ class RewritingContext:
         Applies all of the patches to the module.
         """
 
-        for f in self._functions:
-            func_insertions = [
-                insertion
-                for insertion in self._insertions
-                if insertion.scope._function_matches(self._module, f)
-            ]
-            if not func_insertions:
-                continue
-
-            for b in f.get_all_blocks():
-                block_insertions = [
+        with prepare_for_rewriting(self._module, self._isa.nop()):
+            for f in self._functions:
+                func_insertions = [
                     insertion
-                    for insertion in func_insertions
-                    if insertion.scope._block_matches(self._module, f, b)
+                    for insertion in self._insertions
+                    if insertion.scope._function_matches(self._module, f)
                 ]
-                if not block_insertions:
+                if not func_insertions:
                     continue
 
-                self._apply_insertions(block_insertions, f, b)
+                for b in f.get_all_blocks():
+                    block_insertions = [
+                        insertion
+                        for insertion in func_insertions
+                        if insertion.scope._block_matches(self._module, f, b)
+                    ]
+                    if not block_insertions:
+                        continue
+
+                    self._apply_insertions(block_insertions, f, b)
 
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.

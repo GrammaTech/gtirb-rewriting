@@ -53,6 +53,12 @@ class _ISA:
         """
         raise NotImplementedError
 
+    def nop(self) -> bytes:
+        """
+        Returns the encoding of a no-op instruction.
+        """
+        raise NotImplementedError
+
 
 class _X86_64(_ISA):
     def save_register(
@@ -137,6 +143,9 @@ class _X86_64(_ISA):
                 {"8l": "r15b", "16": "r15w", "32": "r15d", "64": "r15"}, "64"
             ),
         ]
+
+    def nop(self) -> bytes:
+        return b"\x90"
 
 
 def _get_isa(module_isa: gtirb.Module.ISA) -> _ISA:
