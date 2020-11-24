@@ -70,9 +70,23 @@ class RewritingContext:
         Invokes a patch at a concrete location and applies its results to the
         target module.
         """
-        scratch_registers = self._isa.all_registers()[
+        available_registers = self._isa.all_registers()
+        clobbered_registers = set()
+
+        for clobber in patch.constraints.clobbers_registers:
+            for idx, reg in enumerate(available_registers):
+                if clobber in reg:
+                    available_registers.pop(idx)
+                    clobbered_registers.add(reg)
+                    break
+            else:
+                assert False, f"unknown clobbered register {clobber}"
+
+        scratch_registers = available_registers[
             : patch.constraints.scratch_registers
         ]
+        clobbered_registers.update(scratch_registers)
+
         asm = patch.get_asm(context, *scratch_registers)
         if not asm:
             return
@@ -82,7 +96,7 @@ class RewritingContext:
         if patch.constraints.clobbers_flags:
             snippets.append(self._isa.save_flags())
 
-        for reg in scratch_registers:
+        for reg in clobbered_registers:
             snippets.append(self._isa.save_register(reg))
 
         if patch.constraints.align_stack:
