@@ -21,7 +21,7 @@
 # endorsement should be inferred.
 import dataclasses
 from functools import partial
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Set
 
 import gtirb
 import gtirb_functions
@@ -41,6 +41,9 @@ class Register:
     def __init__(self, sizes: Dict[str, str], default_size: str):
         self.sizes = sizes
         self.default_size = default_size
+
+    def __contains__(self, value) -> bool:
+        return value in self.sizes.values()
 
     def __format__(self, spec: str) -> str:
         """
@@ -90,11 +93,14 @@ class Constraints:
     The syntax mode to use for x86 code. This is unused for other ISAs.
     """
 
-    # TODO: It's possible that clobbers_flags gets consumed by something more
-    #       generic (since the patch might clobber any arbitrary registers).
     clobbers_flags: bool = False
     """
     Does the assembly clobber the flags register?
+    """
+
+    clobbers_registers: Set[str] = dataclasses.field(default_factory=set)
+    """
+    The general purpose registers that the assembly clobbers.
     """
 
     scratch_registers: int = 0

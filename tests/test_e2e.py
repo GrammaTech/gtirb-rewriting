@@ -30,9 +30,9 @@ import pytest
 
 class ExitPatch(gtirb_rewriting.Patch):
     def __init__(self, exit_sym):
-        # TODO: The Constraints class can't currently represent that we always
-        #       clobber %rdi.
-        super().__init__(gtirb_rewriting.Constraints())
+        super().__init__(
+            gtirb_rewriting.Constraints(clobbers_registers={"rdi"})
+        )
         self.exit_sym = exit_sym
 
     def get_asm(self, insertion_ctx):
