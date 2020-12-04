@@ -19,14 +19,45 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
-from typing import List, Tuple
+import dataclasses
+from typing import List, Set, Tuple
 
 import gtirb
 
 from .assembly import Register, _AsmSnippet
 
 
+@dataclasses.dataclass
+class CallingConventionDesc:
+    """
+    Describes an ABI's calling convention.
+    """
+
+    registers: Tuple[str, ...]
+    """
+    Registers used for passing integer or pointer-like values, in the
+    order they are to be used. Any remaining arguments will be passed on
+    the stack.
+    """
+
+    stack_alignment: int
+    """
+    The required stack alignment for calling a function.
+    """
+
+    caller_cleanup: bool
+    """
+    Is the caller required to do cleanup for arguments pushed onto the stack?
+    """
+
+
 class _ISA:
+    def __init__(self) -> None:
+        self._register_map = {}
+        for reg in self.all_registers():
+            for name in reg.sizes.values():
+                self._register_map[name.lower()] = reg
+
     def save_register(
         self, register: Register
     ) -> Tuple[_AsmSnippet, _AsmSnippet]:
@@ -40,6 +71,12 @@ class _ISA:
         Generate code to align the stack to the ABI requirements for a call.
         """
         raise NotImplementedError
+
+    def get_register(self, name: str) -> Register:
+        """
+        Gets a Register object by its name (or the name of a subregister).
+        """
+        return self._register_map[name.lower()]
 
     def save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         """
@@ -56,6 +93,45 @@ class _ISA:
     def nop(self) -> bytes:
         """
         Returns the encoding of a no-op instruction.
+        """
+        raise NotImplementedError
+
+    def caller_saved_registers(self) -> Set[Register]:
+        """
+        Returns the registers that need to be saved by the caller if it wants
+        the values preserved across the call.
+        """
+        raise NotImplementedError
+
+    def pointer_size(self) -> int:
+        """
+        Returns the size of a pointer on the ISA (which is assumed to match
+        the size of general purpose registers).
+        """
+        raise NotImplementedError
+
+    def red_zone_size(self) -> int:
+        """
+        Returns the number of bytes that leaf functions are allowed to use on
+        the stack (without adjusting the stack pointer).
+        """
+        return 0
+
+    def preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+        """
+        Generate code required to preserve the contents of the red zone.
+        """
+        raise NotImplementedError
+
+    def calling_convention(self) -> CallingConventionDesc:
+        """
+        Returns a description of the ABI's default calling convention.
+        """
+        raise NotImplementedError
+
+    def stack_register(self) -> Register:
+        """
+        Returns the stack pointer register.
         """
         raise NotImplementedError
 
@@ -147,9 +223,60 @@ class _X86_64(_ISA):
     def nop(self) -> bytes:
         return b"\x90"
 
+    def pointer_size(self) -> int:
+        return 8
 
-def _get_isa(module_isa: gtirb.Module.ISA) -> _ISA:
-    if module_isa == gtirb.Module.ISA.X64:
-        return _X86_64()
-    else:
-        assert False, f"Unsupported ISA: {module_isa}"
+    def stack_register(self) -> Register:
+        return Register({"16": "sp", "32": "esp", "64": "rsp"}, "64",)
+
+
+class _X86_64_PE(_X86_64):
+    def caller_saved_registers(self) -> Set[Register]:
+        return {
+            self.get_register(name)
+            for name in ("RAX", "RCX", "RDX", "R8", "R9", "R10", "R11")
+        }
+
+
+class _X86_64_ELF(_X86_64):
+    def caller_saved_registers(self) -> Set[Register]:
+        return {
+            self.get_register(name)
+            for name in (
+                "RAX",
+                "RCX",
+                "RDX",
+                "RSI",
+                "RDI",
+                "R8",
+                "R9",
+                "R10",
+                "R11",
+            )
+        }
+
+    def red_zone_size(self) -> int:
+        return 128
+
+    def preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+        return (
+            _AsmSnippet("leaq -128(%rsp), %rsp"),
+            _AsmSnippet("leaq +128(%rsp), %rsp"),
+        )
+
+    def calling_convention(self) -> CallingConventionDesc:
+        return CallingConventionDesc(
+            registers=("RDI", "RSI", "RDX", "RCX", "R8", "R9"),
+            stack_alignment=16,
+            caller_cleanup=True,
+        )
+
+
+def _get_isa(module: gtirb.Module) -> _ISA:
+    if module.isa == gtirb.Module.ISA.X64:
+        if module.file_format == gtirb.Module.FileFormat.ELF:
+            return _X86_64_ELF()
+        elif module.file_format == gtirb.Module.FileFormat.PE:
+            return _X86_64_PE()
+
+    assert False, f"Unsupported ISA/format: {module.isa}/{module.file_format}"

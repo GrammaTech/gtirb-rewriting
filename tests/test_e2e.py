@@ -25,25 +25,29 @@ import sys
 
 import gtirb
 import gtirb_rewriting
+import gtirb_rewriting.patches
 import pytest
 
 
-class ExitPatch(gtirb_rewriting.Patch):
-    def __init__(self, exit_sym):
-        super().__init__(
-            gtirb_rewriting.Constraints(clobbers_registers={"rdi"})
-        )
-        self.exit_sym = exit_sym
-
-    def get_asm(self, insertion_ctx):
-        return f"""
-            mov $42, %rdi
-            call {self.exit_sym.name}
-        """
-
-
-class ExitPass(gtirb_rewriting.Pass):
+class E2EPass(gtirb_rewriting.Pass):
     def begin_module(self, module, functions, rewriting_ctx):
+        print_sym = next(
+            sym for sym in module.symbols if sym.name == "print_integers"
+        )
+        rewriting_ctx.register_insert(
+            gtirb_rewriting.AllFunctionsScope(
+                position=gtirb_rewriting.FunctionPosition.ENTRY,
+                block_position=gtirb_rewriting.BlockPosition.ENTRY,
+                functions={gtirb_rewriting.ENTRYPOINT_NAME},
+            ),
+            gtirb_rewriting.patches.CallPatch(
+                print_sym,
+                args=(1, 2, 3, 4, 5, 6, 7, 8),
+                align_stack=True,
+                preserve_caller_saved_registers=True,
+            ),
+        )
+
         exit_sym = rewriting_ctx.get_or_insert_extern_symbol(
             "exit", "libc.so.6"
         )
@@ -53,7 +57,7 @@ class ExitPass(gtirb_rewriting.Pass):
                 block_position=gtirb_rewriting.BlockPosition.EXIT,
                 functions={gtirb_rewriting.MAIN_NAME},
             ),
-            ExitPatch(exit_sym),
+            gtirb_rewriting.patches.CallPatch(exit_sym, args=(42,)),
         )
 
 
@@ -61,12 +65,13 @@ class ExitPass(gtirb_rewriting.Pass):
 def test_e2e(tmpdir):
     # Test that we can instrument GTIRB, reassemble it, and then run the
     # binary. Our test binary just prints a string and then exits 0. Our
-    # modified binary will print out that string and then exit 42.
+    # modified binary will print out integers, the original string and then
+    # exit 42.
 
     ir = gtirb.IR.load_protobuf(pathlib.Path(__file__).parent / "e2e.gtirb")
 
     pm = gtirb_rewriting.PassManager()
-    pm.add(ExitPass())
+    pm.add(E2EPass())
     pm.run(ir)
 
     ir.save_protobuf(tmpdir / "rewritten.gtirb")
@@ -87,5 +92,8 @@ def test_e2e(tmpdir):
     )
 
     result = subprocess.run(tmpdir / "rewritten", stdout=subprocess.PIPE)
-    assert result.stdout == b"hello world\n"
+    assert (
+        result.stdout
+        == b"print_integers: 1, 2, 3, 4, 5, 6, 7, 8\nhello world\n"
+    )
     assert result.returncode == 42

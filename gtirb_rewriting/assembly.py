@@ -45,6 +45,17 @@ class Register:
     def __contains__(self, value) -> bool:
         return value in self.sizes.values()
 
+    def __eq__(self, other) -> bool:
+        return (
+            self.sizes == other.sizes
+            and self.default_size == other.default_size
+        )
+
+    def __hash__(self) -> int:
+        return hash(self.default_size) ^ hash(
+            tuple(sorted(self.sizes.items()))
+        )
+
     def __format__(self, spec: str) -> str:
         """
         Formats the register (or subregister) as its name.
@@ -56,6 +67,10 @@ class Register:
         """
         if spec:
             return self.sizes[spec]
+        return self.sizes[self.default_size]
+
+    @property
+    def name(self) -> str:
         return self.sizes[self.default_size]
 
 
@@ -71,6 +86,13 @@ class InsertionContext:
     offset: int
     """
     The byte offset of the insertion, relative to the start of the block.
+    """
+
+    stack_adjustment: Optional[int] = None
+    """
+    The amount that the stack has been adjusted to allow for the insertion.
+    A value of None means that it is unknown how much it has been affected
+    (which can happen with the align_stack constraint).
     """
 
     def decorate_extern_symbol(self, name: str) -> str:
@@ -119,6 +141,12 @@ class Constraints:
     Generate code to align the stack to the ABI-defined alignment before
     emitting the patch's code and restore the previous value after. This is
     useful for inserting a call into a module's entrypoint.
+    """
+
+    preserve_caller_saved_registers: bool = False
+    """
+    Spill all caller saved registers as per the ABI based on ISA and ouput
+    format (e.g. PE vs ELF).
     """
 
 
