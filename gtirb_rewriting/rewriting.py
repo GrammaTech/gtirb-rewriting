@@ -61,46 +61,78 @@ class RewritingContext:
         self._symbols_by_name = {s.name: s for s in module.symbols}
         self._functions = functions
         self._decoder = GtirbInstructionDecoder(self._module.isa)
-        self._isa = _get_isa(module.isa)
+        self._isa = _get_isa(module)
         self._insertions: List[_Insertion] = []
         self._logger = logger
 
-    def _invoke_patch(self, context: InsertionContext, patch: Patch) -> None:
+    def _might_be_leaf_function(self, func: gtirb_functions.Function) -> bool:
+        return all(
+            not edge.label or edge.label.type != gtirb.Edge.Type.Call
+            for block in func.get_all_blocks()
+            for edge in block.outgoing_edges
+        )
+
+    def _invoke_patch(
+        self,
+        func: gtirb_functions.Function,
+        block: gtirb.CodeBlock,
+        offset: int,
+        patch: Patch,
+    ) -> None:
         """
         Invokes a patch at a concrete location and applies its results to the
         target module.
         """
-        available_registers = self._isa.all_registers()
+
+        available_registers = list(self._isa.all_registers())
         clobbered_registers = set()
+        snippets = []
+        stack_adjustment = 0
 
         for clobber in patch.constraints.clobbers_registers:
-            for idx, reg in enumerate(available_registers):
-                if clobber in reg:
-                    available_registers.pop(idx)
-                    clobbered_registers.add(reg)
-                    break
-            else:
-                assert False, f"unknown clobbered register {clobber}"
+            reg = self._isa.get_register(clobber)
+            available_registers.remove(reg)
+            clobbered_registers.add(reg)
 
         scratch_registers = available_registers[
             : patch.constraints.scratch_registers
         ]
         clobbered_registers.update(scratch_registers)
 
-        asm = patch.get_asm(context, *scratch_registers)
-        if not asm:
-            return
+        if patch.constraints.preserve_caller_saved_registers:
+            clobbered_registers.update(self._isa.caller_saved_registers())
 
-        snippets = []
+        # TODO: If align_stack was set too, we're going to end up doing
+        #       some redundant work.
+        if clobbered_registers or patch.constraints.clobbers_flags:
+            if self._isa.red_zone_size() and self._might_be_leaf_function(
+                func
+            ):
+                stack_adjustment += self._isa.red_zone_size()
+                snippets.append(self._isa.preserve_red_zone())
 
         if patch.constraints.clobbers_flags:
+            stack_adjustment += self._isa.pointer_size()
             snippets.append(self._isa.save_flags())
 
-        for reg in clobbered_registers:
+        for reg in sorted(clobbered_registers, key=lambda reg: reg.name):
+            stack_adjustment += self._isa.pointer_size()
             snippets.append(self._isa.save_register(reg))
 
         if patch.constraints.align_stack:
+            # TODO: We don't know how much the stack may be adjusted by the
+            #       snippet.
+            stack_adjustment = None
             snippets.append(self._isa.align_stack())
+
+        asm = patch.get_asm(
+            InsertionContext(
+                self._module, func, block, offset, stack_adjustment
+            ),
+            *scratch_registers,
+        )
+        if not asm:
+            return
 
         # Transform all the prefixes/suffixes into a flat list of assembly
         flat_snippets: List[_AsmSnippet] = []
@@ -109,41 +141,35 @@ class RewritingContext:
         flat_snippets.extend(snippet[1] for snippet in snippets[::-1])
 
         chunks = [
-            self._assemble(context.module, snippet.code, snippet.x86_syntax)
+            self._assemble(self._module, snippet.code, snippet.x86_syntax)
             for snippet in flat_snippets
         ]
         chunks_encoded = b"".join(chunk[0] for chunk in chunks)
 
         if self._logger.isEnabledFor(logging.DEBUG):
-            self._logger.debug(
-                "Applying %s at %s+%s", patch, context.block, context.offset
-            )
+            self._logger.debug("Applying %s at %s+%s", patch, block, offset)
             self._logger.debug("  Before:")
-            show_block_asm(
-                context.block, decoder=self._decoder, logger=self._logger
-            )
+            show_block_asm(block, decoder=self._decoder, logger=self._logger)
 
         _modify_block_insert(
-            context.block, chunks_encoded, context.offset,
+            block, chunks_encoded, offset,
         )
 
-        start = context.block.offset + context.offset
+        start = block.offset + offset
         for encoding, fixups in chunks:
             for rel_offset, sym in fixups.items():
-                offset = start + rel_offset
-                assert context.block.byte_interval
+                fixup_offset = start + rel_offset
+                assert block.byte_interval
                 assert (
-                    offset
-                    not in context.block.byte_interval.symbolic_expressions
+                    fixup_offset
+                    not in block.byte_interval.symbolic_expressions
                 )
-                context.block.byte_interval.symbolic_expressions[offset] = sym
+                block.byte_interval.symbolic_expressions[fixup_offset] = sym
             start += len(encoding)
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
-            show_block_asm(
-                context.block, decoder=self._decoder, logger=self._logger
-            )
+            show_block_asm(block, decoder=self._decoder, logger=self._logger)
 
     def get_or_insert_extern_symbol(
         self, name: str, libname: str
@@ -267,8 +293,7 @@ class RewritingContext:
                 insertion.scope._potential_offsets(func, block, instructions)
             )
             self._invoke_patch(
-                InsertionContext(self._module, func, block, offset),
-                insertion.patch,
+                func, block, offset, insertion.patch,
             )
 
     def register_insert(self, scope: Scope, patch: Patch) -> None:
