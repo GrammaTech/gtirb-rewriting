@@ -225,7 +225,7 @@ def join_byte_intervals(
             if nop is not None:
                 pad_bytes = nop
             elif last_module is not None:
-                pad_bytes = _get_isa(last_module.isa).nop()
+                pad_bytes = _get_isa(last_module).nop()
             else:
                 raise PaddingError("cannot determine nop instruction")
             size, remainder = divmod(size, len(pad_bytes))

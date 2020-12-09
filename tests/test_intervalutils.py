@@ -299,7 +299,12 @@ def test_join_byte_intervals_default_tables():
     bi2 = gtirb.ByteInterval(blocks=[b2], contents=b"\x02\x03")
     bi3 = gtirb.ByteInterval(blocks=[], contents=b"\xff\xff")
     s = gtirb.Section(name=".test", byte_intervals=[bi1, bi2, bi3])
-    m = gtirb.Module(name="test", sections=[s], isa=gtirb.Module.ISA.X64)
+    m = gtirb.Module(
+        name="test",
+        sections=[s],
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+    )
 
     m.aux_data["alignment"] = gtirb.AuxData(
         type_name="mapping<UUID,uint64_t>", data={b2: 4},
