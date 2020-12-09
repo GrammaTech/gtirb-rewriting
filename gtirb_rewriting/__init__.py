@@ -27,6 +27,11 @@ from .assembly import (
     X86Syntax,
     patch_constraints,
 )
+from .intervalutils import (
+    PaddingError,
+    join_byte_intervals,
+    split_byte_interval,
+)
 from .passes import Pass, PassManager
 from .rewriting import RewritingContext
 from .scopes import (
@@ -38,7 +43,7 @@ from .scopes import (
     FunctionPosition,
     Scope,
 )
-from .utils import decorate_extern_symbol, show_block_asm
+from .utils import OffsetMapping, decorate_extern_symbol, show_block_asm
 from .version import __version__
 
 __all__ = [
@@ -51,7 +56,10 @@ __all__ = [
     "ENTRYPOINT_NAME",
     "FunctionPosition",
     "InsertionContext",
+    "join_byte_intervals",
     "MAIN_NAME",
+    "OffsetMapping",
+    "PaddingError",
     "Pass",
     "PassManager",
     "patch_constraints",
@@ -60,5 +68,6 @@ __all__ = [
     "RewritingContext",
     "Scope",
     "show_block_asm",
+    "split_byte_interval",
     "X86Syntax",
 ]
