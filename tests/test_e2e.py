@@ -91,7 +91,7 @@ def test_e2e(tmpdir):
         ]
     )
 
-    result = subprocess.run(tmpdir / "rewritten", stdout=subprocess.PIPE)
+    result = subprocess.run(str(tmpdir / "rewritten"), stdout=subprocess.PIPE)
     assert (
         result.stdout
         == b"print_integers: 1, 2, 3, 4, 5, 6, 7, 8\nhello world\n"
