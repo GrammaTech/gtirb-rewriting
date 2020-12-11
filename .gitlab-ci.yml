@@ -13,7 +13,21 @@ check-format:
   script:
     - apt update -y && apt install -y git
     - pip3 install pre-commit
-    - pre-commit run --all-files --show-diff-on-failure
+    - |+
+      pre-commit run --all-files --show-diff-on-failure || ( (cat <<EOF
+      ================================================================================
+      If this stage fails, the formatting of your changes may be incorrect.
+      To automatically format your files, install pre-commit:
+          pip3 install pre-commit
+          pre-commit install
+      pre-commit will now automatically format any files before commit.
+      To fix any misformatted files, run:
+          pre-commit run --all-files
+      And then commit any changes.
+      More information regarding pre-commit can be found at https://pre-commit.com.
+      ================================================================================
+      EOF
+      ) && exit 1)
 
 test:
   stage: test
