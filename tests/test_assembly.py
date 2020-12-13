@@ -37,7 +37,9 @@ def test_register_fmt():
 
 def test_decorate_symbol_elf_pic():
     mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
     mod.aux_data["binaryType"] = gtirb.AuxData(
         type_name="vector<string>", data=["DYN"],
@@ -52,7 +54,9 @@ def test_decorate_symbol_elf_pic():
 
 def test_decorate_symbol_elf():
     mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
     mod.aux_data["binaryType"] = gtirb.AuxData(
         type_name="vector<string>", data=["EXEC"],
