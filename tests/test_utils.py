@@ -85,22 +85,30 @@ def test_offset_mapping():
 
 def test_triples():
     mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
     assert gtirb_rewriting.utils._target_triple(mod) == "x86_64-pc-linux"
 
     mod = gtirb.Module(
-        isa=gtirb.Module.ISA.IA32, file_format=gtirb.Module.FileFormat.ELF
+        isa=gtirb.Module.ISA.IA32,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
     assert gtirb_rewriting.utils._target_triple(mod) == "i386-pc-linux"
 
     mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.PE
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.PE,
+        name="test",
     )
     assert gtirb_rewriting.utils._target_triple(mod) == "x86_64-pc-win32"
 
     mod = gtirb.Module(
-        isa=gtirb.Module.ISA.IA32, file_format=gtirb.Module.FileFormat.PE
+        isa=gtirb.Module.ISA.IA32,
+        file_format=gtirb.Module.FileFormat.PE,
+        name="test",
     )
     assert gtirb_rewriting.utils._target_triple(mod) == "i386-pc-win32"
 
@@ -143,7 +151,9 @@ def test_nonterminator_instructions_fallthrough():
 
 def test_show_block_asm(caplog):
     mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
     # pushfq; popfq
     raw_data = b"\x9C\x9D"
@@ -168,7 +178,7 @@ def test_show_block_asm(caplog):
 
 def test_insert_bytes():
     ir = gtirb.IR()
-    m = gtirb.Module(isa=gtirb.Module.ISA.X64)
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
     m.ir = ir
     s = gtirb.Section(name=".text")
     s.module = m

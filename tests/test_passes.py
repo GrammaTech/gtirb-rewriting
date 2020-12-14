@@ -36,13 +36,17 @@ def test_pass_order():
             events.append((self, "end", module))
 
     mod1 = gtirb.Module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
     mod1.aux_data["functionEntries"] = gtirb.AuxData(
         type_name="mapping<UUID,set<UUID>>", data={},
     )
     mod2 = gtirb.Module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
     mod2.aux_data["functionEntries"] = gtirb.AuxData(
         type_name="mapping<UUID,set<UUID>>", data={},
