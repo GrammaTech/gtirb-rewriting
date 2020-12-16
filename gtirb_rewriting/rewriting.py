@@ -20,23 +20,18 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import logging
-from typing import Dict, List, NamedTuple, Sequence, Tuple
+from typing import List, NamedTuple, Sequence
 
 import gtirb
 import gtirb_functions
-import mcasm
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
-from .assembly import InsertionContext, Patch, X86Syntax, _AsmSnippet
+from .assembler import _Assembler
+from .assembly import InsertionContext, Patch
 from .isa import _get_isa
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
-from .utils import (
-    _modify_block_insert,
-    _target_triple,
-    decorate_extern_symbol,
-    show_block_asm,
-)
+from .utils import _modify_block_insert, decorate_extern_symbol, show_block_asm
 
 
 class _Insertion(NamedTuple):
@@ -64,6 +59,7 @@ class RewritingContext:
         self._isa = _get_isa(module)
         self._insertions: List[_Insertion] = []
         self._logger = logger
+        self._patch_id = 0
 
     def _might_be_leaf_function(self, func: gtirb_functions.Function) -> bool:
         return all(
@@ -134,17 +130,17 @@ class RewritingContext:
         if not asm:
             return
 
-        # Transform all the prefixes/suffixes into a flat list of assembly
-        flat_snippets: List[_AsmSnippet] = []
-        flat_snippets.extend(snippet[0] for snippet in snippets)
-        flat_snippets.append(_AsmSnippet(asm, patch.constraints.x86_syntax))
-        flat_snippets.extend(snippet[1] for snippet in snippets[::-1])
+        self._patch_id += 1
 
-        chunks = [
-            self._assemble(self._module, snippet.code, snippet.x86_syntax)
-            for snippet in flat_snippets
-        ]
-        chunks_encoded = b"".join(chunk[0] for chunk in chunks)
+        assembler = _Assembler(
+            self._module, self._patch_id, self._symbols_by_name
+        )
+        for snippet in snippets:
+            assembler.assemble(snippet[0].code, snippet[0].x86_syntax)
+        assembler.assemble(asm, patch.constraints.x86_syntax)
+        for snippet in reversed(snippets):
+            assembler.assemble(snippet[1].code, snippet[1].x86_syntax)
+        assembler.finalize()
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("Applying %s at %s+%s", patch, block, offset)
@@ -152,24 +148,22 @@ class RewritingContext:
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
 
         _modify_block_insert(
-            block, chunks_encoded, offset,
+            block,
+            offset,
+            bytes(assembler.data),
+            assembler.blocks,
+            assembler.cfg,
+            assembler.symbolic_expressions,
+            assembler.local_symbols.values(),
         )
-
-        start = block.offset + offset
-        for encoding, fixups in chunks:
-            for rel_offset, sym in fixups.items():
-                fixup_offset = start + rel_offset
-                assert block.byte_interval
-                assert (
-                    fixup_offset
-                    not in block.byte_interval.symbolic_expressions
-                )
-                block.byte_interval.symbolic_expressions[fixup_offset] = sym
-            start += len(encoding)
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
+            for patch_block in assembler.blocks:
+                show_block_asm(
+                    patch_block, decoder=self._decoder, logger=self._logger
+                )
 
     def get_or_insert_extern_symbol(
         self, name: str, libname: str
@@ -197,78 +191,6 @@ class RewritingContext:
             self._module.aux_data["libraries"].data.append(libname)
 
         return sym
-
-    def _fixup_to_symbolic_operand(
-        self, module: gtirb.Module, fixup: dict, encoding: bytes
-    ) -> gtirb.SymAddrConst:
-        """
-        Converts an LLVM fixup to a GTIRB SymbolicExpression.
-        """
-        expr = fixup["value"]
-
-        # LLVM will automatically add a negative value to make the expression
-        # be PC-relative. We don't care about that and just want to unwrap it.
-        if (
-            "IsPCRel" in fixup["flags"]
-            and expr["kind"] == "binaryExpr"
-            and expr["opcode"] == "Add"
-            and expr["rhs"]["kind"] == "constant"
-            and fixup["offset"] - expr["rhs"]["value"] == len(encoding)
-        ):
-            expr = expr["lhs"]
-
-        # TODO: Do we need to support more fixup types? GTIRB only supports
-        #       two forms:
-        #       - Sym + Offset
-        #       - (Sym1 - Sym2) / Scale + Offset
-        assert (
-            expr["kind"] == "symbolRef"
-        ), "Only simple simple references are currently supported"
-
-        name = expr["symbol"]["name"]
-        if "variantKind" in expr:
-            name += "@" + expr["variantKind"]
-
-        sym = self._symbols_by_name.get(name, None)
-        if not sym or sym.module != module:
-            sym = next(
-                (sym for sym in module.symbols if sym.name == name), None
-            )
-        assert sym, "Referencing a symbol not present in the module"
-
-        return gtirb.SymAddrConst(0, sym)
-
-    def _assemble(
-        self, module: gtirb.Module, asm: str, x86_syntax: X86Syntax
-    ) -> Tuple[bytes, Dict[int, gtirb.SymAddrConst]]:
-        assembler = mcasm.Assembler(_target_triple(module))
-        assembler.x86_syntax = x86_syntax
-
-        data = b""
-        symbolic_expressions = {}
-        for event in assembler.assemble(asm):
-            if event["kind"] == "instruction":
-                encoding = bytes.fromhex(event["data"])
-                for fixup in event["fixups"]:
-                    pos = len(data) + fixup["offset"]
-                    symbolic_expressions[
-                        pos
-                    ] = self._fixup_to_symbolic_operand(
-                        module, fixup, encoding
-                    )
-                data += encoding
-                # TODO: We need to update the CFG if the instruction was a call
-                #       or branch.
-            elif event["kind"] == "bytes":
-                data += bytes.fromhex(event["data"])
-            elif event["kind"] == "changeSection":
-                assert event["section"]["kind"][
-                    "isText"
-                ], "Sections other than .text are not supported"
-            else:
-                assert False, f"Unsupported assembler event: {event['kind']}"
-
-        return data, symbolic_expressions
 
     def _apply_insertions(
         self,
