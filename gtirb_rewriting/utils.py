@@ -21,7 +21,9 @@
 # endorsement should be inferred.
 import logging
 from typing import (
+    Dict,
     Iterator,
+    List,
     Mapping,
     MutableMapping,
     Sequence,
@@ -178,25 +180,69 @@ def show_block_asm(
             arch = block.byte_interval.section.module.isa
         decoder = GtirbInstructionDecoder(arch)
 
-    for i in decoder.get_instructions(block):
-        logger.debug("\t0x%x:\t%s\t%s", i.address, i.mnemonic, i.op_str)
+    if block.contents:
+        for i in decoder.get_instructions(block):
+            logger.debug("\t0x%x:\t%s\t%s", i.address, i.mnemonic, i.op_str)
 
 
 def _modify_block_insert(
-    block: gtirb.CodeBlock, new_bytes: bytes, offset: int
+    block: gtirb.CodeBlock,
+    offset: int,
+    new_bytes: bytes,
+    new_blocks: List[gtirb.CodeBlock],
+    new_cfg: gtirb.CFG,
+    new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
+    new_symbols: Sequence[gtirb.Symbol],
 ) -> None:
     """
     Insert bytes into a block and adjusts the IR as needed.
     """
 
-    offset += block.offset
-
     n_bytes = len(new_bytes)
     bi = block.byte_interval
     assert bi
 
-    # adjust block itself
-    block.size += n_bytes
+    # Ideally none of this would be necessary, but there is non-determinism in
+    # gtirb-pprinter that causes it to issue warnings with zero-sized blocks,
+    # so we'll avoid creating one here.
+    if offset == 0:
+        new_blocks[-1].size += block.size
+        block.size = new_blocks[0].size
+
+        for edge in set(new_cfg.in_edges(new_blocks[0])):
+            new_cfg.discard(edge)
+            new_cfg.add(edge._replace(target=block))
+
+        for edge in set(new_cfg.out_edges(new_blocks[0])):
+            new_cfg.discard(edge)
+            new_cfg.add(edge._replace(source=block))
+
+        for sym in new_symbols:
+            if sym.referent == new_blocks[0]:
+                sym.referent = block
+
+        del new_blocks[0]
+    else:
+        new_blocks[-1].size += block.size - offset
+        block.size = offset
+
+        # Add an edge from the original block to the first patch block.
+        new_cfg.add(
+            gtirb.Edge(
+                source=block,
+                target=new_blocks[0],
+                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+            )
+        )
+
+    if new_blocks:
+        # Alter any outgoing edges from the original block originate from the
+        # last patch block.
+        for edge in set(block.outgoing_edges):
+            bi.module.ir.cfg.discard(edge)
+            bi.module.ir.cfg.add(edge._replace(source=new_blocks[-1]))
+
+    offset += block.offset
 
     # adjust byte interval the block goes in
     bi.size += n_bytes
@@ -208,11 +254,25 @@ def _modify_block_insert(
         if b != block and b.offset >= offset:
             b.offset += n_bytes
 
+    # adjust all of the new blocks to be relative to the byte interval and
+    # add them to the byte interval
+    for b in new_blocks:
+        b.offset += offset
+
+    bi.blocks.update(new_blocks)
+
     # adjust sym exprs that occur after the insertion point
     bi.symbolic_expressions = {
         (k + n_bytes if k >= offset else k): v
         for k, v in bi.symbolic_expressions.items()
     }
+
+    # add all of the symbolic expressions from the code we're inserting
+    for rel_offset, expr in new_symbolic_expressions.items():
+        bi.symbolic_expressions[offset + rel_offset] = expr
+
+    bi.module.ir.cfg.update(new_cfg)
+    bi.module.symbols.update(new_symbols)
 
     # adjust aux data if present
     def update_aux_data_keyed_by_offset(name):

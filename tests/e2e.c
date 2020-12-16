@@ -16,7 +16,7 @@ void print_integers(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6,
   write(1, buff, fmt_len);
 }
 
-int main() {
-  printf("hello world\n");
+int main(int argc, char **argv) {
+  printf("%i arguments\n", argc);
   return 0;
 }

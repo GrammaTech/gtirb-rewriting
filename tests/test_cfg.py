@@ -25,60 +25,41 @@ import sys
 
 import gtirb
 import gtirb_rewriting
-import gtirb_rewriting.patches
 import pytest
 
 
-class E2EPass(gtirb_rewriting.Pass):
+class CfgPass(gtirb_rewriting.Pass):
     def begin_module(self, module, functions, rewriting_ctx):
-        print_sym = next(
-            sym for sym in module.symbols if sym.name == "print_integers"
-        )
         rewriting_ctx.register_insert(
             gtirb_rewriting.AllFunctionsScope(
                 position=gtirb_rewriting.FunctionPosition.ENTRY,
                 block_position=gtirb_rewriting.BlockPosition.ENTRY,
-                functions={gtirb_rewriting.ENTRYPOINT_NAME},
-            ),
-            gtirb_rewriting.patches.CallPatch(
-                print_sym,
-                args=(1, 2, 3, 4, 5, 6, 7, 8),
-                align_stack=True,
-                preserve_caller_saved_registers=True,
-            ),
-        )
-
-        exit_sym = rewriting_ctx.get_or_insert_extern_symbol(
-            "exit", "libc.so.6"
-        )
-        rewriting_ctx.register_insert(
-            gtirb_rewriting.AllFunctionsScope(
-                position=gtirb_rewriting.FunctionPosition.EXIT,
-                block_position=gtirb_rewriting.BlockPosition.EXIT,
                 functions={gtirb_rewriting.MAIN_NAME},
             ),
-            gtirb_rewriting.patches.CallPatch(
-                exit_sym, args=(self.dynamic_arg_value,)
-            ),
+            gtirb_rewriting.Patch.from_function(self.cfg_patch),
         )
 
-    def dynamic_arg_value(self, insertion_ctx):
-        # We can't verify many properties about the context
-        assert isinstance(insertion_ctx, gtirb_rewriting.InsertionContext)
-        return 42
+    @gtirb_rewriting.patch_constraints()
+    def cfg_patch(self, insertion_ctx):
+        # We're inserting into the start of main, so we have argc in %rdi and
+        # in this nonsense patch we're just going to set argc to 0 by
+        # decrementing it one at a time.
+        return """
+        .L_head:
+            cmp $0, %rdi
+            je .L_end
+            dec %rdi
+            jmp .L_head
+        .L_end:
+        """
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
-def test_e2e(tmpdir):
-    # Test that we can instrument GTIRB, reassemble it, and then run the
-    # binary. Our test binary just prints a string and then exits 0. Our
-    # modified binary will print out integers, the original string and then
-    # exit 42.
-
+def test_cfg(tmpdir):
     ir = gtirb.IR.load_protobuf(pathlib.Path(__file__).parent / "e2e.gtirb")
 
     pm = gtirb_rewriting.PassManager()
-    pm.add(E2EPass())
+    pm.add(CfgPass())
     pm.run(ir)
 
     ir.save_protobuf(tmpdir / "rewritten.gtirb")
@@ -105,9 +86,6 @@ def test_e2e(tmpdir):
     sys.stderr.write(result.stderr.decode())
     assert b"WARNING" not in result.stderr
 
-    result = subprocess.run(str(tmpdir / "rewritten"), stdout=subprocess.PIPE)
-    assert (
-        result.stdout
-        == b"print_integers: 1, 2, 3, 4, 5, 6, 7, 8\n1 arguments\n"
-    )
-    assert result.returncode == 42
+    result = subprocess.run(tmpdir / "rewritten", stdout=subprocess.PIPE)
+    assert result.stdout == b"0 arguments\n"
+    assert result.returncode == 0
