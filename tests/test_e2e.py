@@ -57,8 +57,15 @@ class E2EPass(gtirb_rewriting.Pass):
                 block_position=gtirb_rewriting.BlockPosition.EXIT,
                 functions={gtirb_rewriting.MAIN_NAME},
             ),
-            gtirb_rewriting.patches.CallPatch(exit_sym, args=(42,)),
+            gtirb_rewriting.patches.CallPatch(
+                exit_sym, args=(self.dynamic_arg_value,)
+            ),
         )
+
+    def dynamic_arg_value(self, insertion_ctx):
+        # We can't verify many properties about the context
+        assert isinstance(insertion_ctx, gtirb_rewriting.InsertionContext)
+        return 42
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")

@@ -20,7 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import dataclasses
-from typing import Iterable, List, Optional, Union
+from typing import Callable, Iterable, List, Optional, Union
 
 import gtirb
 
@@ -33,11 +33,15 @@ class CallPatch(Patch):
     Inserts a call to a function with literal arguments.
     """
 
-    ArgumentValue = Union[int, gtirb.Symbol]
+    ActualArgumentValue = Union[int, gtirb.Symbol]
+    ArgumentValue = Union[
+        Callable[[InsertionContext], "ActualArgumentValue"],
+        "ActualArgumentValue",
+    ]
 
     @dataclasses.dataclass
     class _PassedArg:
-        value: str
+        value: "CallPatch.ArgumentValue"
         reg: Optional[str]
 
     def __init__(
@@ -91,16 +95,15 @@ class CallPatch(Patch):
 
         passed_args = []
         for arg in args:
-            if isinstance(arg, gtirb.Symbol):
-                arg_str = arg.name
-            elif isinstance(arg, int):
-                arg_str = arg
-            else:
-                raise ValueError("argument {arg} is not supported")
+            assert (
+                callable(arg)
+                or isinstance(arg, gtirb.Symbol)
+                or isinstance(arg, int)
+            )
 
             passed_args.append(
                 self._PassedArg(
-                    arg_str, remaining_regs.pop(0) if remaining_regs else None
+                    arg, remaining_regs.pop(0) if remaining_regs else None
                 )
             )
 
@@ -118,10 +121,21 @@ class CallPatch(Patch):
             lines.append(f"sub {stack_reg}, {stack_padding}")
 
         for arg in reversed(self._args):
+            arg_value = (
+                arg.value(insertion_context)
+                if callable(arg.value)
+                else arg.value
+            )
+
+            if isinstance(arg_value, gtirb.Symbol):
+                arg_str = arg_value.name
+            elif isinstance(arg_value, int):
+                arg_str = str(arg_value)
+
             if arg.reg:
-                lines.append(f"mov {arg.reg}, {arg.value}")
+                lines.append(f"mov {arg.reg}, {arg_str}")
             else:
-                lines.append(f"push {arg.value}")
+                lines.append(f"push {arg_str}")
 
         lines.append(f"call {self.sym.name}")
 
