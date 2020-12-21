@@ -187,6 +187,10 @@ class RewritingContext:
             self._module.aux_data["symbolForwarding"].data[dummy_symbol] = sym
             # TODO: Check if this is necessary once we're able to link programs
             # module.aux_data['peImportedSymbols'].data.append(sym)
+            if "peImportEntries" in self._module.aux_data:
+                self._module.aux_data["peImportEntries"].data.append(
+                    (0, -1, name, libname)
+                )
         elif self._module.file_format == gtirb.Module.FileFormat.ELF:
             self._module.aux_data["libraries"].data.append(libname)
 

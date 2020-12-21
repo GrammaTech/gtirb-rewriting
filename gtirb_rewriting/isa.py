@@ -237,6 +237,13 @@ class _X86_64_PE(_X86_64):
             for name in ("RAX", "RCX", "RDX", "R8", "R9", "R10", "R11")
         }
 
+    def calling_convention(self) -> CallingConventionDesc:
+        return CallingConventionDesc(
+            registers=("RCX", "RDX", "R8", "R9"),
+            stack_alignment=16,
+            caller_cleanup=True,
+        )
+
 
 class _X86_64_ELF(_X86_64):
     def caller_saved_registers(self) -> Set[Register]:
