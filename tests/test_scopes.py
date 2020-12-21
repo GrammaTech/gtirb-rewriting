@@ -26,7 +26,6 @@ import capstone
 import gtirb
 import gtirb_functions
 import gtirb_rewriting
-import gtirb_rewriting.scopes
 
 
 def test_all_block_scope_entry():
@@ -95,17 +94,37 @@ def test_all_block_scope_exit():
     assert offsets == [4]
 
 
+def test_single_block_scope():
+    mod = unittest.mock.MagicMock(spec=gtirb.Module)
+    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
+    block.size = 3
+    block2 = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
+
+    func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
+    func.get_all_blocks.return_value = (block, block2)
+
+    func2 = unittest.mock.MagicMock(spec=gtirb_functions.Function)
+    func2.get_all_blocks.return_value = (block2,)
+
+    scope = gtirb_rewriting.SingleBlockScope(
+        block, gtirb_rewriting.BlockPosition.ENTRY
+    )
+    assert not scope._needs_disassembly()
+    assert scope._function_matches(mod, func)
+    assert not scope._function_matches(mod, func2)
+    assert scope._block_matches(mod, func, block)
+    assert not scope._block_matches(mod, func, block2)
+    offsets = list(scope._potential_offsets(func, block, None))
+    assert offsets == [0]
+
+
 def test_pattern_match():
     mod = unittest.mock.MagicMock(spec=gtirb.Module)
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
     func.get_name.return_value = "foo"
 
-    assert not gtirb_rewriting.scopes._pattern_match(mod, func, {})
-    assert gtirb_rewriting.scopes._pattern_match(mod, func, {"foo"})
-    assert gtirb_rewriting.scopes._pattern_match(
-        mod, func, {re.compile("f..")}
-    )
+    assert not gtirb_rewriting.pattern_match(mod, func, {})
+    assert gtirb_rewriting.pattern_match(mod, func, {"foo"})
+    assert gtirb_rewriting.pattern_match(mod, func, {re.compile("f..")})
     # Verify that only complete regex matches are considered
-    assert not gtirb_rewriting.scopes._pattern_match(
-        mod, func, {re.compile("f")}
-    )
+    assert not gtirb_rewriting.pattern_match(mod, func, {re.compile("f")})
