@@ -225,6 +225,9 @@ class Patch:
         """
 
         class FuncPatch(Patch):
+            def __str__(self) -> str:
+                return str(func)
+
             def get_asm(self, insertion_context, *args):
                 return func(insertion_context, *args)
 

@@ -24,6 +24,7 @@ from typing import List, NamedTuple, Sequence
 
 import gtirb
 import gtirb_functions
+import mcasm
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .assembler import _Assembler
@@ -67,6 +68,28 @@ class RewritingContext:
             for block in func.get_all_blocks()
             for edge in block.outgoing_edges
         )
+
+    def _log_patch_error(
+        self,
+        asm: str,
+        patch: Patch,
+        patch_id: int,
+        err: mcasm.assembler.AsmSyntaxError,
+    ) -> None:
+        """
+        Logs an assembly syntax error to our logger.
+        """
+        lines = asm.splitlines()
+        self._logger.error("error in %s (#%i): %s", patch, self._patch_id, err)
+        for line in lines[: err.lineno]:
+            self._logger.error("%s", line)
+        # LLVM only stores the start column in its diagnostic object, so we'll
+        # highlight the whole rest of the line as the error.
+        self._logger.error(
+            " " * err.column + "^" + "~" * (len(line) - err.column - 1)
+        )
+        for line in lines[err.lineno :]:
+            self._logger.error("%s", line)
 
     def _invoke_patch(
         self,
@@ -137,7 +160,11 @@ class RewritingContext:
         )
         for snippet in snippets:
             assembler.assemble(snippet[0].code, snippet[0].x86_syntax)
-        assembler.assemble(asm, patch.constraints.x86_syntax)
+        try:
+            assembler.assemble(asm, patch.constraints.x86_syntax)
+        except mcasm.assembler.AsmSyntaxError as err:
+            self._log_patch_error(asm, patch, self._patch_id, err)
+            raise
         for snippet in reversed(snippets):
             assembler.assemble(snippet[1].code, snippet[1].x86_syntax)
         assembler.finalize()
