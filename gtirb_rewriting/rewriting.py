@@ -193,8 +193,17 @@ class RewritingContext:
                 )
 
     def get_or_insert_extern_symbol(
-        self, name: str, libname: str
+        self, name: str, libname: str, preload: bool = False
     ) -> gtirb.Symbol:
+        """
+        Gets a symbol by name, creating it as an extern symbol if it isn't
+        already in the module.
+        :param name: The name of the symbol.
+        :param libname: The name of the shared library the symbol is from.
+        :param preload: Insert the library dependency at the beginning of the
+                        libraries aux data table, similar to LD_PRELOAD. ELF
+                        only, optional.
+        """
         name = decorate_extern_symbol(self._module, name)
 
         sym = next(
@@ -219,7 +228,10 @@ class RewritingContext:
                     (0, -1, name, libname)
                 )
         elif self._module.file_format == gtirb.Module.FileFormat.ELF:
-            self._module.aux_data["libraries"].data.append(libname)
+            if preload:
+                self._module.aux_data["libraries"].data.insert(0, libname)
+            else:
+                self._module.aux_data["libraries"].data.append(libname)
 
         return sym
 
