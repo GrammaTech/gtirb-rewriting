@@ -19,9 +19,11 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+import dataclasses
 import logging
+import operator
 import uuid
-from typing import List, NamedTuple, Sequence
+from typing import List, NamedTuple, Sequence, Tuple
 
 import gtirb
 import gtirb_functions
@@ -110,10 +112,18 @@ class RewritingContext:
         block: gtirb.CodeBlock,
         offset: int,
         patch: Patch,
-    ) -> None:
+        context: InsertionContext,
+    ) -> Tuple[gtirb.CodeBlock, int]:
         """
         Invokes a patch at a concrete location and applies its results to the
         target module.
+        :param func: The function to insert at.
+        :param block: The block to insert at.
+        :param offset: The offset within the block to insert at.
+        :param patch: The patch to invoke.
+        :param context: The InsertionContext to pass to the patch.
+        :returns: A tuple with: the block that ends the patch and the number
+                  of bytes inserted.
         """
 
         available_registers = list(self._isa.all_registers())
@@ -158,13 +168,11 @@ class RewritingContext:
             snippets.append(self._isa.align_stack())
 
         asm = patch.get_asm(
-            InsertionContext(
-                self._module, func, block, offset, stack_adjustment
-            ),
+            dataclasses.replace(context, stack_adjustment=stack_adjustment),
             *scratch_registers,
         )
         if not asm:
-            return
+            return block, 0
 
         self._patch_id += 1
 
@@ -204,6 +212,11 @@ class RewritingContext:
                 show_block_asm(
                     patch_block, decoder=self._decoder, logger=self._logger
                 )
+
+        return (
+            assembler.blocks[-1] if assembler.blocks else block,
+            len(assembler.data),
+        )
 
     def get_or_insert_extern_symbol(
         self, name: str, libname: str, preload: bool = False
@@ -264,15 +277,32 @@ class RewritingContext:
         ):
             instructions = tuple(self._decoder.get_instructions(block))
 
+        # Determine the insertion location for each patch.
+        # TODO: This is where bubbling will get hooked in, but for now
+        #       always insert at the first potential offset.
+        insertions_and_offsets = []
         for insertion in insertions:
-            # TODO: This is where bubbling will get hooked in, but for now
-            #       always insert at the first potential offset.
             offset = next(
                 insertion.scope._potential_offsets(func, block, instructions)
             )
-            self._invoke_patch(
-                func, block, offset, insertion.patch,
+            insertions_and_offsets.append((insertion, offset))
+
+        # Now sort all of the insertions by their offsets. Python uses a
+        # stable sort so that this will still be deterministic for ties.
+        insertions_and_offsets.sort(key=operator.itemgetter(1))
+
+        actual_block = block
+        total_insert_len = 0
+        for insertion, offset in insertions_and_offsets:
+            block_delta = actual_block.offset - block.offset
+            actual_block, insert_len = self._invoke_patch(
+                func,
+                actual_block,
+                offset + total_insert_len - block_delta,
+                insertion.patch,
+                InsertionContext(self._module, func, block, offset),
             )
+            total_insert_len += insert_len
 
     def _apply_function_insertion(
         self, sym: gtirb.Symbol, block: gtirb.CodeBlock, patch: Patch
