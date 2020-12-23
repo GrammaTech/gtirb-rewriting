@@ -86,6 +86,6 @@ def test_cfg(tmpdir):
     sys.stderr.write(result.stderr.decode())
     assert b"WARNING" not in result.stderr
 
-    result = subprocess.run(tmpdir / "rewritten", stdout=subprocess.PIPE)
+    result = subprocess.run(str(tmpdir / "rewritten"), stdout=subprocess.PIPE)
     assert result.stdout == b"0 arguments\n"
     assert result.returncode == 0

@@ -101,3 +101,47 @@ def test_multiple_insertions():
     assert refs[3][0].name == ".L_blah_2"
     assert blocks[3].offset == 11
     assert blocks[3].size == 1
+
+
+def test_added_function_blocks():
+    ir = gtirb.IR()
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\x00\x01\x02\x03\x04\x05\x06\x07", address=0x1000
+    )
+    bi.section = s
+    b = gtirb.CodeBlock(offset=0, size=bi.size)
+    b.byte_interval = bi
+    sym = gtirb.Symbol(name="hi", payload=b)
+    sym.module = m
+
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+
+    functions = gtirb_functions.Function.build_functions(m)
+    assert len(functions) == 1
+    assert len(functions[0].get_all_blocks()) == 1
+
+    ctx = gtirb_rewriting.RewritingContext(m, functions)
+    ctx.insert_at(
+        functions[0], b, 7, gtirb_rewriting.Patch.from_function(dummy_patch)
+    )
+    ctx.apply()
+
+    assert len(m.aux_data["functionBlocks"].data[func_uuid]) == 3
+    assert sum(b.size for b in functions[0].get_all_blocks()) == bi.size == 10

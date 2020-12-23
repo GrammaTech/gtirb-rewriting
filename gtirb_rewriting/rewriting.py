@@ -205,6 +205,13 @@ class RewritingContext:
             assembler.local_symbols.values(),
         )
 
+        if "functionBlocks" in self._module.aux_data:
+            function_blocks = self._module.aux_data["functionBlocks"].data
+            if func.uuid in function_blocks:
+                function_blocks[func.uuid].update(
+                    b for b in assembler.blocks if b.module == self._module
+                )
+
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
@@ -441,7 +448,9 @@ class RewritingContext:
                 if not func_insertions:
                     continue
 
-                for b in f.get_all_blocks():
+                # Iterate over initial function blocks; ignore added blocks
+                # from patches.
+                for b in tuple(f.get_all_blocks()):
                     block_insertions = [
                         insertion
                         for insertion in func_insertions
