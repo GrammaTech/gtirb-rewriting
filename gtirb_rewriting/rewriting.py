@@ -20,6 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import logging
+import uuid
 from typing import List, NamedTuple, Sequence
 
 import gtirb
@@ -32,11 +33,22 @@ from .assembly import InsertionContext, Patch
 from .isa import _get_isa
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
-from .utils import _modify_block_insert, decorate_extern_symbol, show_block_asm
+from .utils import (
+    _modify_block_insert,
+    _substitute_block,
+    decorate_extern_symbol,
+    show_block_asm,
+)
 
 
 class _Insertion(NamedTuple):
     scope: Scope
+    patch: Patch
+
+
+class _FunctionInsertion(NamedTuple):
+    symbol: gtirb.Symbol
+    block: gtirb.CodeBlock
     patch: Patch
 
 
@@ -59,6 +71,7 @@ class RewritingContext:
         self._decoder = GtirbInstructionDecoder(self._module.isa)
         self._isa = _get_isa(module)
         self._insertions: List[_Insertion] = []
+        self._function_insertions: List[_FunctionInsertion] = []
         self._logger = logger
         self._patch_id = 0
 
@@ -261,6 +274,84 @@ class RewritingContext:
                 func, block, offset, insertion.patch,
             )
 
+    def _apply_function_insertion(
+        self, sym: gtirb.Symbol, block: gtirb.CodeBlock, patch: Patch
+    ) -> None:
+        self._patch_id += 1
+
+        sym_block = sym.referent
+        assert isinstance(sym_block, gtirb.CodeBlock)
+        assert sym_block.size == 0 and not sym_block.byte_interval
+
+        # Create a Function object for our InsertionContext's sake. We'll make
+        # it real (ie be in the aux data table) afterwords.
+        func_uuid = uuid.uuid4()
+        func = gtirb_functions.Function(
+            func_uuid, {sym_block}, {sym_block}, {sym}, set()
+        )
+        context = InsertionContext(self._module, func, sym_block, 0)
+
+        # Unlike normal patches, function patches cannot return None to cancel
+        # the insertion (since that would leave the Symbol pointing to an
+        # empty code block).
+        asm = patch.get_asm(context)
+        assert asm
+
+        assembler = _Assembler(
+            self._module, self._patch_id, self._symbols_by_name,
+        )
+        try:
+            assembler.assemble(asm, patch.constraints.x86_syntax)
+        except mcasm.assembler.AsmSyntaxError as err:
+            self._log_patch_error(asm, patch, self._patch_id, err)
+            raise
+        assembler.finalize()
+
+        # Eliminate the first new block and make it be our symbol's block. We
+        # do this in case that we've had other callers to this symbol whose
+        # CFG edges now refer to the symbol's existing code block.
+        _substitute_block(
+            assembler.blocks[0],
+            sym_block,
+            assembler.cfg,
+            assembler.local_symbols.values(),
+        )
+        sym_block.size = assembler.blocks[0].size
+        assembler.blocks[0] = sym_block
+
+        bi = gtirb.ByteInterval(
+            contents=bytes(assembler.data),
+            blocks=assembler.blocks,
+            symbolic_expressions=assembler.symbolic_expressions,
+        )
+        sect = next(
+            sect
+            for sect in self._module.sections
+            if sect.name == assembler.section_name
+        )
+        sect.byte_intervals.add(bi)
+        self._module.ir.cfg.update(assembler.cfg)
+        self._module.symbols.update(assembler.local_symbols.values())
+
+        # TODO: Should there be a mechanism for configuring this?
+        if "elfSymbolInfo" in self._module.aux_data:
+            self._module.aux_data["elfSymbolInfo"].data[sym] = (
+                0,
+                "FUNC",
+                "GLOBAL",
+                "DEFAULT",
+                0,
+            )
+
+        self._module.aux_data["functionEntries"].data[func_uuid] = {sym_block}
+
+        self._module.aux_data["functionBlocks"].data[func_uuid] = set(
+            assembler.blocks[1:]
+        )
+
+        if "functionNames" in self._module.aux_data:
+            self._module.aux_data["functionNames"].data[func_uuid] = sym
+
     def register_insert(self, scope: Scope, patch: Patch) -> None:
         """
         Registers a patch to be inserted.
@@ -268,6 +359,27 @@ class RewritingContext:
         :param patch: The patch to be inserted.
         """
         self._insertions.append(_Insertion(scope, patch))
+
+    def register_insert_function(
+        self, name: str, patch: Patch
+    ) -> gtirb.Symbol:
+        """
+        Registers a patch to be inserted as a function.
+        :param name: The name of the function to be inserted.
+        :param patch: The patch to be inserted.
+        :returns: The new function symbol.
+        """
+        block = gtirb.CodeBlock()
+        # TODO: This assumes the symbol isn't present already in the module,
+        #       which may be a problem if you have an existing external
+        #       symbol that you want to provide a definition for.
+        sym = gtirb.Symbol(name, payload=block)
+        sym.referent = block
+        # TODO: Should we be adding the symbol here?
+        self._module.symbols.add(sym)
+        self._symbols_by_name[sym.name] = sym
+        self._function_insertions.append(_FunctionInsertion(sym, block, patch))
+        return sym
 
     def insert_at(
         self,
@@ -309,6 +421,11 @@ class RewritingContext:
                         continue
 
                     self._apply_insertions(block_insertions, f, b)
+
+            for func in self._function_insertions:
+                self._apply_function_insertion(
+                    func.symbol, func.block, func.patch
+                )
 
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.
