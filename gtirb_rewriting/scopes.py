@@ -128,7 +128,7 @@ class AllBlocksScope(Scope):
     def _function_matches(
         self, module: gtirb.Module, func: gtirb_functions.Function
     ) -> bool:
-        return self.exclude_functions is None or not _pattern_match(
+        return self.exclude_functions is None or not pattern_match(
             module, func, self.exclude_functions
         )
 
@@ -139,6 +139,40 @@ class AllBlocksScope(Scope):
         block: gtirb.CodeBlock,
     ) -> bool:
         return True
+
+    def _needs_disassembly(self) -> bool:
+        return self.position in [BlockPosition.ANYWHERE, BlockPosition.EXIT]
+
+    def _potential_offsets(
+        self,
+        func: gtirb_functions.Function,
+        block: gtirb.CodeBlock,
+        disassembly: Optional[Sequence[capstone.CsInsn]],
+    ) -> Iterator[int]:
+        return _potential_offsets_in_block(self.position, block, disassembly)
+
+
+class SingleBlockScope(Scope):
+    """
+    Specifies that an insertion should happen in a specific block of a program.
+    """
+
+    def __init__(self, block: gtirb.CodeBlock, position: BlockPosition):
+        self.block = block
+        self.position = position
+
+    def _function_matches(
+        self, module: gtirb.Module, func: gtirb_functions.Function
+    ) -> bool:
+        return self.block in func.get_all_blocks()
+
+    def _block_matches(
+        self,
+        module: gtirb.Module,
+        func: gtirb_functions.Function,
+        block: gtirb.CodeBlock,
+    ) -> bool:
+        return self.block == block
 
     def _needs_disassembly(self) -> bool:
         return self.position in [BlockPosition.ANYWHERE, BlockPosition.EXIT]
@@ -185,7 +219,7 @@ class AllFunctionsScope(Scope):
     def _function_matches(
         self, module: gtirb.Module, func: gtirb_functions.Function
     ) -> bool:
-        return self.functions is None or _pattern_match(
+        return self.functions is None or pattern_match(
             module, func, self.functions
         )
 
@@ -278,7 +312,7 @@ def _potential_offsets_in_block(
         assert False, "Invalid block position"
 
 
-def _pattern_match(
+def pattern_match(
     module: gtirb.Module,
     func: gtirb_functions.Function,
     match_set: Set[Union[str, Pattern]],

@@ -42,6 +42,8 @@ from .scopes import (
     BlockPosition,
     FunctionPosition,
     Scope,
+    SingleBlockScope,
+    pattern_match,
 )
 from .utils import OffsetMapping, decorate_extern_symbol, show_block_asm
 from .version import __version__
@@ -63,10 +65,12 @@ __all__ = [
     "Pass",
     "PassManager",
     "patch_constraints",
+    "pattern_match",
     "Patch",
     "Register",
     "RewritingContext",
     "Scope",
+    "SingleBlockScope",
     "show_block_asm",
     "split_byte_interval",
     "X86Syntax",
