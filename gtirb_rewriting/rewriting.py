@@ -260,6 +260,9 @@ class RewritingContext:
                 self._module.aux_data["peImportEntries"].data.append(
                     (0, -1, name, libname)
                 )
+            if "libraries" in self._module.aux_data:
+                if libname not in self._module.aux_data["libraries"]:
+                    self._module.aux_data["libraries"].append(libname)
         elif self._module.file_format == gtirb.Module.FileFormat.ELF:
             if preload:
                 self._module.aux_data["libraries"].data.insert(0, libname)
