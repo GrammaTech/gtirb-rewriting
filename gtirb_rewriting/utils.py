@@ -22,6 +22,7 @@
 import logging
 from typing import (
     Dict,
+    Iterable,
     Iterator,
     List,
     Mapping,
@@ -185,6 +186,30 @@ def show_block_asm(
             logger.debug("\t0x%x:\t%s\t%s", i.address, i.mnemonic, i.op_str)
 
 
+def _substitute_block(
+    old_block: gtirb.CodeBlock,
+    new_block: gtirb.CodeBlock,
+    cfg: gtirb.CFG,
+    symbols: Iterable[gtirb.Symbol],
+) -> None:
+    """
+    Substitutes one block for another by adjusting the CFG and any symbols
+    pointing at the block.
+    """
+
+    for edge in set(cfg.in_edges(old_block)):
+        cfg.discard(edge)
+        cfg.add(edge._replace(target=new_block))
+
+    for edge in set(cfg.out_edges(old_block)):
+        cfg.discard(edge)
+        cfg.add(edge._replace(source=new_block))
+
+    for sym in symbols:
+        if sym.referent == old_block:
+            sym.referent = new_block
+
+
 def _modify_block_insert(
     block: gtirb.CodeBlock,
     offset: int,
@@ -192,7 +217,7 @@ def _modify_block_insert(
     new_blocks: List[gtirb.CodeBlock],
     new_cfg: gtirb.CFG,
     new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
-    new_symbols: Sequence[gtirb.Symbol],
+    new_symbols: Iterable[gtirb.Symbol],
 ) -> None:
     """
     Insert bytes into a block and adjusts the IR as needed.
@@ -208,19 +233,7 @@ def _modify_block_insert(
     if offset == 0:
         new_blocks[-1].size += block.size
         block.size = new_blocks[0].size
-
-        for edge in set(new_cfg.in_edges(new_blocks[0])):
-            new_cfg.discard(edge)
-            new_cfg.add(edge._replace(target=block))
-
-        for edge in set(new_cfg.out_edges(new_blocks[0])):
-            new_cfg.discard(edge)
-            new_cfg.add(edge._replace(source=block))
-
-        for sym in new_symbols:
-            if sym.referent == new_blocks[0]:
-                sym.referent = block
-
+        _substitute_block(new_blocks[0], block, new_cfg, new_symbols)
         del new_blocks[0]
     else:
         new_blocks[-1].size += block.size - offset

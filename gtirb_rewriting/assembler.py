@@ -64,6 +64,7 @@ class _Assembler:
         self.symbolic_expressions = {}
         self.local_symbols = {}
         self._module_symbols = module_symbols
+        self.section_name = None
 
     @property
     def entry_block(self) -> gtirb.CodeBlock:
@@ -142,6 +143,7 @@ class _Assembler:
         assert section["kind"][
             "isText"
         ], "Sections other than .text are not supported"
+        self.section_name = section["name"]
 
     def _assemble_instruction(
         self, data: bytes, inst: dict, fixups: List[dict]
