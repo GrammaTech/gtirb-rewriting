@@ -155,15 +155,14 @@ class _X86_64(_ISA):
                 """
                 pushq   %rax
                 movq    %rsp, %rax
-                pushq   %rax
-                pushq   %rax
-                andq    $-0x10, %rsp
                 leaq    -0x80(%rsp), %rsp
+                andq    $-0x10, %rsp
+                pushq   %rax
+                pushq   %rax
             """
             ),
             _AsmSnippet(
                 """
-                leaq    0x80(%rsp), %rsp
                 popq    %rax
                 movq    %rax, %rsp
                 popq    %rax
