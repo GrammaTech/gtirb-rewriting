@@ -50,6 +50,13 @@ class CallingConventionDesc:
     Is the caller required to do cleanup for arguments pushed onto the stack?
     """
 
+    shadow_space: int = 0
+    """
+    The amount of space required to be allocated on the stack before calling
+    the function. This space is essentially empty can be used by the called
+    function.
+    """
+
 
 class _ISA:
     def __init__(self) -> None:
@@ -242,6 +249,7 @@ class _X86_64_PE(_X86_64):
             registers=("RCX", "RDX", "R8", "R9"),
             stack_alignment=16,
             caller_cleanup=True,
+            shadow_space=32,
         )
 
 
