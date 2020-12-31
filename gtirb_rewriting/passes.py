@@ -65,7 +65,7 @@ class PassManager:
     Maintains a list of registered passes and runs them on IR.
     """
 
-    def __init__(self, logger=logging.Logger("null")):
+    def __init__(self, logger=logging.getLogger("gtirb_rewriting")):
         self._logger = logger
         self._passes = []
 

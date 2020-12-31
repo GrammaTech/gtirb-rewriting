@@ -65,7 +65,7 @@ class RewritingContext:
         self,
         module: gtirb.Module,
         functions: Sequence[gtirb_functions.Function],
-        logger=logging.Logger("null"),
+        logger=logging.getLogger("gtirb_rewriting"),
     ):
         self._module = module
         self._symbols_by_name = {s.name: s for s in module.symbols}
