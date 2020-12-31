@@ -137,11 +137,16 @@ class CallPatch(Patch):
             else:
                 lines.append(f"push {arg_str}")
 
+        if self._cconv.shadow_space:
+            lines.append(f"sub {stack_reg}, {self._cconv.shadow_space}")
+
         lines.append(f"call {self.sym.name}")
 
+        cleanup_size = self._cconv.shadow_space + stack_padding
         if self._cconv.caller_cleanup:
-            cleanup_size = stack_size + stack_padding
-            if cleanup_size:
-                lines.append(f"add {stack_reg}, {cleanup_size}")
+            cleanup_size += stack_size
+
+        if cleanup_size:
+            lines.append(f"add {stack_reg}, {cleanup_size}")
 
         return "\n".join(lines)
