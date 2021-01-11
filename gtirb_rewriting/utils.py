@@ -319,11 +319,9 @@ def _is_elf_pie(module: gtirb.Module) -> bool:
 def decorate_extern_symbol(module: gtirb.Module, sym: str) -> str:
     """
     Decorates a symbol as needed for the target. For example, this might
-    involve adding '@PLT' for position independent ELF executables.
+    involve adding a leading underscore on some platforms.
     """
     # TODO: 32-bit Windows uses a leading underscore. So does Mach-O.
-    if _is_elf_pie(module):
-        return sym + "@PLT"
     return sym
 
 

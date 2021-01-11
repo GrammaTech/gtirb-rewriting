@@ -26,7 +26,7 @@ import gtirb
 import mcasm
 
 from .assembly import X86Syntax
-from .utils import _target_triple
+from .utils import _is_elf_pie, _target_triple
 
 
 class _Assembler:
@@ -231,13 +231,21 @@ class _Assembler:
         ), "Only simple simple references are currently supported"
 
         name = expr["symbol"]["name"]
-        if "variantKind" in expr:
-            name += "@" + expr["variantKind"]
-
         sym = self._symbol_lookup(name)
         assert sym, f"{name} is an undefined symbol reference"
 
-        return gtirb.SymAddrConst(0, sym)
+        attributes = set()
+        if "variantKind" in expr:
+            if expr["variantKind"] == "PLT":
+                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+            else:
+                assert False, f"Unsupported variantKind: {expr['variantKind']}"
+        elif _is_elf_pie(self._module) and isinstance(
+            sym.referent, gtirb.ProxyBlock
+        ):
+            attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+
+        return gtirb.SymAddrConst(0, sym, attributes)
 
     def _symbol_lookup(self, name: str) -> Optional[gtirb.Symbol]:
         """
