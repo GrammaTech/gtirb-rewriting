@@ -49,23 +49,6 @@ def test_decorate_symbol_elf_pic():
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
     context = gtirb_rewriting.InsertionContext(mod, func, block, 0)
 
-    assert context.decorate_extern_symbol("puts") == "puts@PLT"
-
-
-def test_decorate_symbol_elf():
-    mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    mod.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["EXEC"],
-    )
-
-    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
-    func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
-    context = gtirb_rewriting.InsertionContext(mod, func, block, 0)
-
     assert context.decorate_extern_symbol("puts") == "puts"
 
 
