@@ -76,8 +76,16 @@ class RewritingContext:
         self._function_insertions: List[_FunctionInsertion] = []
         self._logger = logger
         self._patch_id = 0
+        self._leaf_functions = {
+            f.uuid: self._might_be_leaf_function(f) for f in self._functions
+        }
 
     def _might_be_leaf_function(self, func: gtirb_functions.Function) -> bool:
+        """
+        Determines if a function might be a leaf function by the absence of
+        calls in the CFG. This should only be used _before_ applying rewrites
+        because the status may change if a patch inserts a call.
+        """
         return all(
             not edge.label or edge.label.type != gtirb.Edge.Type.Call
             for block in func.get_all_blocks()
@@ -147,9 +155,7 @@ class RewritingContext:
         # TODO: If align_stack was set too, we're going to end up doing
         #       some redundant work.
         if clobbered_registers or patch.constraints.clobbers_flags:
-            if self._isa.red_zone_size() and self._might_be_leaf_function(
-                func
-            ):
+            if self._isa.red_zone_size() and self._leaf_functions[func.uuid]:
                 stack_adjustment += self._isa.red_zone_size()
                 snippets.append(self._isa.preserve_red_zone())
 
