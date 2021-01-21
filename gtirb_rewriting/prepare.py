@@ -26,12 +26,11 @@ import gtirb
 
 from .intervalutils import join_byte_intervals, split_byte_interval
 
-
 @contextlib.contextmanager
 def prepare_for_rewriting(module: gtirb.Module, nop: bytes) -> Iterator[None]:
     """Pre-compute data structure to accelerate rewriting."""
 
-    alignment = {}
+    alignment = {} if module.file_format == gtirb.Module.FileFormat.ELF else None
     if "alignment" in module.aux_data:
         alignment = module.aux_data["alignment"].data
 
