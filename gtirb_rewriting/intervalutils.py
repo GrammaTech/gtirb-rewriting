@@ -100,7 +100,7 @@ def split_byte_interval(
                 # Align the offset, since we don't know the actual address
                 alignment[block] = effective_alignment(block.offset)
             else:
-                alignment[block] = effective_alignment(block.offset)
+                alignment[block] = effective_alignment(block.address)
 
     # Process groups in decreasing offset order, but skip the first group
     # because it will stay in the original interval.
