@@ -144,4 +144,8 @@ def test_added_function_blocks():
     ctx.apply()
 
     assert len(m.aux_data["functionBlocks"].data[func_uuid]) == 3
-    assert sum(b.size for b in functions[0].get_all_blocks()) == bi.size == 10
+    assert (
+        sum(b.size for b in m.aux_data["functionBlocks"].data[func_uuid])
+        == bi.size
+        == 10
+    )
