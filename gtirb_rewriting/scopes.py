@@ -94,6 +94,9 @@ class Scope:
         """
         raise NotImplementedError
 
+    def _replacement_length(self) -> int:
+        return 0
+
     def _potential_offsets(
         self,
         func: gtirb_functions.Function,
@@ -258,10 +261,12 @@ class _SpecificLocationScope(Scope):
         function: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         offset: int,
+        replacement_length: int = 0,
     ):
         self.function = function
         self.block = block
         self.offset = offset
+        self.replacement_length = replacement_length
 
     def _function_matches(
         self, module: gtirb.Module, func: gtirb_functions.Function
@@ -278,6 +283,9 @@ class _SpecificLocationScope(Scope):
 
     def _needs_disassembly(self) -> bool:
         return False
+
+    def _replacement_length(self) -> int:
+        return self.replacement_length
 
     def _potential_offsets(
         self,

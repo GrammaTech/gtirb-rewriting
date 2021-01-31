@@ -193,7 +193,7 @@ def test_insert_bytes():
     bi.symbolic_expressions[6] = gtirb.SymAddrConst(0, None)
     new_block = gtirb.CodeBlock(size=2)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 1, b"\x08\x09", [new_block], gtirb.CFG(), {}, []
+        b, 1, 0, b"\x08\x09", [new_block], gtirb.CFG(), {}, []
     )
     assert bi.address == 0x1000
     assert bi.size == 10
@@ -226,7 +226,7 @@ def test_insert_bytes_offset0():
     new_block = gtirb.CodeBlock(size=2)
     sym = gtirb.Symbol(name="hi", payload=new_block)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 0, b"\x08\x09", [new_block], gtirb.CFG(), {}, [sym]
+        b, 0, 0, b"\x08\x09", [new_block], gtirb.CFG(), {}, [sym]
     )
     assert bi.address == 0x1000
     assert bi.size == 10
@@ -239,3 +239,358 @@ def test_insert_bytes_offset0():
     assert b2.size == 2
     assert 6 not in bi.symbolic_expressions
     assert 8 in bi.symbolic_expressions
+
+
+def test_insert_bytes_last():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    # this mimics:
+    #   jne foo
+    #   push %rax
+    # foo:
+    #   push %rcx
+    bi = gtirb.ByteInterval(contents=b"\x75\x00\x50\x51", address=0x1000)
+    bi.section = s
+    foo_sym = gtirb.Symbol("foo")
+    m.symbols.add(foo_sym)
+    b = gtirb.CodeBlock(offset=0, size=2)
+    b.byte_interval = bi
+    b2 = gtirb.CodeBlock(offset=2, size=1)
+    b2.byte_interval = bi
+    b3 = gtirb.CodeBlock(offset=3, size=1)
+    b3.byte_interval = bi
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b3,
+            label=gtirb.Edge.Label(
+                type=gtirb.Edge.Type.Branch, conditional=True
+            ),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b2,
+            target=b3,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+
+    new_block = gtirb.CodeBlock(size=1)
+    gtirb_rewriting.utils._modify_block_insert(
+        b, 2, 0, b"\x90", [new_block], gtirb.CFG(), {}, []
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == b"\x75\x00\x90\x50\x51"
+    assert bi.size == 5
+    assert b.offset == 0
+    assert b.size == 2
+    assert new_block.byte_interval is bi
+    assert new_block.offset == 2
+    assert new_block.size == 1
+    assert b2.offset == 3
+    assert b2.size == 1
+    assert b3.offset == 4
+    assert b3.size == 1
+
+    edges = sorted(b.outgoing_edges, key=lambda e: e.label.type.value)
+    assert len(edges) == 2
+    assert edges[0].label.type == gtirb.Edge.Type.Branch
+    assert edges[0].target == b3
+    assert edges[1].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[1].target == new_block
+
+    edges = list(new_block.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[0].target == b2
+
+    edges = list(b2.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[0].target == b3
+
+
+def test_insert_bytes_last_no_fallthrough():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\xB8\x2A\x00\x00\x00\xC3", address=0x1000
+    )
+    bi.section = s
+    return_proxy = gtirb.ProxyBlock()
+    m.proxies.add(return_proxy)
+    b = gtirb.CodeBlock(offset=0, size=6)
+    b.byte_interval = bi
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=return_proxy,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+        )
+    )
+    new_block = gtirb.CodeBlock(size=1)
+    gtirb_rewriting.utils._modify_block_insert(
+        b, 6, 0, b"\x90", [new_block], gtirb.CFG(), {}, []
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == b"\xB8\x2A\x00\x00\x00\xC3\x90"
+    assert bi.size == 7
+    assert b.offset == 0
+    assert b.size == 6
+    assert new_block.byte_interval is bi
+    assert new_block.offset == 6
+    assert new_block.size == 1
+
+    edges = list(b.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Return
+    assert edges[0].target == return_proxy
+
+    in_edges = list(new_block.incoming_edges)
+    assert not in_edges
+
+    edges = list(new_block.outgoing_edges)
+    assert not edges
+
+
+def test_replace_bytes_offset0():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\x00\x01\x02\x03\x04\x05\x06\x07", address=0x1000
+    )
+    bi.section = s
+    b = gtirb.CodeBlock(offset=2, size=2)
+    b.byte_interval = bi
+    b2 = gtirb.DataBlock(offset=6, size=2)
+    b2.byte_interval = bi
+    bi.symbolic_expressions[2] = gtirb.SymAddrConst(0, None)
+    bi.symbolic_expressions[3] = gtirb.SymAddrConst(0, None)
+    bi.symbolic_expressions[6] = gtirb.SymAddrConst(0, None)
+    new_block = gtirb.CodeBlock(size=1)
+    sym = gtirb.Symbol(name="hi", payload=new_block)
+    gtirb_rewriting.utils._modify_block_insert(
+        b, 0, 1, b"\x08", [new_block], gtirb.CFG(), {}, [sym]
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == b"\x00\x01\x08\x03\x04\x05\x06\x07"
+    assert bi.size == 8
+    assert b.offset == 2
+    assert b.size == 2
+    assert new_block.byte_interval is None
+    assert sym.referent == b
+    assert b2.offset == 6
+    assert b2.size == 2
+    assert list(bi.symbolic_expressions.keys()) == [3, 6]
+
+
+def test_replace_bytes_last():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\x57\xE8\x00\x00\x00\x00\x0f\x0b", address=0x1000
+    )
+    bi.section = s
+    extern_func_proxy = gtirb.ProxyBlock()
+    extern_func_sym = gtirb.Symbol("puts", payload=extern_func_proxy)
+    m.symbols.add(extern_func_sym)
+    b = gtirb.CodeBlock(offset=0, size=6)
+    b.byte_interval = bi
+    b2 = gtirb.DataBlock(offset=6, size=2)
+    b2.byte_interval = bi
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=extern_func_proxy,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Call),
+        )
+    )
+    bi.symbolic_expressions[2] = gtirb.SymAddrConst(0, extern_func_sym)
+    new_block = gtirb.CodeBlock(size=1)
+    gtirb_rewriting.utils._modify_block_insert(
+        b, 1, 5, b"\x90", [new_block], gtirb.CFG(), {}, []
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == b"\x57\x90\x0f\x0b"
+    assert bi.size == 4
+    assert b.offset == 0
+    assert b.size == 1
+    assert new_block.byte_interval is bi
+    assert new_block.offset == 1
+    assert new_block.size == 1
+    assert b2.offset == 2
+    assert b2.size == 2
+    assert set(bi.symbolic_expressions.keys()) == set()
+    assert set(bi.blocks) == {b, new_block, b2}
+
+    edges = list(b.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[0].target == new_block
+
+    edges = list(new_block.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[0].target == b2
+
+
+def test_replace_bytes_all():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\x57\xE8\x00\x00\x00\x00\x0f\x0b", address=0x1000
+    )
+    bi.section = s
+    extern_func_proxy = gtirb.ProxyBlock()
+    extern_func_sym = gtirb.Symbol("puts", payload=extern_func_proxy)
+    m.symbols.add(extern_func_sym)
+    b = gtirb.CodeBlock(offset=0, size=6)
+    b.byte_interval = bi
+    b2 = gtirb.DataBlock(offset=6, size=2)
+    b2.byte_interval = bi
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=extern_func_proxy,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Call),
+        )
+    )
+    bi.symbolic_expressions[2] = gtirb.SymAddrConst(0, extern_func_sym)
+    new_block = gtirb.CodeBlock(size=1)
+    gtirb_rewriting.utils._modify_block_insert(
+        b, 0, b.size, b"\x90", [new_block], gtirb.CFG(), {}, []
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == b"\x90\x0f\x0b"
+    assert bi.size == 3
+    assert b.offset == 0
+    assert b.size == 1
+    assert new_block.byte_interval is None
+    assert b2.offset == 1
+    assert b2.size == 2
+    assert set(bi.symbolic_expressions.keys()) == set()
+    assert set(bi.blocks) == {b, b2}
+
+    edges = list(b.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[0].target == b2
+
+
+def test_replace_bytes_with_trailing_zerosized_block():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\x57\xE8\x00\x00\x00\x00\x0f\x0b", address=0x1000
+    )
+    bi.section = s
+    extern_func_proxy = gtirb.ProxyBlock()
+    extern_func_sym = gtirb.Symbol("puts", payload=extern_func_proxy)
+    m.symbols.add(extern_func_sym)
+    b = gtirb.CodeBlock(offset=0, size=6)
+    b.byte_interval = bi
+    b2 = gtirb.DataBlock(offset=6, size=2)
+    b2.byte_interval = bi
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=extern_func_proxy,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Call),
+        )
+    )
+    bi.symbolic_expressions[2] = gtirb.SymAddrConst(0, extern_func_sym)
+    # This mimics a patch of:
+    #   jmp foo
+    #   foo:
+    new_block = gtirb.CodeBlock(size=5)
+    new_block2 = gtirb.CodeBlock(size=0)
+    foo_symbol = gtirb.Symbol("foo", payload=new_block2)
+    new_cfg = gtirb.CFG()
+    new_cfg.add(
+        gtirb.Edge(
+            source=new_block,
+            target=new_block2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Branch),
+        )
+    )
+    gtirb_rewriting.utils._modify_block_insert(
+        b,
+        1,
+        5,
+        b"\xEB\x00\x00\x00\x00",
+        [new_block, new_block2],
+        new_cfg,
+        {1: gtirb.SymAddrConst(0, foo_symbol)},
+        [foo_symbol],
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == b"\x57\xEB\x00\x00\x00\x00\x0f\x0b"
+    assert bi.size == 8
+    assert b.offset == 0
+    assert b.size == 1
+    assert new_block.byte_interval == bi
+    assert new_block.offset == 1
+    assert new_block.size == 5
+    assert new_block2.byte_interval is None
+    assert b2.offset == 6
+    assert b2.size == 2
+    assert set(bi.symbolic_expressions.keys()) == {2}
+    assert bi.symbolic_expressions[2].symbol == foo_symbol
+    assert foo_symbol.referent is b2
+
+    edges = list(b.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[0].target == new_block
+
+    edges = list(new_block.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Branch
+    assert edges[0].target == b2
