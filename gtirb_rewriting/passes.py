@@ -65,9 +65,19 @@ class PassManager:
     Maintains a list of registered passes and runs them on IR.
     """
 
-    def __init__(self, logger=logging.getLogger("gtirb_rewriting")):
+    def __init__(
+        self,
+        logger=logging.getLogger("gtirb_rewriting"),
+        expensive_assertions=True,
+    ):
+        """
+        :param logger: The logger to log to when rewriting.
+        :param expensive_assertions: If enabled, extra assertions will be
+        enabled that may have noticable run-time overhead.
+        """
         self._logger = logger
         self._passes = []
+        self._expensive_assertions = expensive_assertions
 
     def add(self, pass_inst: Pass) -> None:
         """
@@ -81,7 +91,12 @@ class PassManager:
         """
         for mod in ir.modules:
             functions = gtirb_functions.Function.build_functions(mod)
-            context = RewritingContext(mod, functions, logger=self._logger)
+            context = RewritingContext(
+                mod,
+                functions,
+                logger=self._logger,
+                expensive_assertions=self._expensive_assertions,
+            )
 
             for pass_inst in self._passes:
                 pass_inst.begin_module(mod, functions, context)

@@ -20,6 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import dataclasses
+import itertools
 import logging
 import operator
 import uuid
@@ -66,7 +67,15 @@ class RewritingContext:
         module: gtirb.Module,
         functions: Sequence[gtirb_functions.Function],
         logger=logging.getLogger("gtirb_rewriting"),
+        expensive_assertions=True,
     ):
+        """
+        :param module: The module to rewrite.
+        :param functions: The list of functions in the module.
+        :param logger: The logger to log to when rewriting.
+        :param expensive_assertions: If enabled, extra assertions will be
+        enabled that may have noticable run-time overhead.
+        """
         self._module = module
         self._symbols_by_name = {s.name: s for s in module.symbols}
         self._functions = functions
@@ -76,6 +85,7 @@ class RewritingContext:
         self._function_insertions: List[_FunctionInsertion] = []
         self._logger = logger
         self._patch_id = 0
+        self._expensive_assertions = expensive_assertions
         self._leaf_functions = {
             f.uuid: self._might_be_leaf_function(f) for f in self._functions
         }
@@ -119,6 +129,7 @@ class RewritingContext:
         func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         offset: int,
+        replacement_length: int,
         patch: Patch,
         context: InsertionContext,
     ) -> Tuple[gtirb.CodeBlock, int]:
@@ -204,6 +215,7 @@ class RewritingContext:
         _modify_block_insert(
             block,
             offset,
+            replacement_length,
             bytes(assembler.data),
             assembler.blocks,
             assembler.cfg,
@@ -305,6 +317,13 @@ class RewritingContext:
         # stable sort so that this will still be deterministic for ties.
         insertions_and_offsets.sort(key=operator.itemgetter(1))
 
+        # Assert that we don't have any replacements and insertions that
+        # overlap.
+        last_end = 0
+        for insertion, offset in insertions_and_offsets:
+            assert offset >= last_end, "Insertions and replacements overlap"
+            last_end = offset + insertion.scope._replacement_length()
+
         actual_block = block
         total_insert_len = 0
         for insertion, offset in insertions_and_offsets:
@@ -313,10 +332,13 @@ class RewritingContext:
                 func,
                 actual_block,
                 offset + total_insert_len - block_delta,
+                insertion.scope._replacement_length(),
                 insertion.patch,
                 InsertionContext(self._module, func, block, offset),
             )
-            total_insert_len += insert_len
+            total_insert_len += (
+                insert_len - insertion.scope._replacement_length()
+            )
 
     def _apply_function_insertion(
         self, sym: gtirb.Symbol, block: gtirb.CodeBlock, patch: Patch
@@ -396,6 +418,32 @@ class RewritingContext:
         if "functionNames" in self._module.aux_data:
             self._module.aux_data["functionNames"].data[func_uuid] = sym
 
+    def _validate_offset_and_length(
+        self, block: gtirb.CodeBlock, offset: int, length: int
+    ) -> None:
+        """
+        Validate that an offset and length fall within a code block and, if
+        expensive assertions are enabled, verify that they fall on instruction
+        boundaries.
+        """
+        assert 0 <= offset <= block.size
+        assert length >= 0
+        assert offset + length <= block.size
+
+        if self._expensive_assertions:
+            legal_offsets = {
+                0,
+                *itertools.accumulate(
+                    inst.size for inst in self._decoder.get_instructions(block)
+                ),
+            }
+            assert (
+                offset in legal_offsets
+            ), f"offset {offset} is not an instruction boundary"
+            assert (
+                offset + length in legal_offsets
+            ), f"offset {offset}+{length} is not an instruction boundary"
+
     def register_insert(self, scope: Scope, patch: Patch) -> None:
         """
         Registers a patch to be inserted.
@@ -436,8 +484,26 @@ class RewritingContext:
         Inserts a patch at a specific location in the binary. This is not
         subject to bubbling.
         """
+        self._validate_offset_and_length(block, offset, 0)
         self.register_insert(
             _SpecificLocationScope(function, block, offset), patch
+        )
+
+    def replace_at(
+        self,
+        function: gtirb_functions.Function,
+        block: gtirb.CodeBlock,
+        offset: int,
+        length: int,
+        patch: Patch,
+    ) -> None:
+        """
+        Inserts a patch at a specific location in the binary, replacing the
+        instructions as specified. This is not subject to bubbling.
+        """
+        self._validate_offset_and_length(block, offset, length)
+        self.register_insert(
+            _SpecificLocationScope(function, block, offset, length), patch
         )
 
     def apply(self) -> None:

@@ -210,9 +210,15 @@ def _substitute_block(
             sym.referent = new_block
 
 
+def _is_fallthrough_edge(edge: gtirb.Edge) -> bool:
+    """Determines if an edge is a fall-through edge."""
+    return edge.label and edge.label.type == gtirb.Edge.Type.Fallthrough
+
+
 def _modify_block_insert(
     block: gtirb.CodeBlock,
     offset: int,
+    replacement_length: int,
     new_bytes: bytes,
     new_blocks: List[gtirb.CodeBlock],
     new_cfg: gtirb.CFG,
@@ -221,25 +227,53 @@ def _modify_block_insert(
 ) -> None:
     """
     Insert bytes into a block and adjusts the IR as needed.
+    :param block: The code block to insert into.
+    :param offset: The byte offset into the code block.
+    :param replacement_length: The number of bytes after `offset` that should
+                               be removed.
+    :param new_bytes: The new content to be inserted.
+    :param new_blocks: The CFG corresponding to the new content.
+    :param new_symbolic_expressions: The symbolic expressions corresponding to
+                                     the new content, with the keys relative
+                                     to the start of `new_bytes`.
+    :param new_symbols: Any symbols that may be defined in the new content.
     """
 
-    n_bytes = len(new_bytes)
+    assert block.size
+    assert 0 <= offset <= block.size
+    assert 0 <= offset + replacement_length <= block.size
+    assert replacement_length >= 0
+    assert new_bytes
+    assert new_blocks
+    assert block not in new_blocks
+    assert new_blocks[0].size, "must have at least one non-empty block"
+    assert all(
+        new_block.size for new_block in new_blocks[:-1]
+    ), "only the last block may be empty"
+    assert not any(
+        new_cfg.out_edges(new_blocks[-1])
+    ), "the last block cannot have outgoing cfg edges"
+
     bi = block.byte_interval
     assert bi
 
-    # Ideally none of this would be necessary, but there is non-determinism in
-    # gtirb-pprinter that causes it to issue warnings with zero-sized blocks,
-    # so we'll avoid creating one here.
-    if offset == 0:
-        new_blocks[-1].size += block.size
-        block.size = new_blocks[0].size
-        _substitute_block(new_blocks[0], block, new_cfg, new_symbols)
-        del new_blocks[0]
-    else:
-        new_blocks[-1].size += block.size - offset
-        block.size = offset
+    original_size = block.size
+    inserts_at_end = not replacement_length and offset == block.size
+    replaces_last_instruction = (
+        replacement_length and offset + replacement_length == block.size
+    )
 
-        # Add an edge from the original block to the first patch block.
+    # Adjust the target block to be the size of offset. Then extend the last
+    # patch block to cover the remaining bytes in the original block.
+    block.size = offset
+    new_blocks[-1].size += original_size - offset - replacement_length
+
+    # Now add a fallthrough edge from the original block to the first patch
+    # block, unless we're inserting at the end of the block and the block has
+    # no fallthrough edges. For example, inserting after a ret instruction.
+    if not inserts_at_end or any(
+        edge for edge in block.outgoing_edges if _is_fallthrough_edge(edge)
+    ):
         new_cfg.add(
             gtirb.Edge(
                 source=block,
@@ -248,43 +282,119 @@ def _modify_block_insert(
             )
         )
 
-    if new_blocks:
-        # Alter any outgoing edges from the original block originate from the
-        # last patch block.
+    # Alter any outgoing edges from the original block to originate from the
+    # last patch block.
+    if inserts_at_end:
         for edge in set(block.outgoing_edges):
-            bi.module.ir.cfg.discard(edge)
-            bi.module.ir.cfg.add(edge._replace(source=new_blocks[-1]))
+            if _is_fallthrough_edge(edge):
+                bi.ir.cfg.discard(edge)
+                new_cfg.add(edge._replace(source=new_blocks[-1]))
+    elif replaces_last_instruction:
+        for edge in set(block.outgoing_edges):
+            if _is_fallthrough_edge(edge):
+                bi.ir.cfg.discard(edge)
+                new_cfg.add(edge._replace(source=new_blocks[-1]))
+            else:
+                bi.ir.cfg.discard(edge)
+    else:
+        for edge in set(block.outgoing_edges):
+            bi.ir.cfg.discard(edge)
+            new_cfg.add(edge._replace(source=new_blocks[-1]))
 
+    # Now go back and clean up any zero-sized blocks, which trigger
+    # nondeterministic behavior in the pretty printer.
+    if block.size == 0:
+        added_fallthrough = next(
+            edge
+            for edge in new_cfg.in_edges(new_blocks[0])
+            if _is_fallthrough_edge(edge) and edge.source == block
+        )
+        new_cfg.discard(added_fallthrough)
+
+        block.size = new_blocks[0].size
+        _substitute_block(
+            new_blocks[0], block, new_cfg, new_symbols,
+        )
+        del new_blocks[0]
+
+    if new_blocks and new_blocks[-1].size == 0:
+        has_symbols = any(
+            sym.referent == new_blocks[-1] for sym in new_symbols
+        )
+        has_incoming_edges = any(new_cfg.in_edges(new_blocks[-1]))
+        fallthrough_edges = [
+            edge
+            for edge in new_cfg.out_edges(new_blocks[-1])
+            if _is_fallthrough_edge(edge)
+        ]
+
+        if not has_symbols and not has_incoming_edges:
+            # If nothing refers to the block, we can simply drop it and any
+            # outgoing edges that may have been added to it from the earlier
+            # steps.
+            for out_edge in new_cfg.out_edges(new_blocks[-1]):
+                new_cfg.discard(out_edge)
+            del new_blocks[-1]
+        elif len(fallthrough_edges) == 1:
+            # If we know where the "next" block is, substitute that for our
+            # last block.
+            _substitute_block(
+                new_blocks[-1],
+                fallthrough_edges[0].target,
+                new_cfg,
+                new_symbols,
+            )
+            del new_blocks[-1]
+        else:
+            # We don't know where control flow goes after our patch, so we'll
+            # raise an exception for now. There are other ways of resolving
+            # this that we could explore (e.g. insert a nop at the end of the
+            # inserted bytes to make it be a non-zero block).
+            raise NotImplementedError(
+                "Attempting to insert a block at the end of another "
+                "block without knowing how to update control flow"
+            )
+
+    size_delta = len(new_bytes) - replacement_length
     offset += block.offset
 
     # adjust byte interval the block goes in
-    bi.size += n_bytes
-    bi.contents = bi.contents[:offset] + new_bytes + bi.contents[offset:]
+    bi.size += size_delta
+    bi.contents = (
+        bi.contents[:offset]
+        + new_bytes
+        + bi.contents[offset + replacement_length :]
+    )
 
     # adjust blocks that occur after the insertion point
     # TODO: what if blocks overlap over the insertion point?
     for b in bi.blocks:
         if b != block and b.offset >= offset:
-            b.offset += n_bytes
+            b.offset += size_delta
 
     # adjust all of the new blocks to be relative to the byte interval and
     # add them to the byte interval
     for b in new_blocks:
         b.offset += offset
 
+    assert block.size and all(b.size for b in new_blocks), (
+        "_modify_block_insert created a zero-sized block; please file a bug "
+        "report against gtirb-rewriting"
+    )
     bi.blocks.update(new_blocks)
 
     # adjust sym exprs that occur after the insertion point
     bi.symbolic_expressions = {
-        (k + n_bytes if k >= offset else k): v
+        (k + size_delta if k >= offset else k): v
         for k, v in bi.symbolic_expressions.items()
+        if k < offset or k >= offset + replacement_length
     }
 
     # add all of the symbolic expressions from the code we're inserting
     for rel_offset, expr in new_symbolic_expressions.items():
         bi.symbolic_expressions[offset + rel_offset] = expr
 
-    bi.module.ir.cfg.update(new_cfg)
+    bi.ir.cfg.update(new_cfg)
     bi.module.symbols.update(new_symbols)
 
     # adjust aux data if present
@@ -297,13 +407,11 @@ def _modify_block_insert(
                 displacement_map = table.data[bi]
                 del table.data[bi]
                 table.data[bi] = {
-                    (k + n_bytes if k >= offset else k): v
+                    (k + size_delta if k >= offset else k): v
                     for k, v in displacement_map.items()
+                    if k < offset or k >= offset + replacement_length
                 }
 
-    # TODO: It seems like we _could_ detect any aux data table that is a
-    #       mapping using Offset as keys if gtirb.Serialization._parse_type
-    #       were public.
     update_aux_data_keyed_by_offset("comments")
     update_aux_data_keyed_by_offset("padding")
     update_aux_data_keyed_by_offset("symbolicExpressionSizes")

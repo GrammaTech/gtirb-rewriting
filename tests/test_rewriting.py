@@ -24,6 +24,7 @@ import uuid
 import gtirb
 import gtirb_functions
 import gtirb_rewriting
+import pytest
 
 
 @gtirb_rewriting.patch_constraints()
@@ -47,7 +48,7 @@ def test_multiple_insertions():
     s = gtirb.Section(name=".text")
     s.module = m
     bi = gtirb.ByteInterval(
-        contents=b"\x00\x01\x02\x03\x04\x05\x06\x07", address=0x1000
+        contents=b"\x50\x51\x52\x53\x54\x55\x56\x57", address=0x1000
     )
     bi.section = s
     b = gtirb.CodeBlock(offset=0, size=bi.size)
@@ -80,7 +81,7 @@ def test_multiple_insertions():
     blocks = sorted(bi.blocks, key=lambda b: b.offset)
     refs = [list(b.references) for b in blocks]
 
-    assert bi.contents == b"\x90\x90\x00\x01\x02\x03\x04\x05\x06\x90\x90\x07"
+    assert bi.contents == b"\x90\x90\x50\x51\x52\x53\x54\x55\x56\x90\x90\x57"
 
     assert len(refs[0]) == 1
     assert refs[0][0].name == "hi"
@@ -103,6 +104,58 @@ def test_multiple_insertions():
     assert blocks[3].size == 1
 
 
+def test_multiple_replacements():
+    @gtirb_rewriting.patch_constraints()
+    def nop_patch(context):
+        return "nop"
+
+    ir = gtirb.IR()
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\x50\x51\x52\x53\x54\x55\x56\x57", address=0x1000
+    )
+    bi.section = s
+    b = gtirb.CodeBlock(offset=0, size=bi.size)
+    b.byte_interval = bi
+    sym = gtirb.Symbol(name="hi", payload=b)
+    m.symbols.add(sym)
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+
+    functions = gtirb_functions.Function.build_functions(m)
+    assert len(functions) == 1
+
+    ctx = gtirb_rewriting.RewritingContext(m, functions)
+    ctx.replace_at(
+        functions[0], b, 0, 2, gtirb_rewriting.Patch.from_function(nop_patch)
+    )
+    ctx.replace_at(
+        functions[0], b, 3, 4, gtirb_rewriting.Patch.from_function(nop_patch)
+    )
+    ctx.insert_at(
+        functions[0], b, 8, gtirb_rewriting.Patch.from_function(nop_patch)
+    )
+    ctx.apply()
+
+    assert bi.contents == b"\x90\x52\x90\x57\x90"
+    assert sum(b.size for b in bi.blocks) == 5
+
+
 def test_added_function_blocks():
     ir = gtirb.IR()
     m = gtirb.Module(
@@ -114,7 +167,7 @@ def test_added_function_blocks():
     s = gtirb.Section(name=".text")
     s.module = m
     bi = gtirb.ByteInterval(
-        contents=b"\x00\x01\x02\x03\x04\x05\x06\x07", address=0x1000
+        contents=b"\x50\x51\x52\x53\x54\x55\x56\x57", address=0x1000
     )
     bi.section = s
     b = gtirb.CodeBlock(offset=0, size=bi.size)
@@ -149,3 +202,133 @@ def test_added_function_blocks():
         == bi.size
         == 10
     )
+
+
+def test_expensive_assertions():
+    ir = gtirb.IR()
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\xE8\x00\x00\x00\x00\xE8\x00\x00\x00\x00", address=0x1000
+    )
+    bi.section = s
+    b = gtirb.CodeBlock(offset=0, size=bi.size)
+    b.byte_interval = bi
+    sym = gtirb.Symbol(name="hi", payload=b)
+    sym.module = m
+
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+
+    functions = gtirb_functions.Function.build_functions(m)
+    assert len(functions) == 1
+    assert len(functions[0].get_all_blocks()) == 1
+
+    ctx = gtirb_rewriting.RewritingContext(
+        m, functions, expensive_assertions=True
+    )
+    ctx.insert_at(
+        functions[0], b, 0, gtirb_rewriting.Patch.from_function(dummy_patch)
+    )
+    ctx.insert_at(
+        functions[0], b, 5, gtirb_rewriting.Patch.from_function(dummy_patch)
+    )
+    # Offset is not on an instruction boundary
+    with pytest.raises(AssertionError):
+        ctx.insert_at(
+            functions[0],
+            b,
+            1,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
+        )
+    # Offset is not on an instruction boundary
+    with pytest.raises(AssertionError):
+        ctx.replace_at(
+            functions[0],
+            b,
+            1,
+            0,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
+        )
+    # Offset is valid, but end position isn't on an instruction boundary
+    with pytest.raises(AssertionError):
+        ctx.replace_at(
+            functions[0],
+            b,
+            0,
+            6,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
+        )
+    # Range extends out of the block's bounds
+    with pytest.raises(AssertionError):
+        ctx.replace_at(
+            functions[0],
+            b,
+            0,
+            60,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
+        )
+    ctx.apply()
+
+
+def test_conflicting_insertion_replacement():
+    ir = gtirb.IR()
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(
+        contents=b"\x09\x90\x90\x90\x90\x90\x90\x90", address=0x1000
+    )
+    bi.section = s
+    b = gtirb.CodeBlock(offset=0, size=bi.size)
+    b.byte_interval = bi
+    sym = gtirb.Symbol(name="hi", payload=b)
+    sym.module = m
+
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {b}}
+    )
+
+    functions = gtirb_functions.Function.build_functions(m)
+    assert len(functions) == 1
+    assert len(functions[0].get_all_blocks()) == 1
+
+    ctx = gtirb_rewriting.RewritingContext(m, functions)
+    ctx.insert_at(
+        functions[0], b, 7, gtirb_rewriting.Patch.from_function(dummy_patch)
+    )
+    ctx.replace_at(
+        functions[0],
+        b,
+        0,
+        bi.size,
+        gtirb_rewriting.Patch.from_function(dummy_patch),
+    )
+    with pytest.raises(AssertionError):
+        ctx.apply()
