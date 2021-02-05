@@ -80,9 +80,11 @@ def test_insert_function(tmpdir):
         [
             "gtirb-pprinter",
             tmpdir / "rewritten.gtirb",
-            "--keep-all-symbols",
-            "--keep-all-functions",
-            "--keep-all-array-sections",
+            "--keep-all",
+            "--skip-section",
+            ".rela.plt",
+            "--skip-section",
+            ".rela.dyn",
             "--skip-section",
             ".eh_frame",
             "-b",
@@ -93,9 +95,10 @@ def test_insert_function(tmpdir):
             "-nostartfiles",
         ],
         stderr=subprocess.PIPE,
-        check=True,
+        check=False,
     )
     sys.stderr.write(result.stderr.decode())
+    assert result.returncode == 0
     assert b"WARNING" not in result.stderr
 
     result = subprocess.run(str(tmpdir / "rewritten"), stdout=subprocess.PIPE)
