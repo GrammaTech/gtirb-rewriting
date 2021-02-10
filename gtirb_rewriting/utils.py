@@ -232,7 +232,8 @@ def _modify_block_insert(
     :param replacement_length: The number of bytes after `offset` that should
                                be removed.
     :param new_bytes: The new content to be inserted.
-    :param new_blocks: The CFG corresponding to the new content.
+    :param new_blocks: The blocks corresponding to the new content.
+    :param new_cfg: The CFG corresponding to the new content.
     :param new_symbolic_expressions: The symbolic expressions corresponding to
                                      the new content, with the keys relative
                                      to the start of `new_bytes`.
@@ -257,11 +258,127 @@ def _modify_block_insert(
     bi = block.byte_interval
     assert bi
 
+    # Adjust codeblock sizes, create CFG edges, remove 0-size blocks
+    _modify_block_insert_cfg(
+        block,
+        offset,
+        replacement_length,
+        new_bytes,
+        new_blocks,
+        new_cfg,
+        new_symbolic_expressions,
+        new_symbols,
+    )
+
+    size_delta = len(new_bytes) - replacement_length
+    offset += block.offset
+
+    # adjust byte interval the block goes in
+    bi.size += size_delta
+    bi.contents = (
+        bi.contents[:offset]
+        + new_bytes
+        + bi.contents[offset + replacement_length :]
+    )
+
+    # adjust blocks that occur after the insertion point
+    # TODO: what if blocks overlap over the insertion point?
+    for b in bi.blocks:
+        if b != block and b.offset >= offset:
+            b.offset += size_delta
+
+    # adjust all of the new blocks to be relative to the byte interval and
+    # add them to the byte interval
+    for b in new_blocks:
+        b.offset += offset
+
+    assert block.size and all(b.size for b in new_blocks), (
+        "_modify_block_insert created a zero-sized block; please file a bug "
+        "report against gtirb-rewriting"
+    )
+    bi.blocks.update(new_blocks)
+
+    # adjust sym exprs that occur after the insertion point
+    bi.symbolic_expressions = {
+        (k + size_delta if k >= offset else k): v
+        for k, v in bi.symbolic_expressions.items()
+        if k < offset or k >= offset + replacement_length
+    }
+
+    # add all of the symbolic expressions from the code we're inserting
+    for rel_offset, expr in new_symbolic_expressions.items():
+        bi.symbolic_expressions[offset + rel_offset] = expr
+
+    bi.ir.cfg.update(new_cfg)
+    bi.module.symbols.update(new_symbols)
+
+    # adjust aux data if present
+    def update_aux_data_keyed_by_offset(name):
+        table = bi.module.aux_data.get(name)
+        if table:
+            if not isinstance(table.data, OffsetMapping):
+                table.data = OffsetMapping(table.data)
+            if bi in table.data:
+                displacement_map = table.data[bi]
+                del table.data[bi]
+                table.data[bi] = {
+                    (k + size_delta if k >= offset else k): v
+                    for k, v in displacement_map.items()
+                    if k < offset or k >= offset + replacement_length
+                }
+
+    update_aux_data_keyed_by_offset("comments")
+    update_aux_data_keyed_by_offset("padding")
+    update_aux_data_keyed_by_offset("symbolicExpressionSizes")
+
+
+def _modify_block_insert_cfg(
+    block: gtirb.CodeBlock,
+    offset: int,
+    replacement_length: int,
+    new_bytes: bytes,
+    new_blocks: List[gtirb.CodeBlock],
+    new_cfg: gtirb.CFG,
+    new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
+    new_symbols: Iterable[gtirb.Symbol],
+) -> None:
+    """
+    Adjust codeblock sizes, create CFG edges, remove 0-size blocks.
+    :param block: The code block to insert into.
+    :param offset: The byte offset into the code block.
+    :param replacement_length: The number of bytes after `offset` that should
+                               be removed.
+    :param new_bytes: The new content to be inserted.
+    :param new_blocks: The blocks corresponding to the new content.
+    :param new_cfg: The CFG corresponding to the new content.
+    :param new_symbolic_expressions: The symbolic expressions corresponding to
+                                     the new content, with the keys relative
+                                     to the start of `new_bytes`.
+    :param new_symbols: Any symbols that may be defined in the new content.
+    """
+
+    bi = block.byte_interval
     original_size = block.size
     inserts_at_end = not replacement_length and offset == block.size
     replaces_last_instruction = (
         replacement_length and offset + replacement_length == block.size
     )
+
+    # Adjust the target codeblock and discard the new codeblock if no new CFG
+    # edges are created, no new symbols are created, and the replacement is not
+    # at the end of a block.
+    if (
+        not new_cfg
+        and not new_symbols
+        and not inserts_at_end
+        and not replaces_last_instruction
+    ):
+        block.size = block.size - replacement_length + len(new_bytes)
+
+        # Remove all the blocks from new_blocks so that they don't get added
+        # to the byte_interval in _modify_block_insert.
+        new_blocks.clear()
+        return
 
     # Adjust the target block to be the size of offset. Then extend the last
     # patch block to cover the remaining bytes in the original block.
@@ -354,67 +471,6 @@ def _modify_block_insert(
                 "Attempting to insert a block at the end of another "
                 "block without knowing how to update control flow"
             )
-
-    size_delta = len(new_bytes) - replacement_length
-    offset += block.offset
-
-    # adjust byte interval the block goes in
-    bi.size += size_delta
-    bi.contents = (
-        bi.contents[:offset]
-        + new_bytes
-        + bi.contents[offset + replacement_length :]
-    )
-
-    # adjust blocks that occur after the insertion point
-    # TODO: what if blocks overlap over the insertion point?
-    for b in bi.blocks:
-        if b != block and b.offset >= offset:
-            b.offset += size_delta
-
-    # adjust all of the new blocks to be relative to the byte interval and
-    # add them to the byte interval
-    for b in new_blocks:
-        b.offset += offset
-
-    assert block.size and all(b.size for b in new_blocks), (
-        "_modify_block_insert created a zero-sized block; please file a bug "
-        "report against gtirb-rewriting"
-    )
-    bi.blocks.update(new_blocks)
-
-    # adjust sym exprs that occur after the insertion point
-    bi.symbolic_expressions = {
-        (k + size_delta if k >= offset else k): v
-        for k, v in bi.symbolic_expressions.items()
-        if k < offset or k >= offset + replacement_length
-    }
-
-    # add all of the symbolic expressions from the code we're inserting
-    for rel_offset, expr in new_symbolic_expressions.items():
-        bi.symbolic_expressions[offset + rel_offset] = expr
-
-    bi.ir.cfg.update(new_cfg)
-    bi.module.symbols.update(new_symbols)
-
-    # adjust aux data if present
-    def update_aux_data_keyed_by_offset(name):
-        table = bi.module.aux_data.get(name)
-        if table:
-            if not isinstance(table.data, OffsetMapping):
-                table.data = OffsetMapping(table.data)
-            if bi in table.data:
-                displacement_map = table.data[bi]
-                del table.data[bi]
-                table.data[bi] = {
-                    (k + size_delta if k >= offset else k): v
-                    for k, v in displacement_map.items()
-                    if k < offset or k >= offset + replacement_length
-                }
-
-    update_aux_data_keyed_by_offset("comments")
-    update_aux_data_keyed_by_offset("padding")
-    update_aux_data_keyed_by_offset("symbolicExpressionSizes")
 
 
 def _is_elf_pie(module: gtirb.Module) -> bool:

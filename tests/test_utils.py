@@ -199,9 +199,8 @@ def test_insert_bytes():
     assert bi.size == 10
     assert bi.contents == b"\x00\x01\x02\x08\x09\x03\x04\x05\x06\x07"
     assert b.offset == 2
-    assert b.size == 1
-    assert new_block.offset == 3
-    assert new_block.size == 3
+    assert b.size == 4
+    assert new_block.byte_interval is None
     assert b2.offset == 8
     assert b2.size == 2
     assert 6 not in bi.symbolic_expressions
@@ -594,3 +593,64 @@ def test_replace_bytes_with_trailing_zerosized_block():
     assert len(edges) == 1
     assert edges[0].label.type == gtirb.Edge.Type.Branch
     assert edges[0].target == b2
+
+
+def test_replace_bytes_in_place_no_symbol():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(contents=b"\x50\x51\x52", address=0x1000)
+    bi.section = s
+
+    b = gtirb.CodeBlock(offset=0, size=3)
+    b.byte_interval = bi
+    new_block = gtirb.CodeBlock(size=1)
+    gtirb_rewriting.utils._modify_block_insert(
+        b, 1, 1, b"\x57", [new_block], gtirb.CFG(), {}, []
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == bytearray(b"\x50\x57\x52")
+    assert bi.size == 3
+    assert b.offset == 0
+    assert b.size == 3
+    assert new_block.byte_interval is None  # discarded
+    assert set(bi.symbolic_expressions.keys()) == set()
+    assert set(bi.blocks) == {b}
+    assert len(list(b.outgoing_edges)) == 0
+
+
+def test_replace_bytes_in_place_with_symbol():
+    # in place replacement is expected not to happen because of the symbol
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(contents=b"\x50\x51\x52", address=0x1000)
+    bi.section = s
+
+    b = gtirb.CodeBlock(offset=0, size=3)
+    b.byte_interval = bi
+    new_block = gtirb.CodeBlock(size=1)
+    new_sym = gtirb.Symbol("new", payload=new_block)
+    gtirb_rewriting.utils._modify_block_insert(
+        b, 1, 1, b"\x57", [new_block], gtirb.CFG(), {}, [new_sym]
+    )
+    assert bi.address == 0x1000
+    assert bi.contents == bytearray(b"\x50\x57\x52")
+    assert bi.size == 3
+    assert b.offset == 0
+    assert b.size == 1
+    assert new_block.byte_interval is bi
+    assert new_block.offset == 1
+    assert new_block.size == 2
+    assert set(bi.symbolic_expressions.keys()) == set()
+    assert set(bi.blocks) == {b, new_block}
+    assert new_sym in m.symbols
+
+    edges = list(b.outgoing_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
+    assert edges[0].target == new_block
