@@ -368,7 +368,7 @@ def _modify_block_insert_cfg(
     # edges are created, no new symbols are created, and the replacement is not
     # at the end of a block.
     if (
-        len(new_cfg) == 0
+        not new_cfg
         and not new_symbols
         and not inserts_at_end
         and not replaces_last_instruction
