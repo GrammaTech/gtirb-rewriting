@@ -369,55 +369,54 @@ def _modify_block_insert_cfg(
     # at the end of a block.
     if (
         len(new_cfg) == 0
-        and len(new_symbols) == 0
+        and not new_symbols
         and not inserts_at_end
         and not replaces_last_instruction
     ):
         block.size = block.size - replacement_length + len(new_bytes)
 
         # Remove all the blocks from new_blocks so that they don't get added
-        # to the byte_interval in _modify_block_insert
+        # to the byte_interval in _modify_block_insert.
         new_blocks.clear()
+        return
 
-    else:
-        # Adjust the target block to be the size of offset. Then extend the
-        # last patch block to cover the remaining bytes in the original block.
-        block.size = offset
-        new_blocks[-1].size += original_size - offset - replacement_length
+    # Adjust the target block to be the size of offset. Then extend the last
+    # patch block to cover the remaining bytes in the original block.
+    block.size = offset
+    new_blocks[-1].size += original_size - offset - replacement_length
 
-        # Now add a fallthrough edge from the original block to the first patch
-        # block, unless we're inserting at the end of the block and the block
-        # has no fallthrough edges. For example, inserting after a ret
-        # instruction.
-        if not inserts_at_end or any(
-            edge for edge in block.outgoing_edges if _is_fallthrough_edge(edge)
-        ):
-            new_cfg.add(
-                gtirb.Edge(
-                    source=block,
-                    target=new_blocks[0],
-                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
-                )
+    # Now add a fallthrough edge from the original block to the first patch
+    # block, unless we're inserting at the end of the block and the block has
+    # no fallthrough edges. For example, inserting after a ret instruction.
+    if not inserts_at_end or any(
+        edge for edge in block.outgoing_edges if _is_fallthrough_edge(edge)
+    ):
+        new_cfg.add(
+            gtirb.Edge(
+                source=block,
+                target=new_blocks[0],
+                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
             )
+        )
 
-        # Alter any outgoing edges from the original block to originate from
-        # the last patch block.
-        if inserts_at_end:
-            for edge in set(block.outgoing_edges):
-                if _is_fallthrough_edge(edge):
-                    bi.ir.cfg.discard(edge)
-                    new_cfg.add(edge._replace(source=new_blocks[-1]))
-        elif replaces_last_instruction:
-            for edge in set(block.outgoing_edges):
-                if _is_fallthrough_edge(edge):
-                    bi.ir.cfg.discard(edge)
-                    new_cfg.add(edge._replace(source=new_blocks[-1]))
-                else:
-                    bi.ir.cfg.discard(edge)
-        else:  # why doesn't this break stuff?
-            for edge in set(block.outgoing_edges):
+    # Alter any outgoing edges from the original block to originate from the
+    # last patch block.
+    if inserts_at_end:
+        for edge in set(block.outgoing_edges):
+            if _is_fallthrough_edge(edge):
                 bi.ir.cfg.discard(edge)
                 new_cfg.add(edge._replace(source=new_blocks[-1]))
+    elif replaces_last_instruction:
+        for edge in set(block.outgoing_edges):
+            if _is_fallthrough_edge(edge):
+                bi.ir.cfg.discard(edge)
+                new_cfg.add(edge._replace(source=new_blocks[-1]))
+            else:
+                bi.ir.cfg.discard(edge)
+    else:
+        for edge in set(block.outgoing_edges):
+            bi.ir.cfg.discard(edge)
+            new_cfg.add(edge._replace(source=new_blocks[-1]))
 
     # Now go back and clean up any zero-sized blocks, which trigger
     # nondeterministic behavior in the pretty printer.
