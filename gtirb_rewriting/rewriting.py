@@ -38,7 +38,7 @@ from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
     _modify_block_insert,
-    _substitute_block,
+    _text_section_name,
     decorate_extern_symbol,
     show_block_asm,
 )
@@ -221,6 +221,8 @@ class RewritingContext:
             assembler.cfg,
             assembler.symbolic_expressions,
             assembler.local_symbols.values(),
+            assembler.proxies,
+            self._functions_by_block,
         )
 
         if "functionBlocks" in self._module.aux_data:
@@ -229,6 +231,14 @@ class RewritingContext:
                 function_blocks[func.uuid].update(
                     b for b in assembler.blocks if b.module == self._module
                 )
+
+        self._functions_by_block.update(
+            {
+                b: func.uuid
+                for b in assembler.blocks
+                if b.module == self._module
+            }
+        )
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
@@ -344,64 +354,41 @@ class RewritingContext:
                 insert_len - insertion.scope._replacement_length()
             )
 
-    def _apply_function_insertion(
-        self, sym: gtirb.Symbol, block: gtirb.CodeBlock, patch: Patch
+    def _insert_function_stub(
+        self, sym: gtirb.Symbol, block: gtirb.CodeBlock
     ) -> None:
-        self._patch_id += 1
+        """
+        Inserts a stub that just contains a return instruction and
+        corresponding return edge.
+        """
+        assert sym.referent == block
+        assert block.size == 0
 
-        sym_block = sym.referent
-        assert isinstance(sym_block, gtirb.CodeBlock)
-        assert sym_block.size == 0 and not sym_block.byte_interval
-
-        # Create a Function object for our InsertionContext's sake. We'll make
-        # it real (ie be in the aux data table) afterwords.
         func_uuid = uuid.uuid4()
-        func = gtirb_functions.Function(
-            func_uuid, {sym_block}, {sym_block}, {sym}, set()
-        )
-        context = InsertionContext(self._module, func, sym_block, 0)
 
-        # Unlike normal patches, function patches cannot return None to cancel
-        # the insertion (since that would leave the Symbol pointing to an
-        # empty code block).
-        asm = patch.get_asm(context)
-        assert asm
+        # Our code block needs something in it for now, along with a return
+        # edge for callers to update. The actual instruction in the block
+        # doesn't matter, so we'll use a nop.
+        nop_encoding = self._isa.nop()
+        block.size = len(nop_encoding)
 
-        assembler = _Assembler(
-            self._module, self._patch_id, self._symbols_by_name,
-        )
-        try:
-            assembler.assemble(asm, patch.constraints.x86_syntax)
-        except mcasm.assembler.AsmSyntaxError as err:
-            self._log_patch_error(asm, patch, self._patch_id, err)
-            raise
-        assembler.finalize()
-
-        # Eliminate the first new block and make it be our symbol's block. We
-        # do this in case that we've had other callers to this symbol whose
-        # CFG edges now refer to the symbol's existing code block.
-        _substitute_block(
-            assembler.blocks[0],
-            sym_block,
-            assembler.cfg,
-            assembler.local_symbols.values(),
-        )
-        sym_block.size = assembler.blocks[0].size
-        assembler.blocks[0] = sym_block
-
-        bi = gtirb.ByteInterval(
-            contents=bytes(assembler.data),
-            blocks=assembler.blocks,
-            symbolic_expressions=assembler.symbolic_expressions,
-        )
+        bi = gtirb.ByteInterval(contents=nop_encoding, blocks=[block])
         sect = next(
             sect
             for sect in self._module.sections
-            if sect.name == assembler.section_name
+            if sect.name == _text_section_name(self._module)
         )
         sect.byte_intervals.add(bi)
-        self._module.ir.cfg.update(assembler.cfg)
-        self._module.symbols.update(assembler.local_symbols.values())
+
+        return_proxy = gtirb.ProxyBlock()
+        self._module.proxies.add(return_proxy)
+        self._module.ir.cfg.add(
+            gtirb.Edge(
+                source=block,
+                target=return_proxy,
+                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+            )
+        )
 
         # TODO: Should there be a mechanism for configuring this?
         if "elfSymbolInfo" in self._module.aux_data:
@@ -413,14 +400,43 @@ class RewritingContext:
                 0,
             )
 
-        self._module.aux_data["functionEntries"].data[func_uuid] = {sym_block}
+        if "functionEntries" in self._module.aux_data:
+            self._module.aux_data["functionEntries"].data[func_uuid] = {block}
 
-        self._module.aux_data["functionBlocks"].data[func_uuid] = set(
-            assembler.blocks[1:]
-        )
+        if "functionBlocks" in self._module.aux_data:
+            self._module.aux_data["functionBlocks"].data[func_uuid] = {block}
 
         if "functionNames" in self._module.aux_data:
             self._module.aux_data["functionNames"].data[func_uuid] = sym
+
+        self._functions_by_block[block] = func_uuid
+
+    def _apply_function_insertion(
+        self, sym: gtirb.Symbol, block: gtirb.CodeBlock, patch: Patch
+    ) -> None:
+        assert sym.referent == block
+        assert (
+            not patch.constraints.clobbers_registers
+        ), "function patches should not set clobbers_registers"
+        assert (
+            not patch.constraints.scratch_registers
+        ), "function patches should not set scratch_registers"
+        assert (
+            not patch.constraints.preserve_caller_saved_registers
+        ), "function patches should not set preserve_caller_saved_registers"
+        assert (
+            not patch.constraints.clobbers_flags
+        ), "function patches should not set clobbers_flags"
+        assert (
+            not patch.constraints.align_stack
+        ), "function patches should not set align_stack"
+
+        func = gtirb_functions.Function(
+            self._functions_by_block[block], {block}, {block}, {sym}, set()
+        )
+        context = InsertionContext(self._module, func, block, 0)
+
+        self._invoke_patch(func, block, 0, block.size, patch, context)
 
     def _validate_offset_and_length(
         self, block: gtirb.CodeBlock, offset: int, length: int
@@ -516,6 +532,20 @@ class RewritingContext:
         """
 
         with prepare_for_rewriting(self._module, self._isa.nop()):
+            self._functions_by_block = {
+                block: func.uuid
+                for func in self._functions
+                for block in func.get_all_blocks()
+            }
+
+            for func in self._function_insertions:
+                self._insert_function_stub(func.symbol, func.block)
+
+            for func in self._function_insertions:
+                self._apply_function_insertion(
+                    func.symbol, func.block, func.patch
+                )
+
             for f in self._functions:
                 func_insertions = [
                     insertion
@@ -537,11 +567,6 @@ class RewritingContext:
                         continue
 
                     self._apply_insertions(block_insertions, f, b)
-
-            for func in self._function_insertions:
-                self._apply_function_insertion(
-                    func.symbol, func.block, func.patch
-                )
 
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.

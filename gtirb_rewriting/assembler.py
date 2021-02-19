@@ -40,6 +40,7 @@ class _Assembler:
     :ivar ~.symbolic_expressions: A map of offset to symbolic expression,
                                   relative to the data position.
     :ivar ~.local_symbols: Symbols that were created in the patch.
+    :ivar ~.proxies: Proxy blocks that represent unknown targets.
     """
 
     def __init__(
@@ -65,6 +66,7 @@ class _Assembler:
         self.local_symbols = {}
         self._module_symbols = module_symbols
         self.section_name = None
+        self.proxies = set()
 
     @property
     def entry_block(self) -> gtirb.CodeBlock:
@@ -157,7 +159,23 @@ class _Assembler:
         self.data += data
         self.current_block.size += len(data)
 
-        if inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
+        if inst["desc"]["isReturn"]:
+            proxy = gtirb.ProxyBlock()
+            self.proxies.add(proxy)
+            self.cfg.add(
+                gtirb.Edge(
+                    source=self.current_block,
+                    target=proxy,
+                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+                )
+            )
+
+            next_block = gtirb.CodeBlock(
+                offset=self.current_block.offset + self.current_block.size
+            )
+            self.blocks.append(next_block)
+
+        elif inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
             assert not inst["desc"][
                 "isIndirectBranch"
             ], "Indirect branches are not yet supported"
