@@ -31,7 +31,7 @@ check-format:
 
 test:
   stage: test
-  image: ${DOCKER_REGISTRY}/rewriting/ddisasm/ubuntu20
+  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
   script:
     - mkdir pkgs
     - pushd pkgs
