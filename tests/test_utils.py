@@ -21,6 +21,7 @@
 # endorsement should be inferred.
 import logging
 import unittest.mock
+import uuid
 
 import capstone
 import gtirb
@@ -193,7 +194,16 @@ def test_insert_bytes():
     bi.symbolic_expressions[6] = gtirb.SymAddrConst(0, None)
     new_block = gtirb.CodeBlock(size=2)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 1, 0, b"\x08\x09", [new_block], gtirb.CFG(), {}, []
+        block=b,
+        offset=1,
+        replacement_length=0,
+        new_bytes=b"\x08\x09",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.size == 10
@@ -225,7 +235,16 @@ def test_insert_bytes_offset0():
     new_block = gtirb.CodeBlock(size=2)
     sym = gtirb.Symbol(name="hi", payload=new_block)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 0, 0, b"\x08\x09", [new_block], gtirb.CFG(), {}, [sym]
+        block=b,
+        offset=0,
+        replacement_length=0,
+        new_bytes=b"\x08\x09",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[sym],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.size == 10
@@ -287,7 +306,16 @@ def test_insert_bytes_last():
 
     new_block = gtirb.CodeBlock(size=1)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 2, 0, b"\x90", [new_block], gtirb.CFG(), {}, []
+        block=b,
+        offset=2,
+        replacement_length=0,
+        new_bytes=b"\x90",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == b"\x75\x00\x90\x50\x51"
@@ -343,7 +371,16 @@ def test_insert_bytes_last_no_fallthrough():
     )
     new_block = gtirb.CodeBlock(size=1)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 6, 0, b"\x90", [new_block], gtirb.CFG(), {}, []
+        block=b,
+        offset=6,
+        replacement_length=0,
+        new_bytes=b"\x90",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == b"\xB8\x2A\x00\x00\x00\xC3\x90"
@@ -386,7 +423,16 @@ def test_replace_bytes_offset0():
     new_block = gtirb.CodeBlock(size=1)
     sym = gtirb.Symbol(name="hi", payload=new_block)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 0, 1, b"\x08", [new_block], gtirb.CFG(), {}, [sym]
+        block=b,
+        offset=0,
+        replacement_length=1,
+        new_bytes=b"\x08",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[sym],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == b"\x00\x01\x08\x03\x04\x05\x06\x07"
@@ -434,7 +480,16 @@ def test_replace_bytes_last():
     bi.symbolic_expressions[2] = gtirb.SymAddrConst(0, extern_func_sym)
     new_block = gtirb.CodeBlock(size=1)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 1, 5, b"\x90", [new_block], gtirb.CFG(), {}, []
+        block=b,
+        offset=1,
+        replacement_length=5,
+        new_bytes=b"\x90",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == b"\x57\x90\x0f\x0b"
@@ -494,7 +549,16 @@ def test_replace_bytes_all():
     bi.symbolic_expressions[2] = gtirb.SymAddrConst(0, extern_func_sym)
     new_block = gtirb.CodeBlock(size=1)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 0, b.size, b"\x90", [new_block], gtirb.CFG(), {}, []
+        block=b,
+        offset=0,
+        replacement_length=b.size,
+        new_bytes=b"\x90",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == b"\x90\x0f\x0b"
@@ -560,14 +624,16 @@ def test_replace_bytes_with_trailing_zerosized_block():
         )
     )
     gtirb_rewriting.utils._modify_block_insert(
-        b,
-        1,
-        5,
-        b"\xEB\x00\x00\x00\x00",
-        [new_block, new_block2],
-        new_cfg,
-        {1: gtirb.SymAddrConst(0, foo_symbol)},
-        [foo_symbol],
+        block=b,
+        offset=1,
+        replacement_length=5,
+        new_bytes=b"\xEB\x00\x00\x00\x00",
+        new_blocks=[new_block, new_block2],
+        new_cfg=new_cfg,
+        new_symbolic_expressions={1: gtirb.SymAddrConst(0, foo_symbol)},
+        new_symbols=[foo_symbol],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == b"\x57\xEB\x00\x00\x00\x00\x0f\x0b"
@@ -608,7 +674,16 @@ def test_replace_bytes_in_place_no_symbol():
     b.byte_interval = bi
     new_block = gtirb.CodeBlock(size=1)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 1, 1, b"\x57", [new_block], gtirb.CFG(), {}, []
+        block=b,
+        offset=1,
+        replacement_length=1,
+        new_bytes=b"\x57",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == bytearray(b"\x50\x57\x52")
@@ -636,7 +711,16 @@ def test_replace_bytes_in_place_with_symbol():
     new_block = gtirb.CodeBlock(size=1)
     new_sym = gtirb.Symbol("new", payload=new_block)
     gtirb_rewriting.utils._modify_block_insert(
-        b, 1, 1, b"\x57", [new_block], gtirb.CFG(), {}, [new_sym]
+        block=b,
+        offset=1,
+        replacement_length=1,
+        new_bytes=b"\x57",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[new_sym],
+        new_proxy_blocks=set(),
+        functions_by_block={},
     )
     assert bi.address == 0x1000
     assert bi.contents == bytearray(b"\x50\x57\x52")
@@ -654,3 +738,400 @@ def test_replace_bytes_in_place_with_symbol():
     assert len(edges) == 1
     assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
     assert edges[0].target == new_block
+
+
+def test_insert_call_edges():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(address=0x1000)
+    bi.section = s
+
+    # This mimics a function that's present in the binary but not called
+    func1_block_content = b"\xC3"
+    func1_block = gtirb.CodeBlock(offset=0, size=len(func1_block_content))
+    func1_block.byte_interval = bi
+    bi.contents += func1_block_content
+    bi.size += len(func1_block_content)
+
+    return_proxy = gtirb.ProxyBlock()
+    m.proxies.add(return_proxy)
+    ir.cfg.add(
+        gtirb.Edge(
+            source=func1_block,
+            target=return_proxy,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+        )
+    )
+    func1_sym = gtirb.Symbol(name="func1", payload=func1_block)
+    m.symbols.add(func1_sym)
+
+    # We need functions because that's how we determine which return edges to
+    # update.
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: func1_sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    functions_by_block = {func1_block: func_uuid}
+
+    # Now another block that's just a nop for us to insert into
+    b_content = b"\x90"
+    b = gtirb.CodeBlock(offset=bi.size, size=len(b_content))
+    b.byte_interval = bi
+    bi.contents += b_content
+    bi.size += len(b_content)
+
+    # This mimics a patch of:
+    #   call func1
+    #   nop
+    new_block = gtirb.CodeBlock(size=5)
+    new_block2 = gtirb.CodeBlock(size=1)
+    new_cfg = gtirb.CFG()
+    new_cfg.add(
+        gtirb.Edge(
+            source=new_block,
+            target=func1_block,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Call),
+        )
+    )
+    new_cfg.add(
+        gtirb.Edge(
+            source=new_block,
+            target=new_block2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    gtirb_rewriting.utils._modify_block_insert(
+        block=b,
+        offset=0,
+        replacement_length=0,
+        new_bytes=b"\xEB\x00\x00\x00\x00\x90",
+        new_blocks=[new_block, new_block2],
+        new_cfg=new_cfg,
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block=functions_by_block,
+    )
+
+    assert bi.contents == b"\xc3\xEB\x00\x00\x00\x00\x90\x90"
+
+    return_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Return
+    ]
+    assert len(return_edges) == 1
+    assert return_edges[0].source == func1_block
+    assert return_edges[0].target == new_block2
+
+
+def test_remove_call_edges():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(address=0x1000)
+    bi.section = s
+
+    # This mimics a function that's present in the binary and has one caller
+    func1_block_content = b"\xC3"
+    func1_block = gtirb.CodeBlock(
+        offset=bi.size, size=len(func1_block_content)
+    )
+    func1_block.byte_interval = bi
+    bi.contents += func1_block_content
+    bi.size += len(func1_block_content)
+
+    func1_sym = gtirb.Symbol(name="func1", payload=func1_block)
+    m.symbols.add(func1_sym)
+
+    # We need functions because that's how we determine which return edges to
+    # update.
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: func1_sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    functions_by_block = {func1_block: func_uuid}
+
+    # Now another bit of code that calls it
+    b_content = b"\xEB\x00\x00\x00\x00"
+    b = gtirb.CodeBlock(offset=bi.size, size=len(b_content))
+    b.byte_interval = bi
+    bi.contents += b_content
+    bi.size += len(b_content)
+
+    b2_content = b"\x90"
+    b2 = gtirb.CodeBlock(offset=bi.size, size=len(b2_content))
+    b2.byte_interval = bi
+    bi.contents += b2_content
+    bi.size += len(b2_content)
+
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=func1_block,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Call),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=func1_block,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+        )
+    )
+
+    # This mimics a patch of:
+    #   nop
+    new_block = gtirb.CodeBlock(size=1)
+    gtirb_rewriting.utils._modify_block_insert(
+        block=b,
+        offset=0,
+        replacement_length=5,
+        new_bytes=b"\x90",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block=functions_by_block,
+    )
+
+    assert bi.contents == b"\xc3\x90\x90"
+
+    call_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Call
+    ]
+    assert not call_edges
+
+    return_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Return
+    ]
+    assert len(return_edges) == 1
+    assert return_edges[0].source == func1_block
+    assert isinstance(return_edges[0].target, gtirb.ProxyBlock)
+    assert return_edges[0].target in m.proxies
+
+
+def test_insert_after_call_edges():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(address=0x1000)
+    bi.section = s
+
+    # This mimics a function that's present in the binary and has one caller
+    func1_block_content = b"\xC3"
+    func1_block = gtirb.CodeBlock(
+        offset=bi.size, size=len(func1_block_content)
+    )
+    func1_block.byte_interval = bi
+    bi.contents += func1_block_content
+    bi.size += len(func1_block_content)
+
+    func1_sym = gtirb.Symbol(name="func1", payload=func1_block)
+    m.symbols.add(func1_sym)
+
+    # We need functions because that's how we determine which return edges to
+    # update.
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: func1_sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    functions_by_block = {func1_block: func_uuid}
+
+    # Now another bit of code that calls it
+    b_content = b"\xEB\x00\x00\x00\x00"
+    b = gtirb.CodeBlock(offset=bi.size, size=len(b_content))
+    b.byte_interval = bi
+    bi.contents += b_content
+    bi.size += len(b_content)
+
+    b2_content = b"\x90"
+    b2 = gtirb.CodeBlock(offset=bi.size, size=len(b2_content))
+    b2.byte_interval = bi
+    bi.contents += b2_content
+    bi.size += len(b2_content)
+
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=func1_block,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Call),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=func1_block,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+        )
+    )
+
+    # This mimics a patch of:
+    #   nop
+    new_block = gtirb.CodeBlock(size=1)
+    gtirb_rewriting.utils._modify_block_insert(
+        block=b,
+        offset=5,
+        replacement_length=0,
+        new_bytes=b"\x90",
+        new_blocks=[new_block],
+        new_cfg=gtirb.CFG(),
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks=set(),
+        functions_by_block=functions_by_block,
+    )
+
+    assert bi.contents == b"\xc3\xEB\x00\x00\x00\x00\x90\x90"
+
+    return_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Return
+    ]
+    assert len(return_edges) == 1
+    assert return_edges[0].source == func1_block
+    assert return_edges[0].target == new_block
+
+
+def test_new_return_edges():
+    ir = gtirb.IR()
+    m = gtirb.Module(isa=gtirb.Module.ISA.X64, name="test")
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(address=0x1000)
+    bi.section = s
+
+    # This mimics a function that's present in the binary and has one caller
+    func1_block_content = b"\xC3"
+    func1_block = gtirb.CodeBlock(
+        offset=bi.size, size=len(func1_block_content)
+    )
+    func1_block.byte_interval = bi
+    bi.contents += func1_block_content
+    bi.size += len(func1_block_content)
+
+    func1_sym = gtirb.Symbol(name="func1", payload=func1_block)
+    m.symbols.add(func1_sym)
+
+    # We need functions because that's how we determine which return edges to
+    # update.
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: func1_sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {func1_block}}
+    )
+    functions_by_block = {func1_block: func_uuid}
+
+    # Now another bit of code that calls it
+    b_content = b"\xEB\x00\x00\x00\x00"
+    b = gtirb.CodeBlock(offset=bi.size, size=len(b_content))
+    b.byte_interval = bi
+    bi.contents += b_content
+    bi.size += len(b_content)
+
+    b2_content = b"\x90"
+    b2 = gtirb.CodeBlock(offset=bi.size, size=len(b2_content))
+    b2.byte_interval = bi
+    bi.contents += b2_content
+    bi.size += len(b2_content)
+
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=func1_block,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Call),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=b,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+    ir.cfg.add(
+        gtirb.Edge(
+            source=func1_block,
+            target=b2,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+        )
+    )
+
+    # This mimics a patch of:
+    #   ret
+    new_block = gtirb.CodeBlock(size=1)
+    new_block2 = gtirb.CodeBlock(size=0)
+    return_proxy = gtirb.ProxyBlock()
+    new_cfg = gtirb.CFG()
+    new_cfg.add(
+        gtirb.Edge(
+            source=new_block,
+            target=return_proxy,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+        )
+    )
+    gtirb_rewriting.utils._modify_block_insert(
+        block=func1_block,
+        offset=0,
+        replacement_length=0,
+        new_bytes=b"\xC3",
+        new_blocks=[new_block, new_block2],
+        new_cfg=new_cfg,
+        new_symbolic_expressions={},
+        new_symbols=[],
+        new_proxy_blocks={return_proxy},
+        functions_by_block=functions_by_block,
+    )
+
+    assert bi.contents == b"\xC3\xC3\xEB\x00\x00\x00\x00\x90"
+
+    return_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Return
+    ]
+    assert len(return_edges) == 2
+    assert return_edges[0].target == b2
+    assert return_edges[1].target == b2
+    assert return_proxy not in m.proxies

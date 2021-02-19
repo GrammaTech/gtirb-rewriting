@@ -332,3 +332,128 @@ def test_conflicting_insertion_replacement():
     )
     with pytest.raises(AssertionError):
         ctx.apply()
+
+
+def test_inserting_function_and_call():
+    ir = gtirb.IR()
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(contents=b"\x90", address=0x1000)
+    bi.section = s
+    main_block = gtirb.CodeBlock(offset=0, size=bi.size)
+    main_block.byte_interval = bi
+    main_sym = gtirb.Symbol(name="main", payload=main_block)
+    m.symbols.add(main_sym)
+    func_uuid = uuid.uuid4()
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={func_uuid: main_sym}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {main_block}}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={func_uuid: {main_block}}
+    )
+    m.aux_data["binaryType"] = gtirb.AuxData(
+        type_name="vector<string>", data=["DYN"]
+    )
+
+    functions = gtirb_functions.Function.build_functions(m)
+    assert len(functions) == 1
+
+    @gtirb_rewriting.patch_constraints()
+    def function_patch(ctx):
+        return "mov $42, %eax; ret"
+
+    @gtirb_rewriting.patch_constraints()
+    def call_patch(ctx):
+        return "call target"
+
+    ctx = gtirb_rewriting.RewritingContext(m, functions)
+    target_sym = ctx.register_insert_function(
+        "target", gtirb_rewriting.Patch.from_function(function_patch)
+    )
+    ctx.insert_at(
+        functions[0],
+        main_block,
+        0,
+        gtirb_rewriting.Patch.from_function(call_patch),
+    )
+    ctx.apply()
+
+    # Look for call edges and return edges in the CFG
+    call_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Call
+    ]
+    assert len(call_edges) == 1
+    assert call_edges[0].source == main_block
+    assert call_edges[0].target == target_sym.referent
+
+    return_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Return
+    ]
+    assert len(return_edges) == 1
+    assert not isinstance(return_edges[0].target, gtirb.ProxyBlock)
+
+
+def test_inserting_function_calling_inserted_function():
+    ir = gtirb.IR()
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    m.ir = ir
+    s = gtirb.Section(name=".text")
+    s.module = m
+    bi = gtirb.ByteInterval(contents=b"", address=0x1000)
+    bi.section = s
+    m.aux_data["functionNames"] = gtirb.AuxData(
+        type_name="mapping<uuid,uuid>", data={}
+    )
+    m.aux_data["functionEntries"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={}
+    )
+    m.aux_data["functionBlocks"] = gtirb.AuxData(
+        type_name="mapping<uuid,set<uuid>>", data={}
+    )
+    m.aux_data["binaryType"] = gtirb.AuxData(
+        type_name="vector<string>", data=["DYN"]
+    )
+
+    @gtirb_rewriting.patch_constraints()
+    def target_function_patch(ctx):
+        return "mov $42, %eax; ret"
+
+    @gtirb_rewriting.patch_constraints()
+    def call_function_patch(ctx):
+        return "call target; ud2"
+
+    ctx = gtirb_rewriting.RewritingContext(m, [])
+    caller_sym = ctx.register_insert_function(
+        "caller", gtirb_rewriting.Patch.from_function(call_function_patch)
+    )
+    target_sym = ctx.register_insert_function(
+        "target", gtirb_rewriting.Patch.from_function(target_function_patch)
+    )
+    ctx.apply()
+
+    # Look for call edges and return edges in the CFG
+    call_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Call
+    ]
+    assert len(call_edges) == 1
+    assert call_edges[0].source == caller_sym.referent
+    assert call_edges[0].target == target_sym.referent
+
+    return_edges = [
+        edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Return
+    ]
+    assert len(return_edges) == 1
+    assert not isinstance(return_edges[0].target, gtirb.ProxyBlock)

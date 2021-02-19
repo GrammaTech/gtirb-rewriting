@@ -20,7 +20,9 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import logging
+import uuid
 from typing import (
+    Container,
     Dict,
     Iterable,
     Iterator,
@@ -28,6 +30,7 @@ from typing import (
     Mapping,
     MutableMapping,
     Sequence,
+    Set,
     TypeVar,
     Union,
     overload,
@@ -215,6 +218,206 @@ def _is_fallthrough_edge(edge: gtirb.Edge) -> bool:
     return edge.label and edge.label.type == gtirb.Edge.Type.Fallthrough
 
 
+def _is_return_edge(edge: gtirb.Edge) -> bool:
+    return edge.label and edge.label.type == gtirb.Edge.Type.Return
+
+
+def _is_call_edge(edge: gtirb.Edge) -> bool:
+    return edge.label and edge.label.type == gtirb.Edge.Type.Call
+
+
+def _block_return_edges(block: gtirb.CodeBlock) -> Set[gtirb.Edge]:
+    return {edge for edge in block.outgoing_edges if _is_return_edge(edge)}
+
+
+def _block_fallthrough_targets(block: gtirb.CodeBlock) -> Set[gtirb.CodeBlock]:
+    return {
+        edge.target
+        for edge in block.outgoing_edges
+        if _is_fallthrough_edge(edge)
+    }
+
+
+def _get_function_blocks(
+    module: gtirb.Module, func_uuid: uuid.UUID
+) -> Set[gtirb.CodeBlock]:
+    """
+    Gets all blocks associated with a function.
+    """
+    if "functionBlocks" in module.aux_data:
+        return module.aux_data["functionBlocks"].data[func_uuid]
+    else:
+        return set()
+
+
+def _add_return_edges_to_one_function(
+    module: gtirb.Module,
+    func_uuid: uuid.UUID,
+    return_target: gtirb.CodeBlock,
+    new_cfg: gtirb.CFG,
+) -> None:
+    """
+    Adds a new return edge to all returns in the function.
+    """
+    for block in _get_function_blocks(module, func_uuid):
+        return_edges = _block_return_edges(block)
+        if not return_edges:
+            continue
+
+        for return_edge in return_edges:
+            if isinstance(return_edge.target, gtirb.ProxyBlock):
+                # We are intentionally leaving the proxy block in the module's
+                # proxies.
+                block.ir.cfg.discard(return_edge)
+
+        new_cfg.add(
+            gtirb.Edge(
+                source=block,
+                target=return_target,
+                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+            )
+        )
+
+
+def _add_return_edges_for_patch_calls(
+    module: gtirb.Module,
+    functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
+    new_cfg: gtirb.CFG,
+) -> None:
+    """
+    Finds all of the call edges added by the patch and adds new return edges
+    to the callee.
+    """
+    call_edges = {edge for edge in new_cfg if _is_call_edge(edge)}
+    for call_edge in call_edges:
+        func_uuid = functions_by_block.get(call_edge.target, None)
+        if not func_uuid:
+            continue
+
+        fallthrough_targets = [
+            edge.target
+            for edge in new_cfg
+            if edge.source == call_edge.source and _is_fallthrough_edge(edge)
+        ]
+        if not fallthrough_targets:
+            continue
+
+        # Because the assembler is generating this input, we can assert that
+        # there's only the single fallthrough target.
+        assert len(fallthrough_targets) == 1
+        _add_return_edges_to_one_function(
+            module, func_uuid, fallthrough_targets[0], new_cfg
+        )
+
+
+def _update_patch_return_edges_to_match(
+    block: gtirb.CodeBlock,
+    functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
+    new_cfg: gtirb.CFG,
+    new_proxy_blocks: Set[gtirb.ProxyBlock],
+) -> None:
+    """
+    Finds all return edges in a patch and updates them to match the function
+    being inserted into.
+    """
+    func_uuid = functions_by_block.get(block, None)
+    if not func_uuid:
+        return
+
+    return_targets = set()
+    for func_block in _get_function_blocks(block.module, func_uuid):
+        return_targets.update(
+            edge.target
+            for edge in func_block.outgoing_edges
+            if _is_return_edge(edge)
+            and not isinstance(edge.target, gtirb.ProxyBlock)
+        )
+
+    if not return_targets:
+        return
+
+    patch_return_edges = {edge for edge in new_cfg if _is_return_edge(edge)}
+    for edge in patch_return_edges:
+        assert isinstance(edge.target, gtirb.ProxyBlock)
+        new_cfg.discard(edge)
+        new_proxy_blocks.discard(edge.target)
+        for target in return_targets:
+            new_cfg.add(
+                gtirb.Edge(
+                    source=edge.source,
+                    target=target,
+                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+                )
+            )
+
+
+def _update_return_edges_from_removing_call(
+    call_edge: gtirb.Edge,
+    fallthrough_targets: Container[gtirb.CodeBlock],
+    functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
+    new_cfg: gtirb.CFG,
+) -> None:
+    """
+    Updates return edges due to removing a call edge.
+    """
+    if isinstance(call_edge.target, gtirb.ProxyBlock):
+        return
+
+    func_uuid = functions_by_block.get(call_edge.target, None)
+    if not func_uuid:
+        return
+
+    for block in _get_function_blocks(call_edge.target.module, func_uuid):
+        return_edges = _block_return_edges(block)
+        if not return_edges:
+            continue
+
+        remaining_edges = set()
+        for edge in return_edges:
+            if edge.target in fallthrough_targets:
+                block.ir.cfg.discard(edge)
+            else:
+                remaining_edges.add(edge)
+
+        if not remaining_edges:
+            proxy = gtirb.ProxyBlock()
+            new_cfg.add(
+                gtirb.Edge(
+                    source=block,
+                    target=proxy,
+                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+                )
+            )
+            block.module.proxies.add(proxy)
+
+
+def _update_return_edges_from_changing_fallthrough(
+    call_edge: gtirb.Edge,
+    fallthrough_targets: Container[gtirb.CodeBlock],
+    functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
+    new_fallthrough: gtirb.CodeBlock,
+    new_cfg: gtirb.CFG,
+) -> None:
+    """
+    Updates all return edges in a function that point to a given return target
+    to point to a new target.
+    """
+    if isinstance(call_edge.target, gtirb.ProxyBlock):
+        return
+
+    target_func_uuid = functions_by_block.get(call_edge.target, None)
+    if not target_func_uuid:
+        return
+
+    for target_block in _get_function_blocks(
+        call_edge.target.module, target_func_uuid
+    ):
+        for edge in _block_return_edges(target_block):
+            if edge.target in fallthrough_targets:
+                target_block.ir.cfg.discard(edge)
+                new_cfg.add(edge._replace(target=new_fallthrough))
+
+
 def _modify_block_insert(
     block: gtirb.CodeBlock,
     offset: int,
@@ -224,6 +427,8 @@ def _modify_block_insert(
     new_cfg: gtirb.CFG,
     new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
     new_symbols: Iterable[gtirb.Symbol],
+    new_proxy_blocks: Set[gtirb.ProxyBlock],
+    functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
 ) -> None:
     """
     Insert bytes into a block and adjusts the IR as needed.
@@ -238,6 +443,8 @@ def _modify_block_insert(
                                      the new content, with the keys relative
                                      to the start of `new_bytes`.
     :param new_symbols: Any symbols that may be defined in the new content.
+    :param new_proxy_blocks: All proxy blocks used by the new content.
+    :param functions_by_block: Map from code block to containing function UUID.
     """
 
     assert block.size
@@ -258,6 +465,13 @@ def _modify_block_insert(
     bi = block.byte_interval
     assert bi
 
+    _add_return_edges_for_patch_calls(
+        block.module, functions_by_block, new_cfg
+    )
+    _update_patch_return_edges_to_match(
+        block, functions_by_block, new_cfg, new_proxy_blocks
+    )
+
     # Adjust codeblock sizes, create CFG edges, remove 0-size blocks
     _modify_block_insert_cfg(
         block,
@@ -268,6 +482,7 @@ def _modify_block_insert(
         new_cfg,
         new_symbolic_expressions,
         new_symbols,
+        functions_by_block,
     )
 
     size_delta = len(new_bytes) - replacement_length
@@ -311,6 +526,7 @@ def _modify_block_insert(
 
     bi.ir.cfg.update(new_cfg)
     bi.module.symbols.update(new_symbols)
+    bi.module.proxies.update(new_proxy_blocks)
 
     # adjust aux data if present
     def update_aux_data_keyed_by_offset(name):
@@ -341,6 +557,7 @@ def _modify_block_insert_cfg(
     new_cfg: gtirb.CFG,
     new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
     new_symbols: Iterable[gtirb.Symbol],
+    functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
 ) -> None:
     """
     Adjust codeblock sizes, create CFG edges, remove 0-size blocks.
@@ -355,9 +572,11 @@ def _modify_block_insert_cfg(
                                      the new content, with the keys relative
                                      to the start of `new_bytes`.
     :param new_symbols: Any symbols that may be defined in the new content.
+    :param functions_by_block: Map from code block to containing function UUID.
     """
 
     bi = block.byte_interval
+
     original_size = block.size
     inserts_at_end = not replacement_length and offset == block.size
     replaces_last_instruction = (
@@ -388,9 +607,7 @@ def _modify_block_insert_cfg(
     # Now add a fallthrough edge from the original block to the first patch
     # block, unless we're inserting at the end of the block and the block has
     # no fallthrough edges. For example, inserting after a ret instruction.
-    if not inserts_at_end or any(
-        edge for edge in block.outgoing_edges if _is_fallthrough_edge(edge)
-    ):
+    if not inserts_at_end or any(_block_fallthrough_targets(block)):
         new_cfg.add(
             gtirb.Edge(
                 source=block,
@@ -402,15 +619,32 @@ def _modify_block_insert_cfg(
     # Alter any outgoing edges from the original block to originate from the
     # last patch block.
     if inserts_at_end:
+        fallthrough_targets = _block_fallthrough_targets(block)
+
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
                 bi.ir.cfg.discard(edge)
                 new_cfg.add(edge._replace(source=new_blocks[-1]))
+            elif _is_call_edge(edge):
+                _update_return_edges_from_changing_fallthrough(
+                    edge,
+                    fallthrough_targets,
+                    functions_by_block,
+                    new_blocks[-1],
+                    new_cfg,
+                )
     elif replaces_last_instruction:
+        fallthrough_targets = _block_fallthrough_targets(block)
+
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
                 bi.ir.cfg.discard(edge)
                 new_cfg.add(edge._replace(source=new_blocks[-1]))
+            elif _is_call_edge(edge):
+                _update_return_edges_from_removing_call(
+                    edge, fallthrough_targets, functions_by_block, new_cfg
+                )
+                bi.ir.cfg.discard(edge)
             else:
                 bi.ir.cfg.discard(edge)
     else:
@@ -478,6 +712,15 @@ def _is_elf_pie(module: gtirb.Module) -> bool:
         module.file_format == gtirb.Module.FileFormat.ELF
         and "DYN" in module.aux_data["binaryType"].data
     )
+
+
+def _text_section_name(module: gtirb.Module):
+    if module.file_format == gtirb.Module.FileFormat.ELF:
+        return ".text"
+    elif module.file_format == gtirb.Module.FileFormat.PE:
+        return ".text"
+    else:
+        assert False, f"unsupported file format: {module.file_format}"
 
 
 def decorate_extern_symbol(module: gtirb.Module, sym: str) -> str:
