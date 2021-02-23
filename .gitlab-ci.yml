@@ -81,6 +81,7 @@ external-pypi:
   stage: deploy
   only: [main]
   script:
+    - apt update -y && apt install -y curl
     - pip3 install .
     - VERSION=$(python3 -c "import gtirb_rewriting; print(gtirb_rewriting.__version__)")
     - RESPONSE_CODE=$(curl -Ls -o /dev/null -w "%{http_code}" https://pypi.org/project/gtirb-rewriting/${VERSION}/)
