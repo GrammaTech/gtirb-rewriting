@@ -683,7 +683,7 @@ def _modify_block_insert_cfg(
             # If nothing refers to the block, we can simply drop it and any
             # outgoing edges that may have been added to it from the earlier
             # steps.
-            for out_edge in new_cfg.out_edges(new_blocks[-1]):
+            for out_edge in set(new_cfg.out_edges(new_blocks[-1])):
                 new_cfg.discard(out_edge)
             del new_blocks[-1]
         elif len(fallthrough_edges) == 1:
