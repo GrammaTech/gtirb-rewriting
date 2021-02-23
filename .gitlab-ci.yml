@@ -76,3 +76,18 @@ internal-pypi:
       then
         exit 1;
       fi
+
+external-pypi:
+  stage: deploy
+  only: [master]
+  script:
+    - pip3 install .
+    - VERSION=$(python3 -c "import gtirb_rewriting; print(gtirb_rewriting.__version__)")
+    - RESPONSE_CODE=$(curl -Ls -o /dev/null -w "%{http_code}" https://pypi.org/project/gtirb-rewriting/${VERSION}/)
+    - if [ "$RESPONSE_CODE" = "404" ];
+      then
+        pip3 install twine wheel setuptools --upgrade;
+        python3 setup.py sdist bdist_wheel
+        twine check dist/*;
+        twine upload dist/* -u __token__ -p $PYPI_API_KEY;
+      fi
