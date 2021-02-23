@@ -4,16 +4,25 @@
 
 The gtirb-rewriting package provides a Python API for rewriting GTIRB files.
 
+## Getting Started
+
+See the documentation in the [Getting Started guide](doc/Getting-Started.md).
+
 ## Design
 
 A `Pass` registers changes to be made in a module with the `RewritingContext`
-passed to `begin_module`. Each change has a given `Scope` and a `Patch` to
-apply.
+passed to `begin_module`.
 
-The `Scope` allows the pass to declaratively state where the patch should be
-applied. Currently supported is `AllBlocksScope` to insert in every basic block
-and `AllFunctionsScope` to insert into every function's entry blocks or exit
-blocks.
+When using `RewritingContext.register_insert`, each change has a given `Scope`
+and a `Patch` to apply. The `Scope` allows the pass to declaratively state
+where the patch should be applied. Currently supported are:
+* `AllBlocksScope` to insert in every basic block
+* `AllFunctionsScope` to insert into every function's entry blocks or exit
+   blocks.
+* `SingleBlockScope` to insert at a specific block
+
+Alternatively, `RewritingContext.insert_at` and `RewritingConext.replace_at`
+take an exact location of function / block / offset to insert at.
 
 A `Patch` consists of a method to generate an assembly string and a
 `Constraints` object that describes metadata about the assembly (e.g. what
