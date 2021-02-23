@@ -63,7 +63,7 @@ build:
 
 internal-pypi:
   stage: deploy
-  only: [master]
+  only: [main]
   script:
     - pip3 install twine wheel setuptools --upgrade
     - rm -rf build dist *.egg-info
@@ -79,7 +79,7 @@ internal-pypi:
 
 external-pypi:
   stage: deploy
-  only: [master]
+  only: [main]
   script:
     - pip3 install .
     - VERSION=$(python3 -c "import gtirb_rewriting; print(gtirb_rewriting.__version__)")
