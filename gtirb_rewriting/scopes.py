@@ -26,7 +26,7 @@ import capstone
 import gtirb
 import gtirb_functions
 
-from .utils import _nonterminator_instructions
+from .utils import _is_partial_disassembly, _nonterminator_instructions
 
 ENTRYPOINT_NAME = "\0"
 """
@@ -304,14 +304,17 @@ def _potential_offsets_in_block(
     if block_position == BlockPosition.ENTRY:
         yield 0
     elif block_position == BlockPosition.ANYWHERE:
-        assert disassembly
+        assert disassembly is not None
         offset = 0
         for inst in _nonterminator_instructions(block, disassembly):
             yield offset
             offset += inst.size
         yield offset
     elif block_position == BlockPosition.EXIT:
-        assert disassembly
+        assert disassembly is not None
+        assert not _is_partial_disassembly(
+            block, disassembly
+        ), "Capstone failed to disassemble all instructions in target block"
         yield sum(
             inst.size
             for inst in _nonterminator_instructions(block, disassembly)
