@@ -88,7 +88,7 @@ external-pypi:
     - if [ "$RESPONSE_CODE" = "404" ];
       then
         pip3 install twine wheel setuptools --upgrade;
-        python3 setup.py sdist bdist_wheel
+        python3 setup.py sdist bdist_wheel;
         twine check dist/*;
         twine upload dist/* -u __token__ -p $PYPI_API_KEY;
       fi
