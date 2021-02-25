@@ -333,6 +333,11 @@ def _update_patch_return_edges_to_match(
     Finds all return edges in a patch and updates them to match the function
     being inserted into.
     """
+
+    patch_return_edges = {edge for edge in new_cfg if _is_return_edge(edge)}
+    if not patch_return_edges:
+        return
+
     func_uuid = functions_by_block.get(block, None)
     if not func_uuid:
         return
@@ -349,7 +354,6 @@ def _update_patch_return_edges_to_match(
     if not return_targets:
         return
 
-    patch_return_edges = {edge for edge in new_cfg if _is_return_edge(edge)}
     for edge in patch_return_edges:
         assert isinstance(edge.target, gtirb.ProxyBlock)
         new_cfg.discard(edge)
