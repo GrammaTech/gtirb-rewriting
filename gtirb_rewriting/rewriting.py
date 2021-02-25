@@ -37,6 +37,7 @@ from .isa import _get_isa
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
+    _is_partial_disassembly,
     _modify_block_insert,
     _text_section_name,
     decorate_extern_symbol,
@@ -451,18 +452,18 @@ class RewritingContext:
         assert offset + length <= block.size
 
         if self._expensive_assertions:
-            legal_offsets = {
-                0,
-                *itertools.accumulate(
-                    inst.size for inst in self._decoder.get_instructions(block)
-                ),
-            }
-            assert (
-                offset in legal_offsets
-            ), f"offset {offset} is not an instruction boundary"
-            assert (
-                offset + length in legal_offsets
-            ), f"offset {offset}+{length} is not an instruction boundary"
+            disassembly = tuple(self._decoder.get_instructions(block))
+            if not _is_partial_disassembly(block, disassembly):
+                legal_offsets = {
+                    0,
+                    *itertools.accumulate(inst.size for inst in disassembly),
+                }
+                assert (
+                    offset in legal_offsets
+                ), f"offset {offset} is not an instruction boundary"
+                assert (
+                    offset + length in legal_offsets
+                ), f"offset {offset}+{length} is not an instruction boundary"
 
     def register_insert(self, scope: Scope, patch: Patch) -> None:
         """

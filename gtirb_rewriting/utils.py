@@ -149,6 +149,16 @@ def _target_triple(module: gtirb.Module) -> str:
     return f"{arch}-{vendor}-{os}"
 
 
+def _is_partial_disassembly(
+    block: gtirb.CodeBlock, disassembly: Iterable[capstone.CsInsn]
+) -> bool:
+    """
+    Determines if disassembly of a block is complete or only partial, which
+    can happen when capstone is unable to disassemble an instruction.
+    """
+    return sum(inst.size for inst in disassembly) != block.size
+
+
 def _nonterminator_instructions(
     block: gtirb.CodeBlock, disassembly: Sequence[capstone.CsInsn]
 ) -> Iterator[capstone.CsInsn]:
@@ -185,8 +195,11 @@ def show_block_asm(
         decoder = GtirbInstructionDecoder(arch)
 
     if block.contents:
-        for i in decoder.get_instructions(block):
+        instructions = tuple(decoder.get_instructions(block))
+        for i in instructions:
             logger.debug("\t0x%x:\t%s\t%s", i.address, i.mnemonic, i.op_str)
+        if _is_partial_disassembly(block, instructions):
+            logger.debug("\t<incomplete disassembly>")
 
 
 def _substitute_block(
