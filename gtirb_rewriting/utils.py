@@ -333,8 +333,11 @@ def _update_patch_return_edges_to_match(
     Finds all return edges in a patch and updates them to match the function
     being inserted into.
     """
-
-    patch_return_edges = {edge for edge in new_cfg if _is_return_edge(edge)}
+    patch_return_edges = {
+        edge
+        for edge in new_cfg
+        if _is_return_edge(edge) and edge.target in new_proxy_blocks
+    }
     if not patch_return_edges:
         return
 
