@@ -143,6 +143,73 @@ class _ISA:
         raise NotImplementedError
 
 
+class _IA32(_ISA):
+    def save_register(
+        self, register: Register
+    ) -> Tuple[_AsmSnippet, _AsmSnippet]:
+        return (
+            _AsmSnippet(f"push %{register}"),
+            _AsmSnippet(f"pop %{register}"),
+        )
+
+    def save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+        # TODO: Replace this with something more efficient.
+        return _AsmSnippet("pushfd"), _AsmSnippet("popfd")
+
+    def align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+        return (
+            _AsmSnippet(
+                """
+                push   %eax
+                mov    %esp, %eax
+                lea    -0x80(%esp), %esp
+                and    $-0x10, %esp
+                push   %eax
+                push   %eax
+            """
+            ),
+            _AsmSnippet(
+                """
+                pop    %eax
+                mov    %eax, %esp
+                pop    %eax
+            """
+            ),
+        )
+
+    def all_registers(self) -> List[Register]:
+        return [
+            Register({"8l": "al", "8h": "ah", "16": "ax", "32": "eax"}, "32",),
+            Register({"8l": "bl", "8h": "bh", "16": "bx", "32": "ebx"}, "32",),
+            Register({"8l": "cl", "8h": "ch", "16": "cx", "32": "ecx"}, "32",),
+            Register({"8l": "dl", "8h": "dh", "16": "dx", "32": "edx"}, "32",),
+            Register({"8l": "sil", "16": "si", "32": "esi"}, "32"),
+            Register({"8l": "dil", "16": "di", "32": "edi"}, "32"),
+        ]
+
+    def nop(self) -> bytes:
+        return b"\x90"
+
+    def pointer_size(self) -> int:
+        return 4
+
+    def stack_register(self) -> Register:
+        return Register({"16": "sp", "32": "esp"}, "32",)
+
+
+class _IA32_PE(_IA32):
+    def caller_saved_registers(self) -> Set[Register]:
+        return {self.get_register(name) for name in ("EAX", "ECX", "EDX")}
+
+    def calling_convention(self) -> CallingConventionDesc:
+        return CallingConventionDesc(
+            registers=(),
+            stack_alignment=4,
+            caller_cleanup=True,
+            shadow_space=0,
+        )
+
+
 class _X86_64(_ISA):
     def save_register(
         self, register: Register
@@ -293,5 +360,8 @@ def _get_isa(module: gtirb.Module) -> _ISA:
             return _X86_64_ELF()
         elif module.file_format == gtirb.Module.FileFormat.PE:
             return _X86_64_PE()
+    elif module.isa == gtirb.Module.ISA.IA32:
+        if module.file_format == gtirb.Module.FileFormat.PE:
+            return _IA32_PE()
 
     assert False, f"Unsupported ISA/format: {module.isa}/{module.file_format}"
