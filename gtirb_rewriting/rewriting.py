@@ -255,7 +255,11 @@ class RewritingContext:
         )
 
     def get_or_insert_extern_symbol(
-        self, name: str, libname: str, preload: bool = False
+        self,
+        name: str,
+        libname: str,
+        preload: bool = False,
+        libpath: str = None,
     ) -> gtirb.Symbol:
         """
         Gets a symbol by name, creating it as an extern symbol if it isn't
@@ -299,6 +303,12 @@ class RewritingContext:
                 self._module.aux_data["libraries"].data.insert(0, libname)
             else:
                 self._module.aux_data["libraries"].data.append(libname)
+
+        if libpath is not None and "libraryPaths" in self._module.aux_data:
+            if preload:
+                self._module.aux_data["libraryPaths"].data.insert(0, libpath)
+            else:
+                self._module.aux_data["libraryPaths"].data.append(libpath)
 
         return sym
 
