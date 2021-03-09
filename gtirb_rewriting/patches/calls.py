@@ -128,7 +128,7 @@ class CallPatch(Patch):
             )
 
             if isinstance(arg_value, gtirb.Symbol):
-                arg_str = arg_value.name
+                arg_str = f"{arg_value.name}[rip]"
             elif isinstance(arg_value, int):
                 arg_str = str(arg_value)
 
