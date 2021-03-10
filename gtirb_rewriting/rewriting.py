@@ -23,8 +23,9 @@ import dataclasses
 import itertools
 import logging
 import operator
+import pathlib
 import uuid
-from typing import List, NamedTuple, Sequence, Tuple
+from typing import List, NamedTuple, Sequence, Tuple, Union
 
 import gtirb
 import gtirb_functions
@@ -259,7 +260,7 @@ class RewritingContext:
         name: str,
         libname: str,
         preload: bool = False,
-        libpath: str = None,
+        libpath: Union[str, pathlib.Path] = None,
     ) -> gtirb.Symbol:
         """
         Gets a symbol by name, creating it as an extern symbol if it isn't
@@ -269,6 +270,7 @@ class RewritingContext:
         :param preload: Insert the library dependency at the beginning of the
                         libraries aux data table, similar to LD_PRELOAD. ELF
                         only, optional.
+        :param libpath: Additional path to search for libname at runtime.
         """
         name = decorate_extern_symbol(self._module, name)
 
@@ -305,6 +307,7 @@ class RewritingContext:
                 self._module.aux_data["libraries"].data.append(libname)
 
         if libpath is not None and "libraryPaths" in self._module.aux_data:
+            libpath = str(libpath)
             if preload:
                 self._module.aux_data["libraryPaths"].data.insert(0, libpath)
             else:
