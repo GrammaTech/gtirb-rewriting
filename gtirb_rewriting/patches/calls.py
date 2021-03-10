@@ -116,7 +116,9 @@ class CallPatch(Patch):
         stack_reg = self._isa.stack_register()
 
         stack_size = sum(stack_slot_size for arg in self._args if not arg.reg)
-        stack_padding = stack_size % self._cconv.stack_alignment
+        stack_padding = self._cconv.stack_alignment - (
+            stack_size % self._cconv.stack_alignment
+        )
         if stack_padding:
             lines.append(f"sub {stack_reg}, {stack_padding}")
 
