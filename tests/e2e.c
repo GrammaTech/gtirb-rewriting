@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <unistd.h>
 
+// A global variable so we can test passing a symbol as an argument.
+int global_int = 100;
+
 // This is intentionally not called in the program to test that we can insert
 // a call and do it according to the platform ABI. It also has more arguments
 // than fit in registers so that we test the stack argument passing.
