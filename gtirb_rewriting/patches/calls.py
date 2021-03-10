@@ -128,7 +128,11 @@ class CallPatch(Patch):
             )
 
             if isinstance(arg_value, gtirb.Symbol):
-                arg_str = f"{arg_value.name}[rip]"
+                file_format = insertion_context.module.file_format
+                if file_format == gtirb.Module.FileFormat.ELF:
+                    arg_str = f"{arg_value.name}[rip]"
+                elif file_format == gtirb.Module.FileFormat.PE:
+                    arg_str = arg_value.name
             elif isinstance(arg_value, int):
                 arg_str = str(arg_value)
 
