@@ -175,6 +175,23 @@ def _nonterminator_instructions(
         yield from disassembly[:-1]
 
 
+def _format_symbolic_expr(expr) -> str:
+    if isinstance(expr, gtirb.SymAddrConst):
+        result = f"SymAddrConst: {expr.symbol.name} + {expr.offset}"
+    elif isinstance(expr, gtirb.SymAddrAddr):
+        result = (
+            f"SymAddrAddr: ({expr.symbol1.name} - {expr.symbol2.name}) "
+            f"/ {expr.scale} + {expr.offset}"
+        )
+    else:
+        result = str(expr)
+
+    if expr.attributes:
+        result += " " + str(expr.attributes)
+
+    return result
+
+
 def show_block_asm(
     block: gtirb.CodeBlock,
     arch: gtirb.Module.ISA = None,
@@ -195,9 +212,27 @@ def show_block_asm(
         decoder = GtirbInstructionDecoder(arch)
 
     if block.contents:
+        offset = block.offset
         instructions = tuple(decoder.get_instructions(block))
         for i in instructions:
             logger.debug("\t0x%x:\t%s\t%s", i.address, i.mnemonic, i.op_str)
+            # Print out the symbolic expression for the instruction, if any
+            operand_encodings = (
+                (i.imm_offset, i.imm_size),
+                (i.disp_offset, i.disp_size),
+            )
+            for enc_offset, enc_size in operand_encodings:
+                if enc_size:
+                    expr = block.byte_interval.symbolic_expressions.get(
+                        offset + enc_offset, None
+                    )
+                    if expr:
+                        logger.debug(
+                            "\t# +%i: %s",
+                            enc_offset,
+                            _format_symbolic_expr(expr),
+                        )
+            offset += i.size
         if _is_partial_disassembly(block, instructions):
             logger.debug("\t<incomplete disassembly>")
 

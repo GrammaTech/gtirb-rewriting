@@ -26,7 +26,12 @@ import capstone
 import gtirb
 import gtirb_rewriting.utils
 import pytest
-from helpers import add_code_block, create_test_module
+from helpers import (
+    add_code_block,
+    add_proxy_block,
+    add_symbol,
+    create_test_module,
+)
 
 
 def test_offset_mapping():
@@ -152,11 +157,16 @@ def test_nonterminator_instructions_fallthrough():
 
 def test_show_block_asm(caplog):
     ir, m, bi = create_test_module()
+    sym = add_symbol(m, "puts", add_proxy_block(m))
 
-    # pushfq; popfq
-    block = add_code_block(bi, b"\x9C\x9D")
+    # pushfq; popfq; call puts+4
+    block = add_code_block(
+        bi, b"\x9C\x9D\xE8\x00\x00\x00\x00", {3: gtirb.SymAddrConst(4, sym)}
+    )
 
     with caplog.at_level(logging.DEBUG):
         gtirb_rewriting.utils.show_block_asm(block)
         assert "pushfq" in caplog.text
         assert "popfq" in caplog.text
+        assert "call" in caplog.text
+        assert "puts + 4" in caplog.text
