@@ -25,7 +25,7 @@ from typing import Iterable, List, Mapping, MutableMapping
 
 import gtirb
 
-from .isa import _get_isa
+from .abi import ABI
 from .utils import OffsetMapping, align_address, effective_alignment
 
 standard_byte_interval_aux_data = (
@@ -225,7 +225,7 @@ def join_byte_intervals(
             if nop is not None:
                 pad_bytes = nop
             elif last_module is not None:
-                pad_bytes = _get_isa(last_module).nop()
+                pad_bytes = ABI.get(last_module).nop()
             else:
                 raise PaddingError("cannot determine nop instruction")
             size, remainder = divmod(size, len(pad_bytes))

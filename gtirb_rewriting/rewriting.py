@@ -32,9 +32,9 @@ import gtirb_functions
 import mcasm
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
+from .abi import ABI
 from .assembler import _Assembler
 from .assembly import InsertionContext, Patch
-from .isa import _get_isa
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
@@ -82,7 +82,7 @@ class RewritingContext:
         self._symbols_by_name = {s.name: s for s in module.symbols}
         self._functions = functions
         self._decoder = GtirbInstructionDecoder(self._module.isa)
-        self._isa = _get_isa(module)
+        self._abi = ABI.get(module)
         self._insertions: List[_Insertion] = []
         self._function_insertions: List[_FunctionInsertion] = []
         self._logger = logger
@@ -147,13 +147,13 @@ class RewritingContext:
                   of bytes inserted.
         """
 
-        available_registers = list(self._isa.all_registers())
+        available_registers = list(self._abi.all_registers())
         clobbered_registers = set()
         snippets = []
         stack_adjustment = 0
 
         for clobber in patch.constraints.clobbers_registers:
-            reg = self._isa.get_register(clobber)
+            reg = self._abi.get_register(clobber)
             available_registers.remove(reg)
             clobbered_registers.add(reg)
 
@@ -163,28 +163,28 @@ class RewritingContext:
         clobbered_registers.update(scratch_registers)
 
         if patch.constraints.preserve_caller_saved_registers:
-            clobbered_registers.update(self._isa.caller_saved_registers())
+            clobbered_registers.update(self._abi.caller_saved_registers())
 
         # TODO: If align_stack was set too, we're going to end up doing
         #       some redundant work.
         if clobbered_registers or patch.constraints.clobbers_flags:
-            if self._isa.red_zone_size() and self._leaf_functions[func.uuid]:
-                stack_adjustment += self._isa.red_zone_size()
-                snippets.append(self._isa.preserve_red_zone())
+            if self._abi.red_zone_size() and self._leaf_functions[func.uuid]:
+                stack_adjustment += self._abi.red_zone_size()
+                snippets.append(self._abi._preserve_red_zone())
 
         if patch.constraints.clobbers_flags:
-            stack_adjustment += self._isa.pointer_size()
-            snippets.append(self._isa.save_flags())
+            stack_adjustment += self._abi.pointer_size()
+            snippets.append(self._abi._save_flags())
 
         for reg in sorted(clobbered_registers, key=lambda reg: reg.name):
-            stack_adjustment += self._isa.pointer_size()
-            snippets.append(self._isa.save_register(reg))
+            stack_adjustment += self._abi.pointer_size()
+            snippets.append(self._abi._save_register(reg))
 
         if patch.constraints.align_stack:
             # TODO: We don't know how much the stack may be adjusted by the
             #       snippet.
             stack_adjustment = None
-            snippets.append(self._isa.align_stack())
+            snippets.append(self._abi._align_stack())
 
         asm = patch.get_asm(
             dataclasses.replace(context, stack_adjustment=stack_adjustment),
@@ -383,7 +383,7 @@ class RewritingContext:
         # Our code block needs something in it for now, along with a return
         # edge for callers to update. The actual instruction in the block
         # doesn't matter, so we'll use a nop.
-        nop_encoding = self._isa.nop()
+        nop_encoding = self._abi.nop()
         block.size = len(nop_encoding)
 
         bi = gtirb.ByteInterval(contents=nop_encoding, blocks=[block])
@@ -545,7 +545,7 @@ class RewritingContext:
         Applies all of the patches to the module.
         """
 
-        with prepare_for_rewriting(self._module, self._isa.nop()):
+        with prepare_for_rewriting(self._module, self._abi.nop()):
             self._functions_by_block = {
                 block: func.uuid
                 for func in self._functions

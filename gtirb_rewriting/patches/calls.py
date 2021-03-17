@@ -24,8 +24,8 @@ from typing import Callable, Iterable, List, Optional, Union
 
 import gtirb
 
+from ..abi import ABI, CallingConventionDesc
 from ..assembly import Constraints, InsertionContext, Patch, X86Syntax
-from ..isa import CallingConventionDesc, _get_isa
 
 
 class CallPatch(Patch):
@@ -66,11 +66,11 @@ class CallPatch(Patch):
         assert sym.module, "Symbol must be in a module"
         assert sym.module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
 
-        self._isa = _get_isa(sym.module)
+        self._abi = ABI.get(sym.module)
         if conv:
             self._cconv = conv
         else:
-            self._cconv = self._isa.calling_convention()
+            self._cconv = self._abi.calling_convention()
 
         self.sym = sym
         self._args = self._create_passed_args(self._cconv, args)
@@ -112,8 +112,8 @@ class CallPatch(Patch):
     def get_asm(self, insertion_context: InsertionContext) -> str:
         lines = []
 
-        stack_slot_size = self._isa.pointer_size()
-        stack_reg = self._isa.stack_register()
+        stack_slot_size = self._abi.pointer_size()
+        stack_reg = self._abi.stack_register()
 
         stack_size = sum(stack_slot_size for arg in self._args if not arg.reg)
         stack_padding = self._cconv.stack_alignment - (
