@@ -58,14 +58,34 @@ class CallingConventionDesc:
     """
 
 
-class _ISA:
+class ABI:
+    """
+    Describes an application binary interface (ABI) and the instruction set
+    architecture (ISA) beneath it.
+    """
+
     def __init__(self) -> None:
         self._register_map = {}
         for reg in self.all_registers():
             for name in reg.sizes.values():
                 self._register_map[name.lower()] = reg
 
-    def save_register(
+    @classmethod
+    def get(self, module: gtirb.Module) -> "ABI":
+        if module.isa == gtirb.Module.ISA.X64:
+            if module.file_format == gtirb.Module.FileFormat.ELF:
+                return _X86_64_ELF()
+            elif module.file_format == gtirb.Module.FileFormat.PE:
+                return _X86_64_PE()
+        elif module.isa == gtirb.Module.ISA.IA32:
+            if module.file_format == gtirb.Module.FileFormat.PE:
+                return _IA32_PE()
+
+        raise ValueError(
+            f"Unsupported ISA/format: {module.isa}/{module.file_format}"
+        )
+
+    def _save_register(
         self, register: Register
     ) -> Tuple[_AsmSnippet, _AsmSnippet]:
         """
@@ -73,7 +93,7 @@ class _ISA:
         """
         raise NotImplementedError
 
-    def align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         """
         Generate code to align the stack to the ABI requirements for a call.
         """
@@ -85,7 +105,7 @@ class _ISA:
         """
         return self._register_map[name.lower()]
 
-    def save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         """
         Generate code required to save the flags register.
         """
@@ -124,7 +144,7 @@ class _ISA:
         """
         return 0
 
-    def preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         """
         Generate code required to preserve the contents of the red zone.
         """
@@ -143,8 +163,8 @@ class _ISA:
         raise NotImplementedError
 
 
-class _IA32(_ISA):
-    def save_register(
+class _IA32(ABI):
+    def _save_register(
         self, register: Register
     ) -> Tuple[_AsmSnippet, _AsmSnippet]:
         return (
@@ -152,11 +172,11 @@ class _IA32(_ISA):
             _AsmSnippet(f"pop %{register}"),
         )
 
-    def save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         # TODO: Replace this with something more efficient.
         return _AsmSnippet("pushfd"), _AsmSnippet("popfd")
 
-    def align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         return (
             _AsmSnippet(
                 """
@@ -210,8 +230,8 @@ class _IA32_PE(_IA32):
         )
 
 
-class _X86_64(_ISA):
-    def save_register(
+class _X86_64(ABI):
+    def _save_register(
         self, register: Register
     ) -> Tuple[_AsmSnippet, _AsmSnippet]:
         return (
@@ -219,11 +239,11 @@ class _X86_64(_ISA):
             _AsmSnippet(f"popq %{register}"),
         )
 
-    def save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         # TODO: Replace this with something more efficient.
         return _AsmSnippet("pushfq"), _AsmSnippet("popfq")
 
-    def align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         return (
             _AsmSnippet(
                 """
@@ -340,7 +360,7 @@ class _X86_64_ELF(_X86_64):
     def red_zone_size(self) -> int:
         return 128
 
-    def preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         return (
             _AsmSnippet("leaq -128(%rsp), %rsp"),
             _AsmSnippet("leaq +128(%rsp), %rsp"),
@@ -352,16 +372,3 @@ class _X86_64_ELF(_X86_64):
             stack_alignment=16,
             caller_cleanup=True,
         )
-
-
-def _get_isa(module: gtirb.Module) -> _ISA:
-    if module.isa == gtirb.Module.ISA.X64:
-        if module.file_format == gtirb.Module.FileFormat.ELF:
-            return _X86_64_ELF()
-        elif module.file_format == gtirb.Module.FileFormat.PE:
-            return _X86_64_PE()
-    elif module.isa == gtirb.Module.ISA.IA32:
-        if module.file_format == gtirb.Module.FileFormat.PE:
-            return _IA32_PE()
-
-    assert False, f"Unsupported ISA/format: {module.isa}/{module.file_format}"

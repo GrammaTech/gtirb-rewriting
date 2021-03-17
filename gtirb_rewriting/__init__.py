@@ -19,6 +19,7 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+from .abi import ABI, CallingConventionDesc
 from .assembly import (
     Constraints,
     InsertionContext,
@@ -50,9 +51,11 @@ from .version import __version__
 
 __all__ = [
     "__version__",
+    "ABI",
     "AllBlocksScope",
     "AllFunctionsScope",
     "BlockPosition",
+    "CallingConventionDesc",
     "Constraints",
     "decorate_extern_symbol",
     "ENTRYPOINT_NAME",
