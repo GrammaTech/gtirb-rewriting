@@ -20,7 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import itertools
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import gtirb
 import mcasm
@@ -153,7 +153,7 @@ class _Assembler:
         for fixup in fixups:
             pos = len(self.data) + fixup["offset"]
             self.symbolic_expressions[pos] = self._fixup_to_symbolic_operand(
-                fixup, data
+                fixup, data, inst["desc"]["isCall"] or inst["desc"]["isBranch"]
             )
 
         self.data += data
@@ -181,7 +181,9 @@ class _Assembler:
             ], "Indirect branches are not yet supported"
 
             assert len(fixups) == 1
-            target_fixup = self._fixup_to_symbolic_operand(fixups[0], data)
+            target_fixup = self._fixup_to_symbolic_operand(
+                fixups[0], data, True
+            )
             assert isinstance(target_fixup, gtirb.SymAddrConst)
             assert target_fixup.offset == 0
 
@@ -221,8 +223,38 @@ class _Assembler:
 
             self.blocks.append(next_block)
 
+    def _resolve_symbol_ref(self, expr: dict) -> gtirb.Symbol:
+        assert expr["kind"] == "symbolRef"
+
+        name = expr["symbol"]["name"]
+        sym = self._symbol_lookup(name)
+        assert sym, f"{name} is an undefined symbol reference"
+        return sym
+
+    def _get_symbol_ref_attrs(
+        self, expr: dict, sym: gtirb.Symbol, is_branch: bool
+    ) -> Set[gtirb.SymbolicExpression.Attribute]:
+        assert expr["kind"] == "symbolRef"
+
+        attributes = set()
+        if "variantKind" in expr:
+            if expr["variantKind"] == "PLT":
+                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+            elif expr["variantKind"] == "GOTPCREL":
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
+            else:
+                assert False, f"Unsupported variantKind: {expr['variantKind']}"
+        elif _is_elf_pie(self._module) and isinstance(
+            sym.referent, gtirb.ProxyBlock
+        ):
+            if is_branch:
+                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+            else:
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
+        return attributes
+
     def _fixup_to_symbolic_operand(
-        self, fixup: dict, encoding: bytes
+        self, fixup: dict, encoding: bytes, is_branch: bool
     ) -> gtirb.SymAddrConst:
         """
         Converts an LLVM fixup to a GTIRB SymbolicExpression.
@@ -240,30 +272,25 @@ class _Assembler:
         ):
             expr = expr["lhs"]
 
-        # TODO: Do we need to support more fixup types? GTIRB only supports
-        #       two forms:
-        #       - Sym + Offset
-        #       - (Sym1 - Sym2) / Scale + Offset
-        assert (
-            expr["kind"] == "symbolRef"
-        ), "Only simple simple references are currently supported"
-
-        name = expr["symbol"]["name"]
-        sym = self._symbol_lookup(name)
-        assert sym, f"{name} is an undefined symbol reference"
-
-        attributes = set()
-        if "variantKind" in expr:
-            if expr["variantKind"] == "PLT":
-                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
-            else:
-                assert False, f"Unsupported variantKind: {expr['variantKind']}"
-        elif _is_elf_pie(self._module) and isinstance(
-            sym.referent, gtirb.ProxyBlock
+        # TODO: Do we need to support SymAddrAddr fixup types?
+        if (
+            expr["kind"] == "binaryExpr"
+            and expr["opcode"] == "Add"
+            and expr["lhs"]["kind"] == "symbolRef"
+            and expr["rhs"]["kind"] == "constant"
         ):
-            attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+            sym = self._resolve_symbol_ref(expr["lhs"])
+            attributes = self._get_symbol_ref_attrs(
+                expr["lhs"], sym, is_branch
+            )
+            offset = expr["rhs"]["value"]
+            return gtirb.SymAddrConst(offset, sym, attributes)
+        elif expr["kind"] == "symbolRef":
+            sym = self._resolve_symbol_ref(expr)
+            attributes = self._get_symbol_ref_attrs(expr, sym, is_branch)
+            return gtirb.SymAddrConst(0, sym, attributes)
 
-        return gtirb.SymAddrConst(0, sym, attributes)
+        assert False, "Unsupported symbolic expression"
 
     def _symbol_lookup(self, name: str) -> Optional[gtirb.Symbol]:
         """
