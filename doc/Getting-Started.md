@@ -251,6 +251,35 @@ def delete_at(rewriting_context, func, block, offset, length):
         func, block, offset, length, Patch.from_function(nop_patch))
 ```
 
+## `.byte` Directive
+
+Patches can use the `.byte` directive (and similar directives) to either emit
+raw data in the patch or instructions that the assembler may not understand.
+Instructions added via `.byte` must not have an impact on control flow.
+
+gtirb-rewriting uses a simple heuristic to determine, at the block level,
+code from data: if the block has any incoming edges or contains other
+instructions, the entire block will be treated as code. Otherwise it is
+treated as a data block.
+
+For example, the bytes in this patch will be treated as code:
+```
+.byte 0x66
+.byte 0x90
+```
+
+While these bytes will be treated as data:
+```
+jmp .L_end
+.byte 0x66
+.byte 0x90
+.L_end:
+nop
+```
+
+Note that symbolic expressions in `.byte` directives are not currently
+supported; the value must be a literal.
+
 ## `PassManager` Versus Using `RewritingContext` Directly
 
 The `RewritingContext` object can be used to rewrite a `Module` directly,

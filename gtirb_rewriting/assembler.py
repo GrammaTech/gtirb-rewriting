@@ -26,7 +26,7 @@ import gtirb
 import mcasm
 
 from .assembly import X86Syntax
-from .utils import _is_elf_pie, _target_triple
+from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 
 
 class _Assembler:
@@ -36,7 +36,7 @@ class _Assembler:
 
     :ivar ~.data: The encoded instructions from assembling the patch.
     :ivar ~.cfg: The control flow graph for the patch.
-    :ivar ~.blocks: All code blocks, in order, for the patch.
+    :ivar ~.blocks: All blocks, in order, for the patch.
     :ivar ~.symbolic_expressions: A map of offset to symbolic expression,
                                   relative to the data position.
     :ivar ~.local_symbols: Symbols that were created in the patch.
@@ -48,6 +48,7 @@ class _Assembler:
         module: gtirb.Module,
         patch_id: int,
         module_symbols: Dict[str, gtirb.Symbol],
+        trivially_unreachable: bool,
     ) -> None:
         """
         :param module: The module the patch will be inserted into.
@@ -56,6 +57,9 @@ class _Assembler:
         :param module_symbols: A map from symbol name to symbol, to speed up
                                name lookups. This may be updated by the
                                assembler upon cache misses.
+        :param trivially_unreachable: Is the entry block of the patch
+                                      obviously unreachable? For example,
+                                      inserting after a ret instruction.
         """
         self._module = module
         self._patch_id = patch_id
@@ -65,8 +69,10 @@ class _Assembler:
         self.symbolic_expressions = {}
         self.local_symbols = {}
         self._module_symbols = module_symbols
+        self._trivially_unreachable = trivially_unreachable
         self.section_name = None
         self.proxies = set()
+        self._blocks_with_code = set()
 
     @property
     def entry_block(self) -> gtirb.CodeBlock:
@@ -101,6 +107,8 @@ class _Assembler:
                 self._assemble_label(event["symbol"])
             elif event["kind"] == "changeSection":
                 self._assemble_change_section(event["section"])
+            elif event["kind"] == "bytes":
+                self._assemble_bytes(bytes.fromhex(event["data"]))
             else:
                 assert False, f"Unsupported assembler event: {event['kind']}"
 
@@ -158,6 +166,7 @@ class _Assembler:
 
         self.data += data
         self.current_block.size += len(data)
+        self._blocks_with_code.add(self.current_block)
 
         if inst["desc"]["isReturn"]:
             proxy = gtirb.ProxyBlock()
@@ -222,6 +231,10 @@ class _Assembler:
                 )
 
             self.blocks.append(next_block)
+
+    def _assemble_bytes(self, data: bytes) -> None:
+        self.data += data
+        self.current_block.size += len(data)
 
     def _resolve_symbol_ref(self, expr: dict) -> gtirb.Symbol:
         assert expr["kind"] == "symbolRef"
@@ -316,6 +329,16 @@ class _Assembler:
 
         return None
 
+    def _replace_symbol_referents(
+        self, old_block: gtirb.Block, new_block: gtirb.Block
+    ) -> None:
+        """
+        Alters all symbols referring to an old block to refer to a new block.
+        """
+        for sym in self.local_symbols.values():
+            if sym.referent == old_block:
+                sym.referent = new_block
+
     def _remove_empty_blocks(self) -> None:
         final_blocks = []
         for _, group in itertools.groupby(self.blocks, key=lambda b: b.offset):
@@ -341,13 +364,33 @@ class _Assembler:
                     )
                     self.cfg.discard(edge)
 
-                for sym in self.local_symbols.values():
-                    if sym.referent == extra_block:
-                        sym.referent = main_block
+                self._replace_symbol_referents(extra_block, main_block)
 
             final_blocks.append(main_block)
 
         self.blocks = final_blocks
+
+    def _convert_data_blocks(self) -> None:
+        """
+        Converts blocks that only have data and have no incoming control flow
+        to be DataBlocks.
+        """
+        for i in range(len(self.blocks)):
+            block = self.blocks[i]
+            if (
+                block.size
+                and block not in self._blocks_with_code
+                and (block != self.entry_block or self._trivially_unreachable)
+                and not any(self.cfg.in_edges(block))
+            ):
+                new_block = gtirb.DataBlock(
+                    offset=block.offset, size=block.size
+                )
+                self._replace_symbol_referents(block, new_block)
+                for out_edge in set(self.cfg.out_edges(block)):
+                    assert _is_fallthrough_edge(out_edge)
+                    self.cfg.discard(out_edge)
+                self.blocks[i] = new_block
 
     def finalize(self) -> None:
         """
@@ -356,3 +399,4 @@ class _Assembler:
         """
 
         self._remove_empty_blocks()
+        self._convert_data_blocks()

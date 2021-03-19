@@ -28,6 +28,7 @@ import gtirb_rewriting.utils
 import pytest
 from helpers import (
     add_code_block,
+    add_data_block,
     add_proxy_block,
     add_symbol,
     create_test_module,
@@ -155,7 +156,7 @@ def test_nonterminator_instructions_fallthrough():
     assert len(nonterm) == 2
 
 
-def test_show_block_asm(caplog):
+def test_show_code_block_asm(caplog):
     ir, m, bi = create_test_module()
     sym = add_symbol(m, "puts", add_proxy_block(m))
 
@@ -170,3 +171,15 @@ def test_show_block_asm(caplog):
         assert "popfq" in caplog.text
         assert "call" in caplog.text
         assert "puts + 4" in caplog.text
+
+
+def test_show_data_block_asm(caplog):
+    ir, m, bi = create_test_module()
+    block = add_data_block(bi, b"\x01\x02\x03\x04")
+
+    with caplog.at_level(logging.DEBUG):
+        gtirb_rewriting.utils.show_block_asm(block)
+        assert ".byte\t1" in caplog.text
+        assert ".byte\t2" in caplog.text
+        assert ".byte\t3" in caplog.text
+        assert ".byte\t4" in caplog.text

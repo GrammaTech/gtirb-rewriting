@@ -38,6 +38,7 @@ from .assembly import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
+    _block_fallthrough_targets,
     _is_partial_disassembly,
     _modify_block_insert,
     _text_section_name,
@@ -195,8 +196,17 @@ class RewritingContext:
 
         self._patch_id += 1
 
+        is_trivially_unreachable = False
+        if offset == block.size:
+            is_trivially_unreachable = not any(
+                _block_fallthrough_targets(block)
+            )
+
         assembler = _Assembler(
-            self._module, self._patch_id, self._symbols_by_name
+            self._module,
+            self._patch_id,
+            self._symbols_by_name,
+            is_trivially_unreachable,
         )
         for snippet in snippets:
             assembler.assemble(snippet[0].code, snippet[0].x86_syntax)
@@ -231,14 +241,16 @@ class RewritingContext:
             function_blocks = self._module.aux_data["functionBlocks"].data
             if func.uuid in function_blocks:
                 function_blocks[func.uuid].update(
-                    b for b in assembler.blocks if b.module == self._module
+                    b
+                    for b in assembler.blocks
+                    if isinstance(b, gtirb.CodeBlock)
                 )
 
         self._functions_by_block.update(
             {
                 b: func.uuid
                 for b in assembler.blocks
-                if b.module == self._module
+                if isinstance(b, gtirb.CodeBlock)
             }
         )
 

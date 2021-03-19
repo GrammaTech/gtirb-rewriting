@@ -771,3 +771,44 @@ def test_new_return_edges():
     assert return_edges[0].target == b2
     assert return_edges[1].target == b2
     assert not m.proxies
+
+
+def test_insert_byte_directive_as_code():
+    ir, m, bi = create_test_module()
+
+    # This mimics:
+    #   func:
+    #   nop
+    b = add_code_block(bi, b"\x90")
+    func = add_function(m, "func", b)
+    set_all_blocks_alignment(m, 1)
+
+    # Insert some bytes to verify we get a code block
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(func, b, 0, literal_patch(".byte 0x66; .byte 0x90"))
+    ctx.apply()
+
+    assert bi.contents == b"\x66\x90\x90"
+    assert set(bi.blocks) == {b}
+
+
+def test_insert_byte_directive_as_data_due_to_unreachable_entrypoint():
+    ir, m, bi = create_test_module()
+
+    # This mimics:
+    #   func:
+    #   ret
+    b = add_code_block(bi, b"\xC3")
+    func = add_function(m, "func", b)
+    add_edge(ir.cfg, b, add_proxy_block(m), gtirb.Edge.Type.Return)
+    set_all_blocks_alignment(m, 1)
+
+    # Insert some bytes that are trivially unreachable
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(func, b, b.size, literal_patch(".byte 0x66; .byte 0x90"))
+    ctx.apply()
+
+    (new_block,) = set(bi.blocks) - {b}
+    assert bi.contents == b"\xC3\x66\x90"
+    assert isinstance(new_block, gtirb.DataBlock)
+    assert m.aux_data["functionBlocks"].data[func.uuid] == {b}
