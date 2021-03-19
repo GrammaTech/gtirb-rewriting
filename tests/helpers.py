@@ -25,7 +25,7 @@ Helper utilities for GTIRB-based tests.
 """
 
 import uuid
-from typing import Dict, Set, Tuple, Union
+from typing import Dict, Set, Tuple, Type, TypeVar, Union
 
 import gtirb
 import gtirb_functions
@@ -85,6 +85,29 @@ def add_proxy_block(m: gtirb.Module) -> gtirb.ProxyBlock:
     return b
 
 
+BlockT = TypeVar("BlockT", bound=gtirb.ByteBlock)
+
+
+def add_byte_block(
+    byte_interval: gtirb.ByteInterval,
+    block_type: Type[BlockT],
+    content: bytes,
+    symbolic_expressions: Dict[int, gtirb.SymbolicExpression] = None,
+) -> BlockT:
+    """
+    Adds a block to a byte interval, setting up its contents and optionally
+    its symbolic expressions.
+    """
+    b = block_type(offset=byte_interval.size, size=len(content))
+    b.byte_interval = byte_interval
+    byte_interval.contents += content
+    if symbolic_expressions:
+        for off, expr in symbolic_expressions.items():
+            byte_interval.symbolic_expressions[byte_interval.size + off] = expr
+    byte_interval.size += len(content)
+    return b
+
+
 def add_code_block(
     byte_interval: gtirb.ByteInterval,
     content: bytes,
@@ -94,14 +117,23 @@ def add_code_block(
     Adds a code block to a byte interval, setting up its contents and
     optionally its symbolic expressions.
     """
-    b = gtirb.CodeBlock(offset=byte_interval.size, size=len(content))
-    b.byte_interval = byte_interval
-    byte_interval.contents += content
-    if symbolic_expressions:
-        for off, expr in symbolic_expressions.items():
-            byte_interval.symbolic_expressions[byte_interval.size + off] = expr
-    byte_interval.size += len(content)
-    return b
+    return add_byte_block(
+        byte_interval, gtirb.CodeBlock, content, symbolic_expressions
+    )
+
+
+def add_data_block(
+    byte_interval: gtirb.ByteInterval,
+    content: bytes,
+    symbolic_expressions: Dict[int, gtirb.SymbolicExpression] = None,
+) -> gtirb.DataBlock:
+    """
+    Adds a data block to a byte interval, setting up its contents and
+    optionally its symbolic expressions.
+    """
+    return add_byte_block(
+        byte_interval, gtirb.DataBlock, content, symbolic_expressions
+    )
 
 
 def add_symbol(

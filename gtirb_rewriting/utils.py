@@ -193,7 +193,7 @@ def _format_symbolic_expr(expr) -> str:
 
 
 def show_block_asm(
-    block: gtirb.CodeBlock,
+    block: gtirb.ByteBlock,
     arch: gtirb.Module.ISA = None,
     logger=logging.getLogger(),
     decoder=None,
@@ -204,6 +204,10 @@ def show_block_asm(
     module. If the block is not in a module, the function throws an error.
     """
 
+    if not block.contents:
+        logger.debug("\t<empty block>")
+        return
+
     if decoder is None:
         if arch is None:
             if block.module is None:
@@ -211,7 +215,7 @@ def show_block_asm(
             arch = block.byte_interval.section.module.isa
         decoder = GtirbInstructionDecoder(arch)
 
-    if block.contents:
+    if isinstance(block, gtirb.CodeBlock):
         offset = block.offset
         instructions = tuple(decoder.get_instructions(block))
         for i in instructions:
@@ -235,6 +239,15 @@ def show_block_asm(
             offset += i.size
         if _is_partial_disassembly(block, instructions):
             logger.debug("\t<incomplete disassembly>")
+
+    elif isinstance(block, gtirb.DataBlock):
+        for offset, byte in enumerate(block.contents):
+            logger.debug("\t0x%x:\t.byte\t%i", block.address + offset, byte)
+            expr = block.byte_interval.symbolic_expressions.get(
+                block.offset, None
+            )
+            if expr:
+                logger.debug("\t# +0: %s", _format_symbolic_expr(expr))
 
 
 def _substitute_block(
@@ -478,7 +491,7 @@ def _modify_block_insert(
     offset: int,
     replacement_length: int,
     new_bytes: bytes,
-    new_blocks: List[gtirb.CodeBlock],
+    new_blocks: List[gtirb.ByteBlock],
     new_cfg: gtirb.CFG,
     new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
     new_symbols: Iterable[gtirb.Symbol],
@@ -513,7 +526,7 @@ def _modify_block_insert(
     assert all(
         new_block.size for new_block in new_blocks[:-1]
     ), "only the last block may be empty"
-    assert not any(
+    assert isinstance(new_blocks[-1], gtirb.DataBlock) or not any(
         new_cfg.out_edges(new_blocks[-1])
     ), "the last block cannot have outgoing cfg edges"
 
@@ -608,7 +621,7 @@ def _modify_block_insert_cfg(
     offset: int,
     replacement_length: int,
     new_bytes: bytes,
-    new_blocks: List[gtirb.CodeBlock],
+    new_blocks: List[gtirb.ByteBlock],
     new_cfg: gtirb.CFG,
     new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
     new_symbols: Iterable[gtirb.Symbol],
@@ -647,12 +660,21 @@ def _modify_block_insert_cfg(
         and not inserts_at_end
         and not replaces_last_instruction
     ):
+        assert len(new_blocks) == 1
+        assert isinstance(new_blocks[0], gtirb.CodeBlock)
+
         block.size = block.size - replacement_length + len(new_bytes)
 
         # Remove all the blocks from new_blocks so that they don't get added
         # to the byte_interval in _modify_block_insert.
         new_blocks.clear()
         return
+
+    # If the patch ended in a data block, we need to create a new code block
+    # that will contain any remaining code from the original block.
+    if isinstance(new_blocks[-1], gtirb.DataBlock):
+        assert new_blocks[-1].size
+        new_blocks.append(gtirb.CodeBlock(offset=len(new_bytes)))
 
     # Adjust the target block to be the size of offset. Then extend the last
     # patch block to cover the remaining bytes in the original block.
@@ -663,6 +685,7 @@ def _modify_block_insert_cfg(
     # block, unless we're inserting at the end of the block and the block has
     # no fallthrough edges. For example, inserting after a ret instruction.
     if not inserts_at_end or any(_block_fallthrough_targets(block)):
+        assert isinstance(new_blocks[0], gtirb.CodeBlock)
         new_cfg.add(
             gtirb.Edge(
                 source=block,
