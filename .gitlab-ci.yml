@@ -74,7 +74,7 @@ export_internal:
           echo "[ERROR] The package version being published on main should always be >= the version in the repository.";
           exit 1;
         fi;
-        ls $CI_PROJECT_DIR/dist/*.whl | xargs $CI_PROJECT_DIR/delete_remote_packages.py $GL_PKG_API_TOKEN;
+        ls $CI_PROJECT_DIR/dist/*.whl | xargs python3 $CI_PROJECT_DIR/delete_remote_packages.py $GL_PKG_API_TOKEN;
       fi
     - sed "s/password = <access token>/password = $GL_PKG_API_TOKEN/" $CI_PROJECT_DIR/.pypirc > ~/.pypirc
     - python3 -m twine upload --verbose --repository repypi $CI_PROJECT_DIR/dist/*.whl
