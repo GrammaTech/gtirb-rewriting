@@ -19,4 +19,5 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
-__version__ = "0.0.19"
+__version__ = "0.0.20.dev"
+__packagename__ = "gtirb-rewriting"

@@ -1,0 +1,32 @@
+0.0.19:
+- Added support for the .byte directive
+- Added support for printing data blocks with show_block_asm
+
+0.0.18:
+- Added support for symbolic expressions with a constant addend
+
+0.0.17:
+- Exposed the ABI class, to allow transforms to get information about the
+  target
+- show_block_asm now prints out symbolic expressions
+
+0.0.16:
+- Fixed passing symbols as arguments with CallPatch on 64-bit ELF
+- Added a libpath argument to RewritingContext.get_or_insert_extern_symbol
+- Fixed incorrect stack padding with CallPatch
+
+0.0.15:
+- Added support for rewriting PE-32 GTIRB files
+
+0.0.14:
+- Performance improvements when inserting patches that don't contain return
+  edges
+
+0.0.13:
+- Added a workaround for incomplete Capstone disassembly
+
+0.0.12:
+- Fixed a "dictionary changed size during iteration" exception
+
+0.0.11:
+- Initial public release

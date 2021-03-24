@@ -1,11 +1,10 @@
 stages:
     - check-format
     - test
-    - build
-    - deploy
+    - export
 
 default:
-  image: python:3-slim
+  image: python:3.7-slim
   tags: ["kubernetes"]
 
 check-format:
@@ -44,47 +43,58 @@ test:
     - apt-get update -y
     - apt-get install -y --allow-unauthenticated gtirb-pprinter
     - popd
-    - pip3 install  '.[test]'
+    - pip3 install -r requirements-dev.txt
     - pip3 install -e .
     - pytest --cov=gtirb_rewriting --cov-fail-under=50
 
-build:
-  stage: build
+# This job ensures that:
+#   - Release branches never publish -dev packages, and packages
+#     on release branches are never overwritten.  This behavior coincides
+#     with that of the external export job, where on the public pypi, packages
+#     cannot be overwritten.
+#   - main therefore only ever publishes '-dev' packages
+#   - The -dev package on main is always the newest version in the repository
+export_internal:
+  stage: export
   script:
-    - pip3 install twine wheel setuptools --upgrade
-    - python3 setup.py sdist bdist_wheel
-  artifacts:
-    paths: [dist]
-    expire_in: 1 week
-
-internal-pypi:
-  stage: deploy
-  only: [main]
-  script:
-    - pip3 install twine wheel setuptools --upgrade
-    - rm -rf build dist *.egg-info
-    - python3 setup.py sdist bdist_wheel
-    - twine check dist/*
-    - echo 0 > exitcode.txt
-    - (twine upload --verbose --repository-url $CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/pypi --username gitlab-ci-token --password "$CI_JOB_TOKEN" dist/* | tee response.txt) || (echo $? > exitcode.txt; exit 0)
-    # do not fail if we try to re-upload a package of the same version
-    - if [[ "$(cat exitcode.txt)" != 0 && -z "$(cat response.txt | grep "File name has already been taken")" ]];
-      then
-        exit 1;
+    - pip install -r requirements-dev.txt
+    - python3 setup.py bdist_wheel --dist-dir=$CI_PROJECT_DIR/dist
+    - VERSION=$(python3 -c "from imp import load_source; pkginfo = load_source('pkginfo.version', 'gtirb_rewriting/version.py'); print(pkginfo.__version__)")
+    - PKGNAME=$(python3 -c "from imp import load_source; pkginfo = load_source('pkginfo.version', 'gtirb_rewriting/version.py'); print(pkginfo.__packagename__)")
+    - if [[ "$VERSION" =~ \.dev[[:digit:]]*.*$ && "$CI_COMMIT_REF_NAME" =~ ^release-.* ]]; then exit 1; fi
+    # this job is not using $CI_JOB_TOKEN because it only has read access
+    # https://gitlab.com/gitlab-org/gitlab/-/issues/35067
+    # this job is also not using $CI_DEPLOY_USER and $CI_DEPLOY_PASSWORD because it only has write access
+    - if [[ "$CI_COMMIT_BRANCH" == "main" ]]; then
+        if [[ ! "$VERSION" =~ \.dev[[:digit:]]*$ ]]; then
+          echo "[ERROR] On the main branch, we must be exporting a -dev version."
+          exit 1;
+        fi;
+        if pip3 install --extra-index-url=$EXTRA_INDEX_URL "$PKGNAME>$VERSION" 2>/dev/null; then
+          echo "[ERROR] The package version being published on main should always be >= the version in the repository.";
+          exit 1;
+        fi;
+        ls $CI_PROJECT_DIR/dist/*.whl | xargs $CI_PROJECT_DIR/delete_remote_packages.py $GL_PKG_API_TOKEN;
       fi
+    - sed "s/password = <access token>/password = $GL_PKG_API_TOKEN/" $CI_PROJECT_DIR/.pypirc > ~/.pypirc
+    - python3 -m twine upload --verbose --repository repypi $CI_PROJECT_DIR/dist/*.whl
+  tags:
+    - kubernetes
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_REF_NAME =~ /^release-.*/'
 
-external-pypi:
-  stage: deploy
-  only: [main]
+export_external:
+  stage: export
+  image: python:3.7-slim
   script:
-    - apt update -y && apt install -y curl
-    - pip3 install .
-    - VERSION=$(python3 -c "import gtirb_rewriting; print(gtirb_rewriting.__version__)")
-    - RESPONSE_CODE=$(curl -Ls -o /dev/null -w "%{http_code}" https://pypi.org/project/gtirb-rewriting/${VERSION}/)
-    - if [ "$RESPONSE_CODE" = "404" ];
-      then
-        pip3 install twine wheel setuptools --upgrade;
-        python3 setup.py sdist bdist_wheel;
-        twine check dist/*;
-        twine upload dist/* -u __token__ -p $PYPI_API_KEY;
-      fi
+    - pip install -r requirements-dev.txt
+    - python3 setup.py bdist_wheel --dist-dir=$CI_PROJECT_DIR/dist
+    - VERSION=$(python3 -c "from imp import load_source; pkginfo = load_source('pkginfo.version', 'gtirb_rewriting/version.py'); print(pkginfo.__version__)")
+    # Do not publish .dev versions on the public pypi
+    - if [[ "$VERSION" =~ \.dev[[:digit:]]*.*$ ]]; then exit 1; fi
+    - python3 -m twine upload --verbose $CI_PROJECT_DIR/dist/*.whl -u __token__ -p $PYPI_API_KEY
+  tags:
+    - kubernetes
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^release-.*/'

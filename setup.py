@@ -42,17 +42,6 @@ setuptools.setup(
         "dataclasses ; python_version<'3.7.0'",
     ],
     classifiers=["Programming Language :: Python :: 3"],
-    extras_require={
-        "test": [
-            "flake8",
-            "isort",
-            "pytest",
-            "pytest-cov",
-            "tox",
-            "tox-wheel",
-            "pre-commit",
-        ]
-    },
     url="https://github.com/grammatech/gtirb-rewriting",
     license="GPLv3",
 )
