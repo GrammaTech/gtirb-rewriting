@@ -104,8 +104,9 @@ def split_byte_interval(
 
     # Process groups in decreasing offset order, but skip the first group
     # because it will stay in the original interval.
-    groups.reverse()
-    groups.pop()
+    if groups:
+        groups.reverse()
+        groups.pop()
 
     # Create the new byte interval for each group of blocks.
     intervals = []

@@ -405,3 +405,11 @@ def test_join_byte_intervals_no_nop():
 
     with pytest.raises(gtirb_rewriting.PaddingError):
         gtirb_rewriting.join_byte_intervals([bi1, bi2], alignment={bi2: 2})
+
+
+def test_split_byte_interval_no_blocks():
+    contents = b"abc123"
+    bi = gtirb.ByteInterval(contents=contents)
+    intervals = gtirb_rewriting.split_byte_interval(bi)
+    assert len(intervals) == 1
+    assert intervals[0].contents == contents
