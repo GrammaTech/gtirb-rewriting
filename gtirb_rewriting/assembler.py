@@ -19,6 +19,7 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+import dataclasses
 import itertools
 from typing import Dict, List, Optional, Set
 
@@ -29,66 +30,72 @@ from .assembly import X86Syntax
 from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 
 
-class _Assembler:
+class Assembler:
     """
-    Assembles the assembly from a patch and its prologue/epilogue, creating
-    control flow graph as it goes.
-
-    :ivar ~.data: The encoded instructions from assembling the patch.
-    :ivar ~.cfg: The control flow graph for the patch.
-    :ivar ~.blocks: All blocks, in order, for the patch.
-    :ivar ~.symbolic_expressions: A map of offset to symbolic expression,
-                                  relative to the data position.
-    :ivar ~.local_symbols: Symbols that were created in the patch.
-    :ivar ~.proxies: Proxy blocks that represent unknown targets.
+    Assembles chunks of assembly, creating a control flow graph and other
+    GTIRB structures as it goes.
     """
 
     def __init__(
         self,
         module: gtirb.Module,
-        patch_id: int,
-        module_symbols: Dict[str, gtirb.Symbol],
-        trivially_unreachable: bool,
+        *,
+        temp_symbol_suffix: str = None,
+        module_symbols: Dict[str, gtirb.Symbol] = None,
+        trivially_unreachable: bool = False,
     ) -> None:
         """
         :param module: The module the patch will be inserted into.
-        :param patch_id: A unique integer for this patch to avoid ambiguous
-                         symbol names.
+        :param temp_symbol_suffix: A suffix to use for local symbols that are
+               considered temporary. Passing in a unique suffix to each
+               assembler that targets the same module means that the assembly
+               itself does not have to be concerned with having unique
+               temporary symbol names.
         :param module_symbols: A map from symbol name to symbol, to speed up
-                               name lookups. This may be updated by the
-                               assembler upon cache misses.
+                               name lookups. This must be in sync with the
+                               module's symbols.
         :param trivially_unreachable: Is the entry block of the patch
                                       obviously unreachable? For example,
                                       inserting after a ret instruction.
         """
         self._module = module
-        self._patch_id = patch_id
-        self.data = bytearray()
-        self.cfg = gtirb.CFG()
-        self.blocks = [gtirb.CodeBlock()]
-        self.symbolic_expressions = {}
-        self.local_symbols = {}
-        self._module_symbols = module_symbols
+        self._temp_symbol_suffix = temp_symbol_suffix
+        self._data = bytearray()
+        self._cfg = gtirb.CFG()
+        self._blocks = [gtirb.CodeBlock()]
+        self._symbolic_expressions = {}
+        self._local_symbols = {}
+        if module_symbols is not None:
+            self._module_symbols = module_symbols
+        else:
+            self._module_symbols = {sym.name: sym for sym in module.symbols}
         self._trivially_unreachable = trivially_unreachable
-        self.section_name = None
-        self.proxies = set()
+        self._section_name = None
+        self._proxies = set()
         self._blocks_with_code = set()
 
     @property
-    def entry_block(self) -> gtirb.CodeBlock:
-        return self.blocks[0]
+    def _entry_block(self) -> gtirb.CodeBlock:
+        return self._blocks[0]
 
     @property
-    def current_block(self) -> gtirb.CodeBlock:
-        return self.blocks[-1]
+    def _current_block(self) -> gtirb.CodeBlock:
+        return self._blocks[-1]
 
-    def assemble(self, asm: str, x86_syntax: X86Syntax) -> None:
+    def assemble(
+        self, asm: str, x86_syntax: X86Syntax = X86Syntax.ATT
+    ) -> None:
         """
-        Assembles additional assembly into this chunk, continuing where the
-        last call to assemble left off.
+        Assembles additional assembly, continuing where the last call to
+        assemble left off.
         """
         assembler = mcasm.Assembler(_target_triple(self._module))
-        assembler.x86_syntax = x86_syntax
+
+        # X86 is hopefully the only ISA with more than one syntax mode that
+        # is widely used. If other targets do come up, we may simply choose
+        # a blessed syntax and avoid the additional complexity.
+        if self._module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64):
+            assembler.x86_syntax = x86_syntax
 
         events = assembler.assemble(asm)
 
@@ -115,37 +122,40 @@ class _Assembler:
     def _precreate_defined_label(self, symbol: dict) -> None:
         label_name = symbol["name"]
 
-        # If the symbol is temporary in LLVM's eyes, we will append our patch
-        # id to it in order to make the symbol name unique.
+        # If the symbol is temporary in LLVM's eyes and our client has given
+        # us a suffix to use for temporary symbols, tack it on. This allows
+        # clients to use the same assembly multiple times without worrying
+        # about duplicate symbol names, as long as they pass a different
+        # suffix each time.
         symbol_name = label_name
-        if symbol["isTemporary"]:
-            symbol_name += f"_{self._patch_id}"
+        if symbol["isTemporary"] and self._temp_symbol_suffix is not None:
+            symbol_name += self._temp_symbol_suffix
 
         assert (
-            label_name not in self.local_symbols
+            label_name not in self._local_symbols
             and symbol_name not in self._module_symbols
         ), f"{symbol_name} defined multiple times"
 
         label_sym = gtirb.Symbol(name=symbol_name, payload=gtirb.CodeBlock())
-        self.local_symbols[label_name] = label_sym
+        self._local_symbols[label_name] = label_sym
 
     def _assemble_label(self, symbol: dict) -> None:
-        label_sym = self.local_symbols[symbol["name"]]
+        label_sym = self._local_symbols[symbol["name"]]
         label_block = label_sym.referent
         assert label_block
 
         label_block.offset = (
-            self.current_block.offset + self.current_block.size
+            self._current_block.offset + self._current_block.size
         )
-        self.cfg.add(
+        self._cfg.add(
             gtirb.Edge(
-                source=self.current_block,
+                source=self._current_block,
                 target=label_block,
                 label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
             )
         )
 
-        self.blocks.append(label_block)
+        self._blocks.append(label_block)
 
     def _assemble_change_section(self, section: dict) -> None:
         # We don't have any work to do here, but we want to make sure that
@@ -153,36 +163,36 @@ class _Assembler:
         assert section["kind"][
             "isText"
         ], "Sections other than .text are not supported"
-        self.section_name = section["name"]
+        self._section_name = section["name"]
 
     def _assemble_instruction(
         self, data: bytes, inst: dict, fixups: List[dict]
     ) -> None:
         for fixup in fixups:
-            pos = len(self.data) + fixup["offset"]
-            self.symbolic_expressions[pos] = self._fixup_to_symbolic_operand(
+            pos = len(self._data) + fixup["offset"]
+            self._symbolic_expressions[pos] = self._fixup_to_symbolic_operand(
                 fixup, data, inst["desc"]["isCall"] or inst["desc"]["isBranch"]
             )
 
-        self.data += data
-        self.current_block.size += len(data)
-        self._blocks_with_code.add(self.current_block)
+        self._data += data
+        self._current_block.size += len(data)
+        self._blocks_with_code.add(self._current_block)
 
         if inst["desc"]["isReturn"]:
             proxy = gtirb.ProxyBlock()
-            self.proxies.add(proxy)
-            self.cfg.add(
+            self._proxies.add(proxy)
+            self._cfg.add(
                 gtirb.Edge(
-                    source=self.current_block,
+                    source=self._current_block,
                     target=proxy,
                     label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
                 )
             )
 
             next_block = gtirb.CodeBlock(
-                offset=self.current_block.offset + self.current_block.size
+                offset=self._current_block.offset + self._current_block.size
             )
-            self.blocks.append(next_block)
+            self._blocks.append(next_block)
 
         elif inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
             assert not inst["desc"][
@@ -197,7 +207,7 @@ class _Assembler:
             assert target_fixup.offset == 0
 
             next_block = gtirb.CodeBlock(
-                offset=self.current_block.offset + self.current_block.size
+                offset=self._current_block.offset + self._current_block.size
             )
 
             if isinstance(target_fixup.symbol.referent, gtirb.CfgNode):
@@ -209,9 +219,9 @@ class _Assembler:
                         conditional=inst["desc"]["isConditionalBranch"],
                     )
 
-                self.cfg.add(
+                self._cfg.add(
                     gtirb.Edge(
-                        source=self.current_block,
+                        source=self._current_block,
                         target=target_fixup.symbol.referent,
                         label=edge_label,
                     )
@@ -220,9 +230,9 @@ class _Assembler:
             # Currently we assume that all calls can return and that they need
             # a fallthrough edge.
             if inst["desc"]["isCall"] or inst["desc"]["isConditionalBranch"]:
-                self.cfg.add(
+                self._cfg.add(
                     gtirb.Edge(
-                        source=self.current_block,
+                        source=self._current_block,
                         target=next_block,
                         label=gtirb.Edge.Label(
                             type=gtirb.Edge.Type.Fallthrough
@@ -230,11 +240,11 @@ class _Assembler:
                     )
                 )
 
-            self.blocks.append(next_block)
+            self._blocks.append(next_block)
 
     def _assemble_bytes(self, data: bytes) -> None:
-        self.data += data
-        self.current_block.size += len(data)
+        self._data += data
+        self._current_block.size += len(data)
 
     def _resolve_symbol_ref(self, expr: dict) -> gtirb.Symbol:
         assert expr["kind"] == "symbolRef"
@@ -312,19 +322,12 @@ class _Assembler:
         :param name: The symbol's name.
         """
 
-        sym = self.local_symbols.get(name, None)
+        sym = self._local_symbols.get(name, None)
         if sym:
             return sym
 
         sym = self._module_symbols.get(name, None)
         if sym and sym.module == self._module:
-            return sym
-
-        sym = next(
-            (sym for sym in self._module.symbols if sym.name == name), None
-        )
-        if sym:
-            self._module_symbols[sym.name] = sym
             return sym
 
         return None
@@ -335,68 +338,136 @@ class _Assembler:
         """
         Alters all symbols referring to an old block to refer to a new block.
         """
-        for sym in self.local_symbols.values():
+        for sym in self._local_symbols.values():
             if sym.referent == old_block:
                 sym.referent = new_block
 
     def _remove_empty_blocks(self) -> None:
         final_blocks = []
-        for _, group in itertools.groupby(self.blocks, key=lambda b: b.offset):
+        for _, group in itertools.groupby(
+            self._blocks, key=lambda b: b.offset
+        ):
             *extra_blocks, main_block = group
-            assert main_block.size or main_block == self.blocks[-1]
+            assert main_block.size or main_block == self._blocks[-1]
 
             for extra_block in extra_blocks:
                 assert not extra_block.size
 
-                for edge in list(self.cfg.in_edges(extra_block)):
-                    self.cfg.discard(edge)
+                for edge in list(self._cfg.in_edges(extra_block)):
+                    self._cfg.discard(edge)
                     if edge.source not in extra_blocks:
                         assert edge.source != main_block
-                        self.cfg.add(edge._replace(target=main_block))
+                        self._cfg.add(edge._replace(target=main_block))
 
                 # Our extra block should only have a single fallthrough edge
                 # that is to another extra block or the main block.
-                for edge in list(self.cfg.out_edges(extra_block)):
+                for edge in list(self._cfg.out_edges(extra_block)):
                     assert edge.label.type == gtirb.Edge.Type.Fallthrough
                     assert (
                         edge.target in extra_blocks
                         or edge.target == main_block
                     )
-                    self.cfg.discard(edge)
+                    self._cfg.discard(edge)
 
                 self._replace_symbol_referents(extra_block, main_block)
 
             final_blocks.append(main_block)
 
-        self.blocks = final_blocks
+        self._blocks = final_blocks
 
     def _convert_data_blocks(self) -> None:
         """
         Converts blocks that only have data and have no incoming control flow
         to be DataBlocks.
         """
-        for i in range(len(self.blocks)):
-            block = self.blocks[i]
+        for i in range(len(self._blocks)):
+            block = self._blocks[i]
             if (
                 block.size
                 and block not in self._blocks_with_code
-                and (block != self.entry_block or self._trivially_unreachable)
-                and not any(self.cfg.in_edges(block))
+                and (block != self._entry_block or self._trivially_unreachable)
+                and not any(self._cfg.in_edges(block))
             ):
                 new_block = gtirb.DataBlock(
                     offset=block.offset, size=block.size
                 )
                 self._replace_symbol_referents(block, new_block)
-                for out_edge in set(self.cfg.out_edges(block)):
+                for out_edge in set(self._cfg.out_edges(block)):
                     assert _is_fallthrough_edge(out_edge)
-                    self.cfg.discard(out_edge)
-                self.blocks[i] = new_block
+                    self._cfg.discard(out_edge)
+                self._blocks[i] = new_block
 
-    def finalize(self) -> None:
+    def finalize(self) -> "Result":
         """
-        Finalizes the assembly contents and validates that there are no
-        undefined symbols referenced.
+        Finalizes the assembly contents and returns the result.
         """
+        assert self._section_name
 
         self._remove_empty_blocks()
         self._convert_data_blocks()
+
+        result = self.Result(
+            data=bytes(self._data),
+            cfg=self._cfg,
+            blocks=self._blocks,
+            symbolic_expressions=self._symbolic_expressions,
+            symbols=list(self._local_symbols.values()),
+            proxies=self._proxies,
+            section_name=self._section_name,
+        )
+
+        # Reinitialize the assembler just in case someone tries to use the
+        # object again.
+        self.__init__(
+            self._module,
+            temp_symbol_suffix=self._temp_symbol_suffix,
+            module_symbols=self._module_symbols,
+            trivially_unreachable=self._trivially_unreachable,
+        )
+
+        return result
+
+    @dataclasses.dataclass
+    class Result:
+        """
+        The result of assembling an assembly patch.
+        """
+
+        data: bytes
+        """
+        The encoded bytes from assembling the patch.
+        """
+
+        cfg: gtirb.CFG
+        """
+        The control flow graph for the patch.
+        """
+
+        blocks: List[gtirb.ByteBlock]
+        """
+        All blocks, in order of offset, for the patch. There will be at most
+        one empty block, which will be at the end of the list.
+        """
+
+        symbolic_expressions: Dict[int, gtirb.SymbolicExpression]
+        """
+        A map of offset to symbolic expression, with 0 being the start of
+        `data`.
+        """
+
+        symbols: List[gtirb.Symbol]
+        """
+        Symbols that were defined in the patch.
+        """
+
+        proxies: Set[gtirb.ProxyBlock]
+        """
+        Proxy blocks that represent unknown targets.
+        """
+
+        section_name: str
+        """
+        The name of the section that the bytes are in. This currently will
+        always be the text section (which may be spelled differently across
+        platforms).
+        """

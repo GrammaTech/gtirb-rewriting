@@ -20,6 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 from .abi import ABI, CallingConventionDesc
+from .assembler import Assembler
 from .assembly import (
     Constraints,
     InsertionContext,
@@ -54,6 +55,7 @@ __all__ = [
     "ABI",
     "AllBlocksScope",
     "AllFunctionsScope",
+    "Assembler",
     "BlockPosition",
     "CallingConventionDesc",
     "Constraints",

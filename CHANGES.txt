@@ -1,3 +1,6 @@
+0.0.20:
+- Exposed the Assembler class
+
 0.0.19:
 - Added support for the .byte directive
 - Added support for printing data blocks with show_block_asm
