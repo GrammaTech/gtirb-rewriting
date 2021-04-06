@@ -22,7 +22,6 @@
 
 import gtirb
 import gtirb_rewriting
-from gtirb_rewriting.assembler import _Assembler
 from helpers import add_proxy_block, add_symbol, create_test_module
 
 
@@ -32,39 +31,39 @@ def test_return_edges():
         file_format=gtirb.Module.FileFormat.ELF,
         name="test",
     )
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         "ret", gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 2
-    assert assembler.blocks[0].offset == 0
-    assert assembler.blocks[0].size == 1
-    assert assembler.blocks[1].offset == 1
-    assert assembler.blocks[1].size == 0
+    assert len(result.blocks) == 2
+    assert result.blocks[0].offset == 0
+    assert result.blocks[0].size == 1
+    assert result.blocks[1].offset == 1
+    assert result.blocks[1].size == 0
 
-    edges = list(assembler.cfg.out_edges(assembler.blocks[0]))
+    edges = list(result.cfg.out_edges(result.blocks[0]))
     assert len(edges) == 1
     assert edges[0].label.type == gtirb.Edge.Type.Return
     assert isinstance(edges[0].target, gtirb.ProxyBlock)
-    assert edges[0].target in assembler.proxies
+    assert edges[0].target in result.proxies
 
-    assert assembler.data == b"\xC3"
+    assert result.data == b"\xC3"
 
 
 def test_symbolic_expr():
     ir, m, bi = create_test_module()
     puts_sym = add_symbol(m, "puts", add_proxy_block(m))
 
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         "call puts", gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.symbolic_expressions) == 1
-    sym_expr = assembler.symbolic_expressions[1]
+    assert len(result.symbolic_expressions) == 1
+    sym_expr = result.symbolic_expressions[1]
     assert isinstance(sym_expr, gtirb.SymAddrConst)
     assert sym_expr.symbol == puts_sym
     assert sym_expr.offset == 0
@@ -75,14 +74,14 @@ def test_symbolic_expr_sym_offset():
     ir, m, bi = create_test_module()
     puts_sym = add_symbol(m, "puts", add_proxy_block(m))
 
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         "inc byte ptr [puts + 42]", gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.symbolic_expressions) == 1
-    sym_expr = assembler.symbolic_expressions[3]
+    assert len(result.symbolic_expressions) == 1
+    sym_expr = result.symbolic_expressions[3]
     assert isinstance(sym_expr, gtirb.SymAddrConst)
     assert sym_expr.symbol == puts_sym
     assert sym_expr.offset == 42
@@ -95,7 +94,7 @@ def test_byte_directive_as_code_due_to_entrypoint():
         file_format=gtirb.Module.FileFormat.ELF,
         name="test",
     )
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         """
         .byte 0x66
@@ -103,12 +102,12 @@ def test_byte_directive_as_code_due_to_entrypoint():
         """,
         gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 1
-    assert isinstance(assembler.blocks[0], gtirb.CodeBlock)
-    assert assembler.blocks[0].size == 2
-    assert assembler.data == b"\x66\x90"
+    assert len(result.blocks) == 1
+    assert isinstance(result.blocks[0], gtirb.CodeBlock)
+    assert result.blocks[0].size == 2
+    assert result.data == b"\x66\x90"
 
 
 def test_byte_directive_as_code_due_to_cfg():
@@ -122,7 +121,7 @@ def test_byte_directive_as_code_due_to_cfg():
     )
 
     # This gets treated as code because control flow can execute it.
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         """
         jne .L_foo
@@ -132,22 +131,22 @@ def test_byte_directive_as_code_due_to_cfg():
         """,
         gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 3
-    assert isinstance(assembler.blocks[0], gtirb.CodeBlock)
-    assert assembler.blocks[0].offset == 0
-    assert assembler.blocks[0].size == 2
+    assert len(result.blocks) == 3
+    assert isinstance(result.blocks[0], gtirb.CodeBlock)
+    assert result.blocks[0].offset == 0
+    assert result.blocks[0].size == 2
 
-    assert isinstance(assembler.blocks[1], gtirb.CodeBlock)
-    assert assembler.blocks[1].offset == 2
-    assert assembler.blocks[1].size == 2
+    assert isinstance(result.blocks[1], gtirb.CodeBlock)
+    assert result.blocks[1].offset == 2
+    assert result.blocks[1].size == 2
 
-    assert isinstance(assembler.blocks[2], gtirb.CodeBlock)
-    assert assembler.blocks[2].offset == 4
-    assert assembler.blocks[2].size == 0
+    assert isinstance(result.blocks[2], gtirb.CodeBlock)
+    assert result.blocks[2].offset == 4
+    assert result.blocks[2].size == 0
 
-    assert assembler.data == b"\x75\x00\x66\x90"
+    assert result.data == b"\x75\x00\x66\x90"
 
 
 def test_byte_directive_as_code_due_to_mixing():
@@ -161,7 +160,7 @@ def test_byte_directive_as_code_due_to_mixing():
     )
 
     # This gets treated as code because it has other code in the block.
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         """
         jmp .L_foo
@@ -172,22 +171,22 @@ def test_byte_directive_as_code_due_to_mixing():
         """,
         gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 3
-    assert isinstance(assembler.blocks[0], gtirb.CodeBlock)
-    assert assembler.blocks[0].offset == 0
-    assert assembler.blocks[0].size == 2
+    assert len(result.blocks) == 3
+    assert isinstance(result.blocks[0], gtirb.CodeBlock)
+    assert result.blocks[0].offset == 0
+    assert result.blocks[0].size == 2
 
-    assert isinstance(assembler.blocks[1], gtirb.CodeBlock)
-    assert assembler.blocks[1].offset == 2
-    assert assembler.blocks[1].size == 4
+    assert isinstance(result.blocks[1], gtirb.CodeBlock)
+    assert result.blocks[1].offset == 2
+    assert result.blocks[1].size == 4
 
-    assert isinstance(assembler.blocks[2], gtirb.CodeBlock)
-    assert assembler.blocks[2].offset == 6
-    assert assembler.blocks[2].size == 0
+    assert isinstance(result.blocks[2], gtirb.CodeBlock)
+    assert result.blocks[2].offset == 6
+    assert result.blocks[2].size == 0
 
-    assert assembler.data == b"\xEB\x00\x66\x90\xFF\xC0"
+    assert result.data == b"\xEB\x00\x66\x90\xFF\xC0"
 
 
 def test_byte_directive_as_data():
@@ -200,7 +199,7 @@ def test_byte_directive_as_data():
         type_name="vector<string>", data=["DYN"]
     )
 
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         """
         jmp .L_foo
@@ -210,22 +209,22 @@ def test_byte_directive_as_data():
         """,
         gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 3
-    assert isinstance(assembler.blocks[0], gtirb.CodeBlock)
-    assert assembler.blocks[0].offset == 0
-    assert assembler.blocks[0].size == 2
+    assert len(result.blocks) == 3
+    assert isinstance(result.blocks[0], gtirb.CodeBlock)
+    assert result.blocks[0].offset == 0
+    assert result.blocks[0].size == 2
 
-    assert isinstance(assembler.blocks[1], gtirb.DataBlock)
-    assert assembler.blocks[1].offset == 2
-    assert assembler.blocks[1].size == 2
+    assert isinstance(result.blocks[1], gtirb.DataBlock)
+    assert result.blocks[1].offset == 2
+    assert result.blocks[1].size == 2
 
-    assert isinstance(assembler.blocks[2], gtirb.CodeBlock)
-    assert assembler.blocks[2].offset == 4
-    assert assembler.blocks[2].size == 0
+    assert isinstance(result.blocks[2], gtirb.CodeBlock)
+    assert result.blocks[2].offset == 4
+    assert result.blocks[2].size == 0
 
-    assert assembler.data == b"\xEB\x00\x66\x90"
+    assert result.data == b"\xEB\x00\x66\x90"
 
 
 def test_asciz_directive_as_data():
@@ -238,7 +237,7 @@ def test_asciz_directive_as_data():
         type_name="vector<string>", data=["DYN"]
     )
 
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         """
         jmp .L_foo
@@ -248,27 +247,28 @@ def test_asciz_directive_as_data():
         """,
         gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 3
-    assert isinstance(assembler.blocks[0], gtirb.CodeBlock)
-    assert assembler.blocks[0].offset == 0
-    assert assembler.blocks[0].size == 2
+    assert len(result.blocks) == 3
+    assert isinstance(result.blocks[0], gtirb.CodeBlock)
+    assert result.blocks[0].offset == 0
+    assert result.blocks[0].size == 2
 
-    assert isinstance(assembler.blocks[1], gtirb.DataBlock)
-    assert assembler.blocks[1].offset == 2
-    assert assembler.blocks[1].size == 6
-    assert assembler.local_symbols[".L_my_str"].referent == assembler.blocks[1]
+    assert isinstance(result.blocks[1], gtirb.DataBlock)
+    assert result.blocks[1].offset == 2
+    assert result.blocks[1].size == 6
+    sym = next(sym for sym in result.symbols if sym.name == ".L_my_str")
+    assert sym.referent == result.blocks[1]
 
-    assert isinstance(assembler.blocks[2], gtirb.CodeBlock)
-    assert assembler.blocks[2].offset == 8
-    assert assembler.blocks[2].size == 0
+    assert isinstance(result.blocks[2], gtirb.CodeBlock)
+    assert result.blocks[2].offset == 8
+    assert result.blocks[2].size == 0
 
-    assert assembler.data == b"\xEB\x00hello\x00"
+    assert result.data == b"\xEB\x00hello\x00"
 
-    for edge in assembler.cfg:
-        assert edge.source in assembler.blocks
-        assert edge.target in assembler.blocks
+    for edge in result.cfg:
+        assert edge.source in result.blocks
+        assert edge.target in result.blocks
 
 
 def test_byte_directive_as_data_due_to_unreachable_entrypoint():
@@ -277,7 +277,7 @@ def test_byte_directive_as_data_due_to_unreachable_entrypoint():
         file_format=gtirb.Module.FileFormat.ELF,
         name="test",
     )
-    assembler = _Assembler(m, 0, {}, True)
+    assembler = gtirb_rewriting.Assembler(m, trivially_unreachable=True)
     assembler.assemble(
         """
         .byte 0x66
@@ -285,12 +285,12 @@ def test_byte_directive_as_data_due_to_unreachable_entrypoint():
         """,
         gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 1
-    assert isinstance(assembler.blocks[0], gtirb.DataBlock)
-    assert assembler.blocks[0].size == 2
-    assert assembler.data == b"\x66\x90"
+    assert len(result.blocks) == 1
+    assert isinstance(result.blocks[0], gtirb.DataBlock)
+    assert result.blocks[0].size == 2
+    assert result.data == b"\x66\x90"
 
 
 def test_multiple_data_labels():
@@ -303,7 +303,7 @@ def test_multiple_data_labels():
         type_name="vector<string>", data=["DYN"]
     )
 
-    assembler = _Assembler(m, 0, {}, False)
+    assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         """
         jmp .L_foo
@@ -315,31 +315,58 @@ def test_multiple_data_labels():
         """,
         gtirb_rewriting.X86Syntax.INTEL,
     )
-    assembler.finalize()
+    result = assembler.finalize()
 
-    assert len(assembler.blocks) == 4
-    assert isinstance(assembler.blocks[0], gtirb.CodeBlock)
-    assert assembler.blocks[0].offset == 0
-    assert assembler.blocks[0].size == 2
+    assert len(result.blocks) == 4
+    assert isinstance(result.blocks[0], gtirb.CodeBlock)
+    assert result.blocks[0].offset == 0
+    assert result.blocks[0].size == 2
 
-    assert isinstance(assembler.blocks[1], gtirb.DataBlock)
-    assert assembler.blocks[1].offset == 2
-    assert assembler.blocks[1].size == 1
-    assert assembler.local_symbols[".L_my_str"].referent == assembler.blocks[1]
+    assert isinstance(result.blocks[1], gtirb.DataBlock)
+    assert result.blocks[1].offset == 2
+    assert result.blocks[1].size == 1
+    sym1 = next(sym for sym in result.symbols if sym.name == ".L_my_str")
+    assert sym1.referent == result.blocks[1]
 
-    assert isinstance(assembler.blocks[2], gtirb.DataBlock)
-    assert assembler.blocks[2].offset == 3
-    assert assembler.blocks[2].size == 1
-    assert (
-        assembler.local_symbols[".L_my_str_2"].referent == assembler.blocks[2]
+    assert isinstance(result.blocks[2], gtirb.DataBlock)
+    assert result.blocks[2].offset == 3
+    assert result.blocks[2].size == 1
+    sym2 = next(sym for sym in result.symbols if sym.name == ".L_my_str_2")
+    assert sym2.referent == result.blocks[2]
+
+    assert isinstance(result.blocks[3], gtirb.CodeBlock)
+    assert result.blocks[3].offset == 4
+    assert result.blocks[3].size == 0
+
+    assert result.data == b"\xEB\x00\x00\x01"
+
+    for edge in result.cfg:
+        assert edge.source in result.blocks
+        assert edge.target in result.blocks
+
+
+def test_temp_symbol_suffix():
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
     )
 
-    assert isinstance(assembler.blocks[3], gtirb.CodeBlock)
-    assert assembler.blocks[3].offset == 4
-    assert assembler.blocks[3].size == 0
+    assembler = gtirb_rewriting.Assembler(m, temp_symbol_suffix="_1")
+    assembler.assemble(
+        """
+        .L_foo:
+        nop
+        bar:
+        ud2
+        """
+    )
+    result = assembler.finalize()
 
-    assert assembler.data == b"\xEB\x00\x00\x01"
+    temp_sym = next(sym for sym in result.symbols if sym.name == ".L_foo_1")
+    assert temp_sym.referent.offset == 0
+    assert temp_sym.referent.size == 1
 
-    for edge in assembler.cfg:
-        assert edge.source in assembler.blocks
-        assert edge.target in assembler.blocks
+    bar_sym = next(sym for sym in result.symbols if sym.name == "bar")
+    assert bar_sym.referent.offset == 1
+    assert bar_sym.referent.size == 2

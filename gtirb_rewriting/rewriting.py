@@ -33,7 +33,7 @@ import mcasm
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .abi import ABI
-from .assembler import _Assembler
+from .assembler import Assembler
 from .assembly import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
@@ -80,7 +80,6 @@ class RewritingContext:
         enabled that may have noticable run-time overhead.
         """
         self._module = module
-        self._symbols_by_name = {s.name: s for s in module.symbols}
         self._functions = functions
         self._decoder = GtirbInstructionDecoder(self._module.isa)
         self._abi = ABI.get(module)
@@ -202,11 +201,11 @@ class RewritingContext:
                 _block_fallthrough_targets(block)
             )
 
-        assembler = _Assembler(
+        assembler = Assembler(
             self._module,
-            self._patch_id,
-            self._symbols_by_name,
-            is_trivially_unreachable,
+            temp_symbol_suffix=f"_{self._patch_id}",
+            module_symbols=self._symbols_by_name,
+            trivially_unreachable=is_trivially_unreachable,
         )
         for snippet in snippets:
             assembler.assemble(snippet[0].code, snippet[0].x86_syntax)
@@ -217,7 +216,7 @@ class RewritingContext:
             raise
         for snippet in reversed(snippets):
             assembler.assemble(snippet[1].code, snippet[1].x86_syntax)
-        assembler.finalize()
+        assembler_result = assembler.finalize()
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("Applying %s at %s+%s", patch, block, offset)
@@ -228,12 +227,12 @@ class RewritingContext:
             block,
             offset,
             replacement_length,
-            bytes(assembler.data),
-            assembler.blocks,
-            assembler.cfg,
-            assembler.symbolic_expressions,
-            assembler.local_symbols.values(),
-            assembler.proxies,
+            assembler_result.data,
+            assembler_result.blocks,
+            assembler_result.cfg,
+            assembler_result.symbolic_expressions,
+            assembler_result.symbols,
+            assembler_result.proxies,
             self._functions_by_block,
         )
 
@@ -242,29 +241,32 @@ class RewritingContext:
             if func.uuid in function_blocks:
                 function_blocks[func.uuid].update(
                     b
-                    for b in assembler.blocks
+                    for b in assembler_result.blocks
                     if isinstance(b, gtirb.CodeBlock)
                 )
 
         self._functions_by_block.update(
             {
                 b: func.uuid
-                for b in assembler.blocks
+                for b in assembler_result.blocks
                 if isinstance(b, gtirb.CodeBlock)
             }
+        )
+        self._symbols_by_name.update(
+            {sym.name: sym for sym in assembler_result.symbols}
         )
 
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
-            for patch_block in assembler.blocks:
+            for patch_block in assembler_result.blocks:
                 show_block_asm(
                     patch_block, decoder=self._decoder, logger=self._logger
                 )
 
         return (
-            assembler.blocks[-1] if assembler.blocks else block,
-            len(assembler.data),
+            assembler_result.blocks[-1] if assembler_result.blocks else block,
+            len(assembler_result.data),
         )
 
     def get_or_insert_extern_symbol(
@@ -515,7 +517,6 @@ class RewritingContext:
         sym.referent = block
         # TODO: Should we be adding the symbol here?
         self._module.symbols.add(sym)
-        self._symbols_by_name[sym.name] = sym
         self._function_insertions.append(_FunctionInsertion(sym, block, patch))
         return sym
 
@@ -563,6 +564,7 @@ class RewritingContext:
                 for func in self._functions
                 for block in func.get_all_blocks()
             }
+            self._symbols_by_name = {s.name: s for s in self._module.symbols}
 
             for func in self._function_insertions:
                 self._insert_function_stub(func.symbol, func.block)
