@@ -27,6 +27,7 @@ from typing import Callable, Optional, Set
 import gtirb
 import gtirb_functions
 
+from .abi import ABI
 from .assembly import Register, X86Syntax
 from .utils import decorate_extern_symbol
 
@@ -54,6 +55,13 @@ class InsertionContext:
 
     def decorate_extern_symbol(self, name: str) -> str:
         return decorate_extern_symbol(self.module, name)
+
+    def temporary_label(self, name: str) -> str:
+        """
+        Creates a temporary label based off of the given base name.
+        """
+        abi = ABI.get(self.module)
+        return abi.temporary_label_prefix() + name
 
 
 @dataclasses.dataclass

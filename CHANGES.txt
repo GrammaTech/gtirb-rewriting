@@ -1,5 +1,6 @@
 0.0.20:
 - Exposed the Assembler class
+- Added ABI.temporary_label_prefix and InsertionContext.temporary_label
 
 0.0.19:
 - Added support for the .byte directive

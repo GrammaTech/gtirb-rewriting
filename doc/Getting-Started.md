@@ -216,6 +216,19 @@ def get_asm(self, context):
     """
 ```
 
+If your patch is intended to be portable across different ABIs, you can use
+`ABI.temporary_label_prefix` to get the prefix needed for a temporary label or
+`InsertionContext.temporary_label` create an appropriate label. For example:
+```python
+def get_asm(self, context):
+    label = context.temporary_label("my_label")
+    return """
+        jmp {label}
+        {label}:
+        nop
+    """
+```
+
 ## Getting a Block's Original Address
 
 For profiling and tracing transforms, it's common to want to know the original

@@ -79,3 +79,29 @@ def test_constraints_decorator_partial():
         clobbers_flags=True
     )
     assert patch.get_asm(context) == "nop"
+
+
+def test_temporary_label_elf_x64():
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
+    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
+
+    context = gtirb_rewriting.InsertionContext(m, func, block, 0)
+    assert context.temporary_label("foo") == ".Lfoo"
+
+
+def test_temporary_label_pe_ia32():
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.IA32,
+        file_format=gtirb.Module.FileFormat.PE,
+        name="test",
+    )
+    func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
+    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
+
+    context = gtirb_rewriting.InsertionContext(m, func, block, 0)
+    assert context.temporary_label("foo") == "Lfoo"
