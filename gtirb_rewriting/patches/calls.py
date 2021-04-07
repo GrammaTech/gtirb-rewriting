@@ -25,7 +25,8 @@ from typing import Callable, Iterable, List, Optional, Union
 import gtirb
 
 from ..abi import ABI, CallingConventionDesc
-from ..assembly import Constraints, InsertionContext, Patch, X86Syntax
+from ..assembly import X86Syntax
+from ..patch import Constraints, InsertionContext, Patch
 
 
 class CallPatch(Patch):

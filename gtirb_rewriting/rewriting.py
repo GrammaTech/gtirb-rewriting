@@ -34,7 +34,7 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .abi import ABI
 from .assembler import Assembler
-from .assembly import InsertionContext, Patch
+from .patch import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
