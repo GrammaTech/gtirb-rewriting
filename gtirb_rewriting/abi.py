@@ -162,6 +162,12 @@ class ABI:
         """
         raise NotImplementedError
 
+    def temporary_label_prefix(self) -> str:
+        """
+        The prefix used to denote that a label is temporary.
+        """
+        raise NotImplementedError
+
 
 class _IA32(ABI):
     def _save_register(
@@ -228,6 +234,9 @@ class _IA32_PE(_IA32):
             caller_cleanup=True,
             shadow_space=0,
         )
+
+    def temporary_label_prefix(self) -> str:
+        return "L"
 
 
 class _X86_64(ABI):
@@ -339,6 +348,9 @@ class _X86_64_PE(_X86_64):
             shadow_space=32,
         )
 
+    def temporary_label_prefix(self) -> str:
+        return ".L"
+
 
 class _X86_64_ELF(_X86_64):
     def caller_saved_registers(self) -> Set[Register]:
@@ -359,6 +371,9 @@ class _X86_64_ELF(_X86_64):
 
     def red_zone_size(self) -> int:
         return 128
+
+    def temporary_label_prefix(self) -> str:
+        return ".L"
 
     def _preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
         return (

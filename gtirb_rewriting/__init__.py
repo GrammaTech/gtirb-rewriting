@@ -21,20 +21,14 @@
 # endorsement should be inferred.
 from .abi import ABI, CallingConventionDesc
 from .assembler import Assembler
-from .assembly import (
-    Constraints,
-    InsertionContext,
-    Patch,
-    Register,
-    X86Syntax,
-    patch_constraints,
-)
+from .assembly import Register, X86Syntax
 from .intervalutils import (
     PaddingError,
     join_byte_intervals,
     split_byte_interval,
 )
 from .passes import Pass, PassManager
+from .patch import Constraints, InsertionContext, Patch, patch_constraints
 from .rewriting import RewritingContext
 from .scopes import (
     ENTRYPOINT_NAME,
