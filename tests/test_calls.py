@@ -67,26 +67,21 @@ def test_call_0_args(isa, file_format):
     if target == (gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub esp, 4
             call foo
-            add esp, 4
             """
         )
     elif target == (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.PE):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub rsp, 16
             sub rsp, 32
             call foo
-            add rsp, 48
+            add rsp, 32
             """
         )
     elif target == (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub rsp, 16
             call foo
-            add rsp, 16
             """
         )
     elif target == (gtirb.Module.ISA.ARM64, gtirb.Module.FileFormat.ELF):
@@ -115,35 +110,31 @@ def test_call_3_args(isa, file_format):
     if target == (gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub esp, 4
             push 3
             push 2
             push 1
             call foo
-            add esp, 16
+            add esp, 12
             """
         )
     elif target == (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.PE):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub rsp, 16
             mov R8, 3
             mov RDX, 2
             mov RCX, 1
             sub rsp, 32
             call foo
-            add rsp, 48
+            add rsp, 32
             """
         )
     elif target == (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub rsp, 16
             mov RDX, 3
             mov RSI, 2
             mov RDI, 1
             call foo
-            add rsp, 16
             """
         )
     elif target == (gtirb.Module.ISA.ARM64, gtirb.Module.FileFormat.ELF):
@@ -171,7 +162,6 @@ def test_call_11_args(isa, file_format):
     if target == (gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub esp, 4
             push 11
             push 10
             push 9
@@ -184,7 +174,7 @@ def test_call_11_args(isa, file_format):
             push 2
             push 1
             call foo
-            add esp, 48
+            add esp, 44
             """
         )
     elif target == (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.PE):
@@ -264,29 +254,25 @@ def test_call_symbol_arg(isa, file_format):
     if target == (gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub esp, 4
             push foo
             call foo
-            add esp, 8
+            add esp, 4
             """
         )
     elif target == (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.PE):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub rsp, 16
             mov RCX, foo
             sub rsp, 32
             call foo
-            add rsp, 48
+            add rsp, 32
             """
         )
     elif target == (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF):
         assert remove_indentation(asm) == remove_indentation(
             """
-            sub rsp, 16
             mov RDI, foo[rip]
             call foo
-            add rsp, 16
             """
         )
     elif target == (gtirb.Module.ISA.ARM64, gtirb.Module.FileFormat.ELF):
