@@ -227,12 +227,7 @@ class RewritingContext:
             block,
             offset,
             replacement_length,
-            assembler_result.data,
-            assembler_result.blocks,
-            assembler_result.cfg,
-            assembler_result.symbolic_expressions,
-            assembler_result.symbols,
-            assembler_result.proxies,
+            assembler_result,
             self._functions_by_block,
         )
 

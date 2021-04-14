@@ -21,10 +21,11 @@
 # endorsement should be inferred.
 
 import uuid
-from typing import Container, Dict, Iterable, List, Set
+from typing import Container, Dict, Iterable, Set
 
 import gtirb
 
+from .assembler import Assembler
 from .utils import (
     OffsetMapping,
     _block_fallthrough_targets,
@@ -239,12 +240,7 @@ def _modify_block_insert(
     block: gtirb.CodeBlock,
     offset: int,
     replacement_length: int,
-    new_bytes: bytes,
-    new_blocks: List[gtirb.ByteBlock],
-    new_cfg: gtirb.CFG,
-    new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
-    new_symbols: Iterable[gtirb.Symbol],
-    new_proxy_blocks: Set[gtirb.ProxyBlock],
+    code: Assembler.Result,
     functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
 ) -> None:
     """
@@ -253,14 +249,8 @@ def _modify_block_insert(
     :param offset: The byte offset into the code block.
     :param replacement_length: The number of bytes after `offset` that should
                                be removed.
-    :param new_bytes: The new content to be inserted.
-    :param new_blocks: The blocks corresponding to the new content.
-    :param new_cfg: The CFG corresponding to the new content.
-    :param new_symbolic_expressions: The symbolic expressions corresponding to
-                                     the new content, with the keys relative
-                                     to the start of `new_bytes`.
-    :param new_symbols: Any symbols that may be defined in the new content.
-    :param new_proxy_blocks: All proxy blocks used by the new content.
+    :param code: The assembled code to be inserted. It will be modified to
+                 reflect what actually gets inserted in the binary.
     :param functions_by_block: Map from code block to containing function UUID.
     """
 
@@ -268,48 +258,40 @@ def _modify_block_insert(
     assert 0 <= offset <= block.size
     assert 0 <= offset + replacement_length <= block.size
     assert replacement_length >= 0
-    assert new_bytes
-    assert new_blocks
-    assert block not in new_blocks
-    assert new_blocks[0].size, "must have at least one non-empty block"
+    assert code.data
+    assert code.blocks
+    assert block not in code.blocks
+    assert code.blocks[0].size, "must have at least one non-empty block"
     assert all(
-        new_block.size for new_block in new_blocks[:-1]
+        new_block.size for new_block in code.blocks[:-1]
     ), "only the last block may be empty"
-    assert isinstance(new_blocks[-1], gtirb.DataBlock) or not any(
-        new_cfg.out_edges(new_blocks[-1])
+    assert isinstance(code.blocks[-1], gtirb.DataBlock) or not any(
+        code.cfg.out_edges(code.blocks[-1])
     ), "the last block cannot have outgoing cfg edges"
 
     bi = block.byte_interval
     assert bi
 
     _add_return_edges_for_patch_calls(
-        block.module, functions_by_block, new_cfg
+        block.module, functions_by_block, code.cfg
     )
     _update_patch_return_edges_to_match(
-        block, functions_by_block, new_cfg, new_proxy_blocks
+        block, functions_by_block, code.cfg, code.proxies
     )
 
     # Adjust codeblock sizes, create CFG edges, remove 0-size blocks
     _modify_block_insert_cfg(
-        block,
-        offset,
-        replacement_length,
-        new_bytes,
-        new_blocks,
-        new_cfg,
-        new_symbolic_expressions,
-        new_symbols,
-        functions_by_block,
+        block, offset, replacement_length, code, functions_by_block,
     )
 
-    size_delta = len(new_bytes) - replacement_length
+    size_delta = len(code.data) - replacement_length
     offset += block.offset
 
     # adjust byte interval the block goes in
     bi.size += size_delta
     bi.contents = (
         bi.contents[:offset]
-        + new_bytes
+        + code.data
         + bi.contents[offset + replacement_length :]
     )
 
@@ -321,14 +303,14 @@ def _modify_block_insert(
 
     # adjust all of the new blocks to be relative to the byte interval and
     # add them to the byte interval
-    for b in new_blocks:
+    for b in code.blocks:
         b.offset += offset
 
-    assert block.size and all(b.size for b in new_blocks), (
+    assert block.size and all(b.size for b in code.blocks), (
         "_modify_block_insert created a zero-sized block; please file a bug "
         "report against gtirb-rewriting"
     )
-    bi.blocks.update(new_blocks)
+    bi.blocks.update(code.blocks)
 
     # adjust sym exprs that occur after the insertion point
     bi.symbolic_expressions = {
@@ -338,12 +320,12 @@ def _modify_block_insert(
     }
 
     # add all of the symbolic expressions from the code we're inserting
-    for rel_offset, expr in new_symbolic_expressions.items():
+    for rel_offset, expr in code.symbolic_expressions.items():
         bi.symbolic_expressions[offset + rel_offset] = expr
 
-    bi.ir.cfg.update(new_cfg)
-    bi.module.symbols.update(new_symbols)
-    bi.module.proxies.update(new_proxy_blocks)
+    bi.ir.cfg.update(code.cfg)
+    bi.module.symbols.update(code.symbols)
+    bi.module.proxies.update(code.proxies)
 
     # adjust aux data if present
     def update_aux_data_keyed_by_offset(name):
@@ -369,11 +351,7 @@ def _modify_block_insert_cfg(
     block: gtirb.CodeBlock,
     offset: int,
     replacement_length: int,
-    new_bytes: bytes,
-    new_blocks: List[gtirb.ByteBlock],
-    new_cfg: gtirb.CFG,
-    new_symbolic_expressions: Dict[int, gtirb.SymbolicExpression],
-    new_symbols: Iterable[gtirb.Symbol],
+    code: Assembler.Result,
     functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID],
 ) -> None:
     """
@@ -382,13 +360,8 @@ def _modify_block_insert_cfg(
     :param offset: The byte offset into the code block.
     :param replacement_length: The number of bytes after `offset` that should
                                be removed.
-    :param new_bytes: The new content to be inserted.
-    :param new_blocks: The blocks corresponding to the new content.
-    :param new_cfg: The CFG corresponding to the new content.
-    :param new_symbolic_expressions: The symbolic expressions corresponding to
-                                     the new content, with the keys relative
-                                     to the start of `new_bytes`.
-    :param new_symbols: Any symbols that may be defined in the new content.
+    :param code: The assembled code to be inserted. It will be modified to
+                 reflect what actually gets inserted in the binary.
     :param functions_by_block: Map from code block to containing function UUID.
     """
 
@@ -404,41 +377,41 @@ def _modify_block_insert_cfg(
     # edges are created, no new symbols are created, and the replacement is not
     # at the end of a block.
     if (
-        not new_cfg
-        and not new_symbols
+        not code.cfg
+        and not code.symbols
         and not inserts_at_end
         and not replaces_last_instruction
     ):
-        assert len(new_blocks) == 1
-        assert isinstance(new_blocks[0], gtirb.CodeBlock)
+        assert len(code.blocks) == 1
+        assert isinstance(code.blocks[0], gtirb.CodeBlock)
 
-        block.size = block.size - replacement_length + len(new_bytes)
+        block.size = block.size - replacement_length + len(code.data)
 
-        # Remove all the blocks from new_blocks so that they don't get added
+        # Remove all the blocks from code.blocks so that they don't get added
         # to the byte_interval in _modify_block_insert.
-        new_blocks.clear()
+        code.blocks.clear()
         return
 
     # If the patch ended in a data block, we need to create a new code block
     # that will contain any remaining code from the original block.
-    if isinstance(new_blocks[-1], gtirb.DataBlock):
-        assert new_blocks[-1].size
-        new_blocks.append(gtirb.CodeBlock(offset=len(new_bytes)))
+    if isinstance(code.blocks[-1], gtirb.DataBlock):
+        assert code.blocks[-1].size
+        code.blocks.append(gtirb.CodeBlock(offset=len(code.data)))
 
     # Adjust the target block to be the size of offset. Then extend the last
     # patch block to cover the remaining bytes in the original block.
     block.size = offset
-    new_blocks[-1].size += original_size - offset - replacement_length
+    code.blocks[-1].size += original_size - offset - replacement_length
 
     # Now add a fallthrough edge from the original block to the first patch
     # block, unless we're inserting at the end of the block and the block has
     # no fallthrough edges. For example, inserting after a ret instruction.
     if not inserts_at_end or any(_block_fallthrough_targets(block)):
-        assert isinstance(new_blocks[0], gtirb.CodeBlock)
-        new_cfg.add(
+        assert isinstance(code.blocks[0], gtirb.CodeBlock)
+        code.cfg.add(
             gtirb.Edge(
                 source=block,
-                target=new_blocks[0],
+                target=code.blocks[0],
                 label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
             )
         )
@@ -451,14 +424,14 @@ def _modify_block_insert_cfg(
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
                 bi.ir.cfg.discard(edge)
-                new_cfg.add(edge._replace(source=new_blocks[-1]))
+                code.cfg.add(edge._replace(source=code.blocks[-1]))
             elif _is_call_edge(edge):
                 _update_return_edges_from_changing_fallthrough(
                     edge,
                     fallthrough_targets,
                     functions_by_block,
-                    new_blocks[-1],
-                    new_cfg,
+                    code.blocks[-1],
+                    code.cfg,
                 )
     elif replaces_last_instruction:
         fallthrough_targets = _block_fallthrough_targets(block)
@@ -466,10 +439,10 @@ def _modify_block_insert_cfg(
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
                 bi.ir.cfg.discard(edge)
-                new_cfg.add(edge._replace(source=new_blocks[-1]))
+                code.cfg.add(edge._replace(source=code.blocks[-1]))
             elif _is_call_edge(edge):
                 _update_return_edges_from_removing_call(
-                    edge, fallthrough_targets, functions_by_block, new_cfg
+                    edge, fallthrough_targets, functions_by_block, code.cfg
                 )
                 bi.ir.cfg.discard(edge)
             else:
@@ -477,32 +450,32 @@ def _modify_block_insert_cfg(
     else:
         for edge in set(block.outgoing_edges):
             bi.ir.cfg.discard(edge)
-            new_cfg.add(edge._replace(source=new_blocks[-1]))
+            code.cfg.add(edge._replace(source=code.blocks[-1]))
 
     # Now go back and clean up any zero-sized blocks, which trigger
     # nondeterministic behavior in the pretty printer.
     if block.size == 0:
         added_fallthrough = next(
             edge
-            for edge in new_cfg.in_edges(new_blocks[0])
+            for edge in code.cfg.in_edges(code.blocks[0])
             if _is_fallthrough_edge(edge) and edge.source == block
         )
-        new_cfg.discard(added_fallthrough)
+        code.cfg.discard(added_fallthrough)
 
-        block.size = new_blocks[0].size
+        block.size = code.blocks[0].size
         _substitute_block(
-            new_blocks[0], block, new_cfg, new_symbols,
+            code.blocks[0], block, code.cfg, code.symbols,
         )
-        del new_blocks[0]
+        del code.blocks[0]
 
-    if new_blocks and new_blocks[-1].size == 0:
+    if code.blocks and code.blocks[-1].size == 0:
         has_symbols = any(
-            sym.referent == new_blocks[-1] for sym in new_symbols
+            sym.referent == code.blocks[-1] for sym in code.symbols
         )
-        has_incoming_edges = any(new_cfg.in_edges(new_blocks[-1]))
+        has_incoming_edges = any(code.cfg.in_edges(code.blocks[-1]))
         fallthrough_edges = [
             edge
-            for edge in new_cfg.out_edges(new_blocks[-1])
+            for edge in code.cfg.out_edges(code.blocks[-1])
             if _is_fallthrough_edge(edge)
         ]
 
@@ -510,19 +483,19 @@ def _modify_block_insert_cfg(
             # If nothing refers to the block, we can simply drop it and any
             # outgoing edges that may have been added to it from the earlier
             # steps.
-            for out_edge in set(new_cfg.out_edges(new_blocks[-1])):
-                new_cfg.discard(out_edge)
-            del new_blocks[-1]
+            for out_edge in set(code.cfg.out_edges(code.blocks[-1])):
+                code.cfg.discard(out_edge)
+            del code.blocks[-1]
         elif len(fallthrough_edges) == 1:
             # If we know where the "next" block is, substitute that for our
             # last block.
             _substitute_block(
-                new_blocks[-1],
+                code.blocks[-1],
                 fallthrough_edges[0].target,
-                new_cfg,
-                new_symbols,
+                code.cfg,
+                code.symbols,
             )
-            del new_blocks[-1]
+            del code.blocks[-1]
         else:
             # We don't know where control flow goes after our patch, so we'll
             # raise an exception for now. There are other ways of resolving
