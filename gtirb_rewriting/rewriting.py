@@ -34,13 +34,13 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .abi import ABI
 from .assembler import Assembler
+from .modify import _modify_block_insert
 from .patch import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
     _block_fallthrough_targets,
     _is_partial_disassembly,
-    _modify_block_insert,
     _text_section_name,
     decorate_extern_symbol,
     show_block_asm,
