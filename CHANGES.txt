@@ -1,4 +1,5 @@
 0.0.20:
+- Added support for ARM64
 - Exposed the Assembler class
 - Added ABI.temporary_label_prefix and InsertionContext.temporary_label
 

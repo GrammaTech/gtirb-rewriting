@@ -221,21 +221,16 @@ def show_block_asm(
         for i in instructions:
             logger.debug("\t0x%x:\t%s\t%s", i.address, i.mnemonic, i.op_str)
             # Print out the symbolic expression for the instruction, if any
-            operand_encodings = (
-                (i.imm_offset, i.imm_size),
-                (i.disp_offset, i.disp_size),
-            )
-            for enc_offset, enc_size in operand_encodings:
-                if enc_size:
-                    expr = block.byte_interval.symbolic_expressions.get(
-                        offset + enc_offset, None
+            for expr_offset in range(i.size):
+                expr = block.byte_interval.symbolic_expressions.get(
+                    offset + expr_offset, None
+                )
+                if expr:
+                    logger.debug(
+                        "\t# +%i: %s",
+                        expr_offset,
+                        _format_symbolic_expr(expr),
                     )
-                    if expr:
-                        logger.debug(
-                            "\t# +%i: %s",
-                            enc_offset,
-                            _format_symbolic_expr(expr),
-                        )
             offset += i.size
         if _is_partial_disassembly(block, instructions):
             logger.debug("\t<incomplete disassembly>")

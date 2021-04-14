@@ -21,9 +21,59 @@
 # endorsement should be inferred.
 
 import dataclasses
-from typing import Dict
+from typing import Dict, Set
 
 import mcasm
+
+X86Syntax = mcasm.X86Syntax
+
+
+@dataclasses.dataclass
+class Constraints:
+    """
+    Constraints related to the assembly code in a patch. These can be seen as
+    metadata about the actual assembly in a patch and can impact where the
+    patch gets placed if bubbling is allowed.
+    """
+
+    x86_syntax: X86Syntax = X86Syntax.ATT
+    """
+    The syntax mode to use for x86 code. This is unused for other ISAs.
+    """
+
+    clobbers_flags: bool = False
+    """
+    Does the assembly clobber the flags register?
+    """
+
+    clobbers_registers: Set[str] = dataclasses.field(default_factory=set)
+    """
+    The general purpose registers that the assembly clobbers.
+    """
+
+    scratch_registers: int = 0
+    """
+    The number of scratch registers that the patch needs. When emitting the
+    patch's code, the rewriting context will try to pick free registers. If no
+    registers are free at the insertion point, it will generate code to spill
+    the registers to the stack before/after the patch.
+
+    The scratch registers will be passed as positional arguments to the patch's
+    get_asm method.
+    """
+
+    align_stack: bool = False
+    """
+    Generate code to align the stack to the ABI-defined alignment before
+    emitting the patch's code and restore the previous value after. This is
+    useful for inserting a call into a module's entrypoint.
+    """
+
+    preserve_caller_saved_registers: bool = False
+    """
+    Spill all caller saved registers as per the ABI based on ISA and ouput
+    format (e.g. PE vs ELF).
+    """
 
 
 class Register:
@@ -68,9 +118,6 @@ class Register:
     @property
     def name(self) -> str:
         return self.sizes[self.default_size]
-
-
-X86Syntax = mcasm.X86Syntax
 
 
 @dataclasses.dataclass

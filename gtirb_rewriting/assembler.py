@@ -267,9 +267,13 @@ class Assembler:
                 attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
             else:
                 assert False, f"Unsupported variantKind: {expr['variantKind']}"
-        elif _is_elf_pie(self._module) and isinstance(
-            sym.referent, gtirb.ProxyBlock
+        elif (
+            self._module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
+            and _is_elf_pie(self._module)
+            and isinstance(sym.referent, gtirb.ProxyBlock)
         ):
+            # These appear to only be necessary for X86 ELF, so we're limiting
+            # the inference to that.
             if is_branch:
                 attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
             else:
@@ -282,7 +286,27 @@ class Assembler:
         """
         Converts an LLVM fixup to a GTIRB SymbolicExpression.
         """
+        attributes = set()
         expr = fixup["value"]
+
+        if expr["kind"] == "targetExpr" and expr["target"] == "aarch64":
+            elfName = expr["elfName"]
+            if elfName == "":
+                # LLVM wrapped the expression in a target-specific MCExpr, but
+                # it doesn't effect the output assembly so we don't need to
+                # create a symbolic expression attr for it.
+                pass
+            elif elfName == ":got:":
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+            elif elfName == ":lo12:":
+                attributes.add(gtirb.SymbolicExpression.Attribute.Part0)
+            elif elfName == ":got_lo12:":
+                attributes.add(gtirb.SymbolicExpression.Attribute.Part1)
+            else:
+                raise NotImplementedError(
+                    f"unknown aarch64-specific fixup: {elfName}"
+                )
+            expr = expr["expr"]
 
         # LLVM will automatically add a negative value to make the expression
         # be PC-relative. We don't care about that and just want to unwrap it.
@@ -303,14 +327,14 @@ class Assembler:
             and expr["rhs"]["kind"] == "constant"
         ):
             sym = self._resolve_symbol_ref(expr["lhs"])
-            attributes = self._get_symbol_ref_attrs(
+            attributes |= self._get_symbol_ref_attrs(
                 expr["lhs"], sym, is_branch
             )
             offset = expr["rhs"]["value"]
             return gtirb.SymAddrConst(offset, sym, attributes)
         elif expr["kind"] == "symbolRef":
             sym = self._resolve_symbol_ref(expr)
-            attributes = self._get_symbol_ref_attrs(expr, sym, is_branch)
+            attributes |= self._get_symbol_ref_attrs(expr, sym, is_branch)
             return gtirb.SymAddrConst(0, sym, attributes)
 
         assert False, "Unsupported symbolic expression"

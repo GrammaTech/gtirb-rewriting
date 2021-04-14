@@ -32,17 +32,16 @@ import gtirb_functions
 import gtirb_rewriting
 
 
-def create_test_module() -> Tuple[gtirb.IR, gtirb.Module, gtirb.ByteInterval]:
+def create_test_module(
+    isa: gtirb.Module.ISA = gtirb.Module.ISA.X64,
+    file_format: gtirb.Module.FileFormat = gtirb.Module.FileFormat.ELF,
+) -> Tuple[gtirb.IR, gtirb.Module, gtirb.ByteInterval]:
     """
     Creates a test GTIRB module and returns the IR object, the module object,
     and the byte interval representing the text section.
     """
     ir = gtirb.IR()
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
+    m = gtirb.Module(isa=isa, file_format=file_format, name="test")
     m.ir = ir
     s = gtirb.Section(
         name=".text",
@@ -213,3 +212,16 @@ def literal_patch(asm: str) -> gtirb_rewriting.Patch:
         return asm
 
     return gtirb_rewriting.Patch.from_function(patch)
+
+
+def remove_indentation(s: str) -> str:
+    """
+    Removes indentation from the front of each line in a string, omitting any
+    purely empty lines.
+    """
+    lines = []
+    for line in s.splitlines():
+        line = line.lstrip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
