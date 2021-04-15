@@ -37,6 +37,21 @@ from .utils import (
 )
 
 
+def _update_edge(
+    edge: gtirb.Edge, old_cfg: gtirb.CFG, new_cfg: gtirb.CFG, **kwargs
+) -> None:
+    """
+    Updates properties about an edge.
+    :param edge: The edge to update.
+    :param old_cfg: The CFG containing the edge. The edge will be removed.
+    :param new_cfg: The CFG that the updated edge should be added to.
+    :param kwargs: Properties of the edge to update.
+    """
+
+    old_cfg.discard(edge)
+    new_cfg.add(edge._replace(**kwargs))
+
+
 def _substitute_block(
     old_block: gtirb.CodeBlock,
     new_block: gtirb.CodeBlock,
@@ -49,12 +64,10 @@ def _substitute_block(
     """
 
     for edge in set(cfg.in_edges(old_block)):
-        cfg.discard(edge)
-        cfg.add(edge._replace(target=new_block))
+        _update_edge(edge, cfg, cfg, target=new_block)
 
     for edge in set(cfg.out_edges(old_block)):
-        cfg.discard(edge)
-        cfg.add(edge._replace(source=new_block))
+        _update_edge(edge, cfg, cfg, source=new_block)
 
     for sym in symbols:
         if sym.referent == old_block:
@@ -232,8 +245,9 @@ def _update_return_edges_from_changing_fallthrough(
     ):
         for edge in _block_return_edges(target_block):
             if edge.target in fallthrough_targets:
-                target_block.ir.cfg.discard(edge)
-                new_cfg.add(edge._replace(target=new_fallthrough))
+                _update_edge(
+                    edge, target_block.ir.cfg, new_cfg, target=new_fallthrough
+                )
 
 
 def _modify_block_insert(
@@ -423,8 +437,7 @@ def _modify_block_insert_cfg(
 
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
-                bi.ir.cfg.discard(edge)
-                code.cfg.add(edge._replace(source=code.blocks[-1]))
+                _update_edge(edge, bi.ir.cfg, code.cfg, source=code.blocks[-1])
             elif _is_call_edge(edge):
                 _update_return_edges_from_changing_fallthrough(
                     edge,
@@ -438,8 +451,7 @@ def _modify_block_insert_cfg(
 
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
-                bi.ir.cfg.discard(edge)
-                code.cfg.add(edge._replace(source=code.blocks[-1]))
+                _update_edge(edge, bi.ir.cfg, code.cfg, source=code.blocks[-1])
             elif _is_call_edge(edge):
                 _update_return_edges_from_removing_call(
                     edge, fallthrough_targets, functions_by_block, code.cfg
@@ -449,8 +461,7 @@ def _modify_block_insert_cfg(
                 bi.ir.cfg.discard(edge)
     else:
         for edge in set(block.outgoing_edges):
-            bi.ir.cfg.discard(edge)
-            code.cfg.add(edge._replace(source=code.blocks[-1]))
+            _update_edge(edge, bi.ir.cfg, code.cfg, source=code.blocks[-1])
 
     # Now go back and clean up any zero-sized blocks, which trigger
     # nondeterministic behavior in the pretty printer.
