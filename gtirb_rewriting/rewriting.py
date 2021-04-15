@@ -147,48 +147,20 @@ class RewritingContext:
                   of bytes inserted.
         """
 
-        available_registers = list(self._abi.all_registers())
-        clobbered_registers = set()
-        snippets = []
-        stack_adjustment = 0
-
-        for clobber in patch.constraints.clobbers_registers:
-            reg = self._abi.get_register(clobber)
-            available_registers.remove(reg)
-            clobbered_registers.add(reg)
-
-        scratch_registers = available_registers[
-            : patch.constraints.scratch_registers
-        ]
-        clobbered_registers.update(scratch_registers)
-
-        if patch.constraints.preserve_caller_saved_registers:
-            clobbered_registers.update(self._abi.caller_saved_registers())
-
-        # TODO: If align_stack was set too, we're going to end up doing
-        #       some redundant work.
-        if clobbered_registers or patch.constraints.clobbers_flags:
-            if self._abi.red_zone_size() and self._leaf_functions[func.uuid]:
-                stack_adjustment += self._abi.red_zone_size()
-                snippets.append(self._abi._preserve_red_zone())
-
-        if patch.constraints.clobbers_flags:
-            stack_adjustment += self._abi.pointer_size()
-            snippets.append(self._abi._save_flags())
-
-        for reg in sorted(clobbered_registers, key=lambda reg: reg.name):
-            stack_adjustment += self._abi.pointer_size()
-            snippets.append(self._abi._save_register(reg))
-
-        if patch.constraints.align_stack:
-            # TODO: We don't know how much the stack may be adjusted by the
-            #       snippet.
-            stack_adjustment = None
-            snippets.append(self._abi._align_stack())
+        registers = self._abi._allocate_patch_registers(patch.constraints)
+        (
+            prologue,
+            epilogue,
+            stack_adjustment,
+        ) = self._abi._create_prologue_and_epilogue(
+            patch.constraints,
+            registers,
+            self._leaf_functions.get(func.uuid, True),
+        )
 
         asm = patch.get_asm(
             dataclasses.replace(context, stack_adjustment=stack_adjustment),
-            *scratch_registers,
+            *registers.scratch_registers,
         )
         if not asm:
             return block, 0
@@ -207,15 +179,15 @@ class RewritingContext:
             module_symbols=self._symbols_by_name,
             trivially_unreachable=is_trivially_unreachable,
         )
-        for snippet in snippets:
-            assembler.assemble(snippet[0].code, snippet[0].x86_syntax)
+        for snippet in prologue:
+            assembler.assemble(snippet.code, snippet.x86_syntax)
         try:
             assembler.assemble(asm, patch.constraints.x86_syntax)
         except mcasm.assembler.AsmSyntaxError as err:
             self._log_patch_error(asm, patch, self._patch_id, err)
             raise
-        for snippet in reversed(snippets):
-            assembler.assemble(snippet[1].code, snippet[1].x86_syntax)
+        for snippet in epilogue:
+            assembler.assemble(snippet.code, snippet.x86_syntax)
         assembler_result = assembler.finalize()
 
         if self._logger.isEnabledFor(logging.DEBUG):

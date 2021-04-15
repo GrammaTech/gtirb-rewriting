@@ -20,11 +20,13 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import dataclasses
-from typing import List, Set, Tuple
+import logging
+from typing import Iterable, List, Optional, Set, Tuple
 
 import gtirb
+import more_itertools
 
-from .assembly import Register, _AsmSnippet
+from .assembly import Constraints, Register, _AsmSnippet
 
 
 @dataclasses.dataclass
@@ -58,6 +60,29 @@ class CallingConventionDesc:
     """
 
 
+@dataclasses.dataclass
+class _PatchRegisterAllocation:
+    """
+    The register allocation for a patch.
+    """
+
+    clobbered_registers: List[Register]
+    """
+    All general purpose registers that might be clobbered and need to be
+    preserved. This includes the scratch registers.
+    """
+
+    scratch_registers: List[Register]
+    """
+    The registers that need to be pass to the patch as scratch registers.
+    """
+
+    available_registers: List[Register]
+    """
+    Any remaining general purpose registers that have not been allocated.
+    """
+
+
 class ABI:
     """
     Describes an application binary interface (ABI) and the instruction set
@@ -80,36 +105,77 @@ class ABI:
         elif module.isa == gtirb.Module.ISA.IA32:
             if module.file_format == gtirb.Module.FileFormat.PE:
                 return _IA32_PE()
+        elif module.isa == gtirb.Module.ISA.ARM64:
+            if module.file_format == gtirb.Module.FileFormat.ELF:
+                return _ARM64_ELF()
 
         raise ValueError(
             f"Unsupported ISA/format: {module.isa}/{module.file_format}"
         )
 
-    def _save_register(
-        self, register: Register
-    ) -> Tuple[_AsmSnippet, _AsmSnippet]:
+    def _allocate_patch_registers(
+        self, constraints: Constraints
+    ) -> _PatchRegisterAllocation:
         """
-        Generate code required to save a specific register.
+        Allocates registers to satisfy a patch's constraints.
+        """
+        available_scratch_registers = list(self._scratch_registers())
+        clobbered_registers = set()
+
+        for clobber in constraints.clobbers_registers:
+            reg = self.get_register(clobber)
+            if reg in available_scratch_registers:
+                available_scratch_registers.remove(reg)
+            clobbered_registers.add(reg)
+
+        if constraints.scratch_registers > len(available_scratch_registers):
+            raise ValueError("unable to allocate enough scratch registers")
+
+        scratch_registers = available_scratch_registers[
+            : constraints.scratch_registers
+        ]
+        clobbered_registers.update(scratch_registers)
+
+        if constraints.preserve_caller_saved_registers:
+            clobbered_registers.update(self.caller_saved_registers())
+
+        # We want deterministic register order out of this function, so we'll
+        # sort it by the order the ABI class gave them out. This avoids
+        # silliness like x1, x10, x2 that we'd get sorting by name.
+        registers_indices = {
+            reg: i for i, reg in enumerate(self.all_registers())
+        }
+        return _PatchRegisterAllocation(
+            sorted(clobbered_registers, key=lambda r: registers_indices[r]),
+            scratch_registers,
+            available_scratch_registers,
+        )
+
+    def _create_prologue_and_epilogue(
+        self,
+        constraints: Constraints,
+        registers: _PatchRegisterAllocation,
+        is_leaf_function: bool,
+    ) -> Tuple[Iterable[_AsmSnippet], Iterable[_AsmSnippet], Optional[int]]:
+        """
+        Creates the prologue and epilogue needed to be able to insert a patch.
+        :param constraints: The patch's constraints.
+        :param registers: The register allocation for the patch.
+        :param is_leaf_function: Is the patch being inserted into a potential
+                                 leaf function?
+        :returns: The prologue snippets, the epilogue snippets, and the amount
+                  the prologue adjusted the stack (if known).
         """
         raise NotImplementedError
 
-    def _align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        """
-        Generate code to align the stack to the ABI requirements for a call.
-        """
-        raise NotImplementedError
+    def _scratch_registers(self) -> List[Register]:
+        return self.all_registers()
 
     def get_register(self, name: str) -> Register:
         """
         Gets a Register object by its name (or the name of a subregister).
         """
         return self._register_map[name.lower()]
-
-    def _save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        """
-        Generate code required to save the flags register.
-        """
-        raise NotImplementedError
 
     def all_registers(self) -> List[Register]:
         """
@@ -144,12 +210,6 @@ class ABI:
         """
         return 0
 
-    def _preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        """
-        Generate code required to preserve the contents of the red zone.
-        """
-        raise NotImplementedError
-
     def calling_convention(self) -> CallingConventionDesc:
         """
         Returns a description of the ABI's default calling convention.
@@ -170,38 +230,56 @@ class ABI:
 
 
 class _IA32(ABI):
-    def _save_register(
-        self, register: Register
-    ) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        return (
-            _AsmSnippet(f"push %{register}"),
-            _AsmSnippet(f"pop %{register}"),
-        )
+    def _create_prologue_and_epilogue(
+        self,
+        constraints: Constraints,
+        register_use: _PatchRegisterAllocation,
+        is_leaf_function: bool,
+    ) -> Tuple[Iterable[_AsmSnippet], Iterable[_AsmSnippet], Optional[int]]:
+        assert not self.red_zone_size()
 
-    def _save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        # TODO: Replace this with something more efficient.
-        return _AsmSnippet("pushfd"), _AsmSnippet("popfd")
+        prologue: List[_AsmSnippet] = []
+        epilogue: List[_AsmSnippet] = []
+        stack_adjustment = 0
 
-    def _align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        return (
-            _AsmSnippet(
-                """
-                push   %eax
-                mov    %esp, %eax
-                lea    -0x80(%esp), %esp
-                and    $-0x10, %esp
-                push   %eax
-                push   %eax
-            """
-            ),
-            _AsmSnippet(
-                """
-                pop    %eax
-                mov    %eax, %esp
-                pop    %eax
-            """
-            ),
-        )
+        if constraints.clobbers_flags:
+            # TODO: Replace this with something more efficient.
+            prologue.append(_AsmSnippet("pushfd"))
+            epilogue.append(_AsmSnippet("popfd"))
+            stack_adjustment += 4
+
+        for reg in register_use.clobbered_registers:
+            prologue.append(_AsmSnippet(f"push %{reg}"))
+            epilogue.append(_AsmSnippet(f"pop %{reg}"))
+            stack_adjustment += 4
+
+        if constraints.align_stack:
+            prologue.append(
+                _AsmSnippet(
+                    """
+                    push   %eax
+                    mov    %esp, %eax
+                    lea    -0x80(%esp), %esp
+                    and    $-0x10, %esp
+                    push   %eax
+                    push   %eax
+                    """
+                )
+            )
+            epilogue.append(
+                _AsmSnippet(
+                    """
+                    pop    %eax
+                    mov    %eax, %esp
+                    pop    %eax
+                    """
+                )
+            )
+            # TODO: We don't know how much the stack may be adjusted by the
+            #       snippet.
+            stack_adjustment = None
+
+        return prologue, reversed(epilogue), stack_adjustment
 
     def all_registers(self) -> List[Register]:
         return [
@@ -240,38 +318,63 @@ class _IA32_PE(_IA32):
 
 
 class _X86_64(ABI):
-    def _save_register(
-        self, register: Register
-    ) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        return (
-            _AsmSnippet(f"pushq %{register}"),
-            _AsmSnippet(f"popq %{register}"),
-        )
+    def _create_prologue_and_epilogue(
+        self,
+        constraints: Constraints,
+        register_use: _PatchRegisterAllocation,
+        is_leaf_function: bool,
+    ) -> Tuple[Iterable[_AsmSnippet], Iterable[_AsmSnippet], Optional[int]]:
+        prologue: List[_AsmSnippet] = []
+        epilogue: List[_AsmSnippet] = []
+        stack_adjustment = 0
 
-    def _save_flags(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        # TODO: Replace this with something more efficient.
-        return _AsmSnippet("pushfq"), _AsmSnippet("popfq")
+        # TODO: If align_stack was set too, we're going to end up doing
+        #       some redundant work.
+        if register_use.clobbered_registers or constraints.clobbers_flags:
+            rz_size = self.red_zone_size()
+            if rz_size and is_leaf_function:
+                prologue.append(_AsmSnippet(f"leaq -{rz_size}(%rsp), %rsp"))
+                epilogue.append(_AsmSnippet(f"leaq +{rz_size}(%rsp), %rsp"))
+                stack_adjustment += self.red_zone_size()
 
-    def _align_stack(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        return (
-            _AsmSnippet(
-                """
-                pushq   %rax
-                movq    %rsp, %rax
-                leaq    -0x80(%rsp), %rsp
-                andq    $-0x10, %rsp
-                pushq   %rax
-                pushq   %rax
-            """
-            ),
-            _AsmSnippet(
-                """
-                popq    %rax
-                movq    %rax, %rsp
-                popq    %rax
-            """
-            ),
-        )
+        if constraints.clobbers_flags:
+            # TODO: Replace this with something more efficient.
+            prologue.append(_AsmSnippet("pushfq"))
+            epilogue.append(_AsmSnippet("popfq"))
+            stack_adjustment += 8
+
+        for reg in register_use.clobbered_registers:
+            prologue.append(_AsmSnippet(f"pushq %{reg}"))
+            epilogue.append(_AsmSnippet(f"popq %{reg}"))
+            stack_adjustment += 8
+
+        if constraints.align_stack:
+            prologue.append(
+                _AsmSnippet(
+                    """
+                    pushq   %rax
+                    movq    %rsp, %rax
+                    leaq    -0x80(%rsp), %rsp
+                    andq    $-0x10, %rsp
+                    pushq   %rax
+                    pushq   %rax
+                    """
+                )
+            )
+            epilogue.append(
+                _AsmSnippet(
+                    """
+                    popq    %rax
+                    movq    %rax, %rsp
+                    popq    %rax
+                    """
+                )
+            )
+            # TODO: We don't know how much the stack may be adjusted by the
+            #       snippet.
+            stack_adjustment = None
+
+        return prologue, reversed(epilogue), stack_adjustment
 
     def all_registers(self) -> List[Register]:
         return [
@@ -372,18 +475,128 @@ class _X86_64_ELF(_X86_64):
     def red_zone_size(self) -> int:
         return 128
 
-    def temporary_label_prefix(self) -> str:
-        return ".L"
-
-    def _preserve_red_zone(self) -> Tuple[_AsmSnippet, _AsmSnippet]:
-        return (
-            _AsmSnippet("leaq -128(%rsp), %rsp"),
-            _AsmSnippet("leaq +128(%rsp), %rsp"),
-        )
-
     def calling_convention(self) -> CallingConventionDesc:
         return CallingConventionDesc(
             registers=("RDI", "RSI", "RDX", "RCX", "R8", "R9"),
             stack_alignment=16,
             caller_cleanup=True,
         )
+
+    def temporary_label_prefix(self) -> str:
+        return ".L"
+
+
+class _ARM64_ELF(ABI):
+    def _create_prologue_and_epilogue(
+        self,
+        constraints: Constraints,
+        register_use: _PatchRegisterAllocation,
+        is_leaf_function: bool,
+    ) -> Tuple[Iterable[_AsmSnippet], Iterable[_AsmSnippet], Optional[int]]:
+        prologue: List[_AsmSnippet] = []
+        epilogue: List[_AsmSnippet] = []
+        stack_adjustment = 0
+
+        if constraints.align_stack:
+            logging.getLogger(__name__).info(
+                "align_stack is unneccessary for ARM64"
+            )
+
+        if constraints.clobbers_flags:
+            # ARM64 can't move the flags directly onto the stack, so we need
+            # to have a register for this.
+            if register_use.scratch_registers:
+                # TODO: We could use a "reads_registers" constraint, which
+                #       would allow us to repurpose any register that's
+                #       clobbered for this as long as it isn't read.
+                flags_reg = register_use.scratch_registers[0]
+            else:
+                flags_reg = register_use.available_registers.pop(0)
+                register_use.clobbered_registers.append(flags_reg)
+
+        # ARM64 requires sp be 16-byte aligned any time it is used as a base
+        # register in an address operand. What we're going to do is push two
+        # registers at a time.
+        for reg1, reg2 in more_itertools.grouper(
+            register_use.clobbered_registers, 2
+        ):
+            if reg2:
+                prologue.append(
+                    _AsmSnippet(f"stp {reg1}, {reg2}, [sp, #-16]!")
+                )
+                epilogue.append(_AsmSnippet(f"ldp {reg1}, {reg2}, [sp], #16"))
+            else:
+                prologue.append(_AsmSnippet(f"str {reg1}, [sp, #-16]!"))
+                epilogue.append(_AsmSnippet(f"ldr {reg1}, [sp], #16"))
+            stack_adjustment += 16
+
+        if constraints.clobbers_flags:
+            prologue.append(
+                _AsmSnippet(
+                    f"""
+                    mrs {flags_reg}, nzcv
+                    str {flags_reg}, [sp, #-16]!
+                    """
+                )
+            )
+            epilogue.append(
+                _AsmSnippet(
+                    f"""
+                    ldr {flags_reg}, [sp], #16
+                    msr nzcv, {flags_reg}
+                    """
+                ),
+            )
+            stack_adjustment += 16
+
+        return prologue, reversed(epilogue), stack_adjustment
+
+    def _inclusive_range(self, start: int, end: int) -> Iterable[int]:
+        return range(start, end + 1)
+
+    def _scratch_registers(self) -> List[Register]:
+        # We don't consider x16, x17, and x18 as scratch registers because
+        # they may be used for a specific purpose by the platform ABI. x29 and
+        # x30 are used for the frame pointer and link register.
+        return [
+            reg
+            for reg in self.all_registers()
+            if reg.name not in ("x16", "x17", "x18", "x29", "x30")
+        ]
+
+    def all_registers(self) -> List[Register]:
+        results = [
+            Register({"64": f"x{i}", "32": f"w{i}"}, "64")
+            for i in self._inclusive_range(0, 28)
+        ]
+        results.append(Register({"64": "x29", "32": "w29", "": "fp"}, "64"))
+        results.append(Register({"64": "x30", "32": "w30", "": "lr"}, "64"))
+        return results
+
+    def nop(self) -> bytes:
+        return b"\x1F\x20\x03\xD5"
+
+    def caller_saved_registers(self) -> Set[Register]:
+        results = {
+            self.get_register(f"x{i}") for i in self._inclusive_range(0, 15)
+        }
+        results.add(self.get_register("x29"))
+        results.add(self.get_register("x30"))
+        return results
+
+    def pointer_size(self) -> int:
+        return 8
+
+    def calling_convention(self) -> CallingConventionDesc:
+        return CallingConventionDesc(
+            registers=("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"),
+            stack_alignment=16,
+            caller_cleanup=True,
+            shadow_space=0,
+        )
+
+    def stack_register(self) -> Register:
+        return Register({"64": "sp", "32": "wsp"}, "64")
+
+    def temporary_label_prefix(self) -> str:
+        return ".L"

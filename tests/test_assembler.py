@@ -370,3 +370,69 @@ def test_temp_symbol_suffix():
     bar_sym = next(sym for sym in result.symbols if sym.name == "bar")
     assert bar_sym.referent.offset == 1
     assert bar_sym.referent.size == 2
+
+
+def test_arm64_sym_attribute_lo12():
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.ARM64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    sym = add_symbol(m, "foo", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        adrp x0, foo
+        add x0, x0, :lo12:foo
+        """
+    )
+    result = assembler.finalize()
+
+    assert 0 in result.symbolic_expressions
+    assert isinstance(result.symbolic_expressions[0], gtirb.SymAddrConst)
+    assert result.symbolic_expressions[0].symbol is sym
+    assert result.symbolic_expressions[0].offset == 0
+    assert not result.symbolic_expressions[0].attributes
+
+    assert 4 in result.symbolic_expressions
+    assert isinstance(result.symbolic_expressions[4], gtirb.SymAddrConst)
+    assert result.symbolic_expressions[4].symbol is sym
+    assert result.symbolic_expressions[4].offset == 0
+    assert result.symbolic_expressions[4].attributes == {
+        gtirb.SymbolicExpression.Attribute.Part0
+    }
+
+
+def test_arm64_sym_attribute_got():
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.ARM64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    sym = add_symbol(m, "foo", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        adrp x0, :got:foo
+        ldr x0, [x0, :got_lo12:foo]
+        """
+    )
+    result = assembler.finalize()
+
+    assert 0 in result.symbolic_expressions
+    assert isinstance(result.symbolic_expressions[0], gtirb.SymAddrConst)
+    assert result.symbolic_expressions[0].symbol is sym
+    assert result.symbolic_expressions[0].offset == 0
+    assert result.symbolic_expressions[0].attributes == {
+        gtirb.SymbolicExpression.Attribute.GotRef
+    }
+
+    assert 4 in result.symbolic_expressions
+    assert isinstance(result.symbolic_expressions[4], gtirb.SymAddrConst)
+    assert result.symbolic_expressions[4].symbol is sym
+    assert result.symbolic_expressions[4].offset == 0
+    assert result.symbolic_expressions[4].attributes == {
+        gtirb.SymbolicExpression.Attribute.Part1
+    }
