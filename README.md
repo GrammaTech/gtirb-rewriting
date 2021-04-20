@@ -8,6 +8,15 @@ The gtirb-rewriting package provides a Python API for rewriting GTIRB files.
 
 See the documentation in the [Getting Started guide](doc/Getting-Started.md).
 
+## Supported ABIs
+
+| ISA          | File Format |
+|--------------|-------------|
+| ARM64        | ELF         |
+| IA32 (x86)   | PE          |
+| X64 (x86-64) | ELF         |
+| X64 (x86-64) | PE          |
+
 ## Design
 
 A `Pass` registers changes to be made in a module with the `RewritingContext`
