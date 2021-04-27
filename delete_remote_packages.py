@@ -23,18 +23,35 @@ import requests
 TOKEN = sys.argv[1]
 for wheel_loc in sys.argv[2:]:
     wheel = pkginfo.Wheel(wheel_loc)
+    # Get packages, handling pagination
+    responses = []
     response = requests.get(
         f"https://git.grammatech.com/api/v4/projects/1587/"
         f"packages?package_name={wheel.name}",
         headers={"PRIVATE-TOKEN": TOKEN},
     )
-    if response.status_code != 200:
-        raise Exception(
-            f"{response.status_code} status code while requesting package "
-            f"listings filtered by local name: {wheel.name}"
+    responses.append(response)
+    while response.links.get("next"):
+        response = requests.get(
+            response.links.get("next")["url"], headers={"PRIVATE-TOKEN": TOKEN}
         )
-    for package in response.json():
-        if wheel.version == package["version"]:
+        if response.status_code != 200:
+            raise Exception(
+                f"{response.status_code} status code while requesting package "
+                f"listings filtered by local name: {wheel.name}"
+            )
+        responses.append(response)
+
+    packages = [
+        package for response in responses for package in response.json()
+    ]
+    # Delete all matching packages
+    for package in packages:
+        if (
+            wheel.version == package["version"]
+            and wheel.name == package["name"]
+        ):
+            print(f'Deleting {package["name"]} {package["version"]}.')
             response = requests.delete(
                 f"https://git.grammatech.com/api/v4/projects/1587/packages/"
                 f'{package["id"]}',
