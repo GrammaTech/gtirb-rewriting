@@ -151,7 +151,11 @@ class _CallPatchX86(_CallPatchImpl):
             x86_syntax=X86Syntax.INTEL,
             clobbers_flags=True,
             clobbers_registers={arg.reg for arg in self._args if arg.reg},
-            **constraint_kwargs,
+            align_stack=True,
+            preserve_caller_saved_registers=True,
+        )
+        self.constraints = dataclasses.replace(
+            self.constraints, **constraint_kwargs
         )
 
     def get_asm(self, insertion_context: InsertionContext) -> str:
@@ -160,9 +164,19 @@ class _CallPatchX86(_CallPatchImpl):
         stack_slot_size = self._abi.pointer_size()
         stack_reg = self._abi.stack_register()
 
-        stack_size = sum(stack_slot_size for arg in self._args if not arg.reg)
+        arg_stack_size = sum(
+            stack_slot_size for arg in self._args if not arg.reg
+        )
+        if insertion_context.stack_adjustment is not None:
+            total_stack_size = (
+                insertion_context.stack_adjustment + arg_stack_size
+            )
+        else:
+            total_stack_size = arg_stack_size
+
         stack_padding = (
-            align_address(stack_size, self._cconv.stack_alignment) - stack_size
+            align_address(total_stack_size, self._cconv.stack_alignment)
+            - total_stack_size
         )
         if stack_padding:
             lines.append(f"sub {stack_reg}, {stack_padding}")
@@ -191,7 +205,7 @@ class _CallPatchX86(_CallPatchImpl):
 
         cleanup_size = self._cconv.shadow_space + stack_padding
         if self._cconv.caller_cleanup:
-            cleanup_size += stack_size
+            cleanup_size += arg_stack_size
 
         if cleanup_size:
             lines.append(f"add {stack_reg}, {cleanup_size}")
@@ -230,7 +244,10 @@ class _CallPatchARM64(_CallPatchImpl):
         self.constraints = Constraints(
             clobbers_flags=True,
             clobbers_registers=clobbered_registers,
-            **constraint_kwargs,
+            preserve_caller_saved_registers=True,
+        )
+        self.constraints = dataclasses.replace(
+            self.constraints, **constraint_kwargs
         )
 
     def _load_immediate(self, reg: str, value: int) -> Iterator[str]:

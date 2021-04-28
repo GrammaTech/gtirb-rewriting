@@ -34,12 +34,14 @@ from helpers import (
 )
 
 
-def create_mock_context(m):
+def create_mock_context(m, stack_adjustment=None):
     """
     Creates a mock insertion context for a given module.
     """
     return unittest.mock.MagicMock(
-        spec=gtirb_rewriting.InsertionContext, module=m
+        spec=gtirb_rewriting.InsertionContext,
+        module=m,
+        stack_adjustment=stack_adjustment,
     )
 
 
@@ -100,11 +102,7 @@ def test_call_3_args(isa, file_format):
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
     patch = CallPatch(sym, args=(1, 2, 3))
-    asm = patch.get_asm(
-        unittest.mock.MagicMock(
-            spec=gtirb_rewriting.InsertionContext, module=m
-        )
-    )
+    asm = patch.get_asm(create_mock_context(m))
 
     target = (isa, file_format)
     if target == (gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE):
@@ -285,6 +283,36 @@ def test_call_symbol_arg(isa, file_format):
         )
     else:
         assert False
+
+
+def test_x64_stack_align():
+    ir, m, bi = create_test_module(
+        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+    )
+    sym = add_symbol(m, "foo", add_proxy_block)
+
+    patch = CallPatch(sym, align_stack=False)
+    asm = patch.get_asm(create_mock_context(m, stack_adjustment=8))
+
+    assert remove_indentation(asm) == remove_indentation(
+        """
+        sub rsp, 8
+        call foo
+        add rsp, 8
+        """
+    )
+
+
+@pytest.mark.parametrize("isa,file_format", call_patch_targets())
+def test_stack_align_opt_out(isa, file_format):
+    ir, m, bi = create_test_module(isa=isa, file_format=file_format)
+    sym = add_symbol(m, "foo", add_proxy_block)
+
+    patch = CallPatch(
+        sym, align_stack=False, preserve_caller_saved_registers=False
+    )
+    assert not patch.constraints.align_stack
+    assert not patch.constraints.preserve_caller_saved_registers
 
 
 def test_call_big_imm_arm64():
