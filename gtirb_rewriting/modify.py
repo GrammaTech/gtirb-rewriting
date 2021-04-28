@@ -113,24 +113,24 @@ def _add_return_edges_for_patch_calls(
     to the callee.
     """
     call_edges = {edge for edge in new_cfg if _is_call_edge(edge)}
+    # Because the assembler is generating this input, we can assume that there
+    # is a single fallthrough edge out of each block.
+    fallthroughs_by_block = {
+        edge.source: edge.target
+        for edge in new_cfg
+        if _is_fallthrough_edge(edge)
+    }
     for call_edge in call_edges:
         func_uuid = functions_by_block.get(call_edge.target, None)
         if not func_uuid:
             continue
 
-        fallthrough_targets = [
-            edge.target
-            for edge in new_cfg
-            if edge.source == call_edge.source and _is_fallthrough_edge(edge)
-        ]
-        if not fallthrough_targets:
+        fallthrough_target = fallthroughs_by_block.get(call_edge.source, None)
+        if not fallthrough_target:
             continue
 
-        # Because the assembler is generating this input, we can assert that
-        # there's only the single fallthrough target.
-        assert len(fallthrough_targets) == 1
         _add_return_edges_to_one_function(
-            module, func_uuid, fallthrough_targets[0], new_cfg
+            module, func_uuid, fallthrough_target, new_cfg
         )
 
 
@@ -443,7 +443,7 @@ def _modify_block_insert_cfg(
                     edge,
                     fallthrough_targets,
                     functions_by_block,
-                    code.blocks[-1],
+                    code.blocks[0],
                     code.cfg,
                 )
     elif replaces_last_instruction:
