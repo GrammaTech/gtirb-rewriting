@@ -422,13 +422,12 @@ def _modify_block_insert_cfg(
     # no fallthrough edges. For example, inserting after a ret instruction.
     if not inserts_at_end or any(_block_fallthrough_targets(block)):
         assert isinstance(code.blocks[0], gtirb.CodeBlock)
-        code.cfg.add(
-            gtirb.Edge(
-                source=block,
-                target=code.blocks[0],
-                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
-            )
+        added_fallthrough = gtirb.Edge(
+            source=block,
+            target=code.blocks[0],
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
         )
+        code.cfg.add(added_fallthrough)
 
     # Alter any outgoing edges from the original block to originate from the
     # last patch block.
@@ -466,11 +465,6 @@ def _modify_block_insert_cfg(
     # Now go back and clean up any zero-sized blocks, which trigger
     # nondeterministic behavior in the pretty printer.
     if block.size == 0:
-        added_fallthrough = next(
-            edge
-            for edge in code.cfg.in_edges(code.blocks[0])
-            if _is_fallthrough_edge(edge) and edge.source == block
-        )
         code.cfg.discard(added_fallthrough)
 
         block.size = code.blocks[0].size
