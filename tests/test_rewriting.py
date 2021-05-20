@@ -718,17 +718,20 @@ def test_insert_after_call_edges():
     # Now insert a nop after the call to verify the call's fallthrough edge
     # was updated correctly.
     ctx = gtirb_rewriting.RewritingContext(m, [func1, func2])
-    ctx.insert_at(func2, b, 5, literal_patch("nop"))
+    ctx.insert_at(func2, b, 5, literal_patch("first: nop; second: nop"))
     ctx.apply()
 
-    assert bi.contents == b"\xC3\xEB\x00\x00\x00\x00\x90\x90"
+    assert bi.contents == b"\xC3\xEB\x00\x00\x00\x00\x90\x90\x90"
+    first_block = next(
+        sym for sym in m.symbols if sym.name == "first"
+    ).referent
 
     return_edges = [
         edge for edge in ir.cfg if edge.label.type == gtirb.Edge.Type.Return
     ]
     assert len(return_edges) == 1
     assert return_edges[0].source == func1_block
-    assert return_edges[0].target not in {func1_block, b, b2}
+    assert return_edges[0].target is first_block
 
 
 def test_new_return_edges():
