@@ -22,6 +22,7 @@
 import pathlib
 import subprocess
 import sys
+import warnings
 
 import gtirb
 import gtirb_rewriting
@@ -90,26 +91,22 @@ def test_e2e(tmpdir):
         [
             "gtirb-pprinter",
             tmpdir / "rewritten.gtirb",
-            "--keep-all",
-            "--skip-section",
-            ".rela.plt",
-            "--skip-section",
-            ".rela.dyn",
-            "--skip-section",
-            ".eh_frame",
+            "--policy=complete",
             "-b",
             tmpdir / "rewritten",
             "-a",
             tmpdir / "rewritten.s",
-            "-c",
-            "-nostartfiles",
         ],
         stderr=subprocess.PIPE,
         check=False,
     )
     sys.stderr.write(result.stderr.decode())
     assert result.returncode == 0
-    assert b"WARNING" not in result.stderr
+    if b"WARNING" in result.stderr:
+        # We specifically want to make sure gtirb-rewriting didn't generate
+        # overlapping blocks. Other warnings are interesting but non-fatal.
+        assert b"WARNING: found overlapping" not in result.stderr
+        warnings.warn(UserWarning(result.stderr.decode()))
 
     result = subprocess.run(str(tmpdir / "rewritten"), stdout=subprocess.PIPE)
     assert (
