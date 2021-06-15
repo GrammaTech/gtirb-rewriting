@@ -25,7 +25,7 @@ import logging
 import operator
 import pathlib
 import uuid
-from typing import List, NamedTuple, Sequence, Tuple, Union
+from typing import List, NamedTuple, Sequence, Set, Tuple, Union
 
 import gtirb
 import gtirb_functions
@@ -98,10 +98,33 @@ class RewritingContext:
         calls in the CFG. This should only be used _before_ applying rewrites
         because the status may change if a patch inserts a call.
         """
+        if "redZoneFunctions" in self._module.aux_data:
+            red_zone_functions: Set[uuid.UUID] = self._module.aux_data[
+                "redZoneFunctions"
+            ].data
+            if func.uuid in red_zone_functions:
+                return True
+
         return all(
             not edge.label or edge.label.type != gtirb.Edge.Type.Call
             for block in func.get_all_blocks()
             for edge in block.outgoing_edges
+        )
+
+    def _update_red_zone_aux_data(self):
+        """
+        Writes the leaf function map to an aux data table for later rewrites,
+        if the ABI has a red zone.
+        """
+        if not self._abi.red_zone_size():
+            return
+
+        red_zone_table = self._module.aux_data.setdefault(
+            "redZoneFunctions", gtirb.AuxData(set(), "set<UUID>")
+        )
+        red_zone_functions: Set[uuid.UUID] = red_zone_table.data
+        red_zone_functions.update(
+            func for func, leaf in self._leaf_functions.items() if leaf
         )
 
     def _log_patch_error(
@@ -524,6 +547,8 @@ class RewritingContext:
         """
         Applies all of the patches to the module.
         """
+
+        self._update_red_zone_aux_data()
 
         with prepare_for_rewriting(self._module, self._abi.nop()):
             self._functions_by_block = {
