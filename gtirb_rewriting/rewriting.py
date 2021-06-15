@@ -111,7 +111,7 @@ class RewritingContext:
             for edge in block.outgoing_edges
         )
 
-    def _update_red_zone_aux_data(self):
+    def _update_red_zone_aux_data(self) -> None:
         """
         Writes the leaf function map to an aux data table for later rewrites,
         if the ABI has a red zone.
