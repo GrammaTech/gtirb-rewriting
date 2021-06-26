@@ -31,6 +31,7 @@ from .utils import (
     _block_fallthrough_targets,
     _block_return_edges,
     _get_function_blocks,
+    _get_or_insert_aux_data,
     _is_call_edge,
     _is_fallthrough_edge,
     _is_return_edge,
@@ -359,6 +360,12 @@ def _modify_block_insert(
     update_aux_data_keyed_by_offset("comments")
     update_aux_data_keyed_by_offset("padding")
     update_aux_data_keyed_by_offset("symbolicExpressionSizes")
+
+    sym_expr_sizes = _get_or_insert_aux_data(
+        bi.module, "symbolicExpressionSizes", "mapping<Offset,uint64_t>", dict
+    )
+    for rel_offset, size in code.symbolic_expression_sizes.items():
+        sym_expr_sizes[gtirb.Offset(bi, offset + rel_offset)] = size
 
 
 def _modify_block_insert_cfg(
