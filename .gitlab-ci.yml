@@ -34,6 +34,8 @@ test:
   script:
     - mkdir pkgs
     - pushd pkgs
+    - curl -L https://git.grammatech.com/rewriting/extra-packages/-/jobs/artifacts/master/download?job=capstone-linux-deb --output "capstone-artifacts.zip"
+    - unzip capstone-artifacts.zip
     - curl -L https://git.grammatech.com/rewriting/gtirb/-/jobs/artifacts/master/download?job=debian-installer-ubuntu20 --output "gtirb-ubuntu20-artifacts.zip"
     - unzip gtirb-ubuntu20-artifacts.zip
     - curl -L https://git.grammatech.com/rewriting/gtirb-pprinter/-/jobs/artifacts/master/download?job=debian-installer-ubuntu20 --output "gtirb-pprinter-ubuntu20-artifacts.zip"
