@@ -28,6 +28,7 @@ from typing import (
     MutableMapping,
     Sequence,
     Set,
+    Type,
     TypeVar,
     Union,
     overload,
@@ -293,6 +294,25 @@ def _text_section_name(module: gtirb.Module):
         return ".text"
     else:
         assert False, f"unsupported file format: {module.file_format}"
+
+
+def _get_or_insert_aux_data(
+    m: gtirb.Module, name: str, type_name: str, data_type: Type[T]
+) -> T:
+    """
+    Gets an aux data table from a module, creating it if it does not already
+    exist.
+    """
+    table = m.aux_data.get(name)
+    if table:
+        assert (
+            table.type_name == type_name
+        ), "existing aux data is not the right type"
+        return table.data
+
+    table = gtirb.AuxData(data_type(), type_name)
+    m.aux_data[name] = table
+    return table.data
 
 
 def decorate_extern_symbol(module: gtirb.Module, sym: str) -> str:

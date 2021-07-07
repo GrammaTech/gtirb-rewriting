@@ -345,6 +345,35 @@ def test_multiple_data_labels():
         assert edge.target in result.blocks
 
 
+def test_sym_expr_in_data():
+    m = gtirb.Module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+        name="test",
+    )
+    m.aux_data["binaryType"] = gtirb.AuxData(
+        type_name="vector<string>", data=["DYN"]
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        str:
+        .string "hello"
+        strptr:
+        .quad str
+        """
+    )
+    result = assembler.finalize()
+
+    str_sym = next(sym for sym in result.symbols if sym.name == "str")
+    assert result.data == b"hello\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    assert set(result.symbolic_expressions.keys()) == {6}
+    assert result.symbolic_expressions[6] == gtirb.SymAddrConst(0, str_sym)
+    assert set(result.symbolic_expression_sizes.keys()) == {6}
+    assert result.symbolic_expression_sizes[6] == 8
+
+
 def test_temp_symbol_suffix():
     m = gtirb.Module(
         isa=gtirb.Module.ISA.X64,

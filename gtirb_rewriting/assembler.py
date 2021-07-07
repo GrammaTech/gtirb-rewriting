@@ -64,6 +64,7 @@ class Assembler:
         self._cfg = gtirb.CFG()
         self._blocks = [gtirb.CodeBlock()]
         self._symbolic_expressions = {}
+        self._symbolic_expression_sizes = {}
         self._local_symbols = {}
         if module_symbols is not None:
             self._module_symbols = module_symbols
@@ -116,6 +117,8 @@ class Assembler:
                 self._assemble_change_section(event["section"])
             elif event["kind"] == "bytes":
                 self._assemble_bytes(bytes.fromhex(event["data"]))
+            elif event["kind"] == "emitValue":
+                self._assemble_emit_value(event["value"], event["size"])
             else:
                 assert False, f"Unsupported assembler event: {event['kind']}"
 
@@ -246,6 +249,14 @@ class Assembler:
         self._data += data
         self._current_block.size += len(data)
 
+    def _assemble_emit_value(self, value: dict, size: int) -> None:
+        self._symbolic_expressions[
+            len(self._data)
+        ] = self._mcexpr_to_symbolic_operand(value, False)
+        self._symbolic_expression_sizes[len(self._data)] = size
+        self._data += b"\x00" * size
+        self._current_block.size += size
+
     def _resolve_symbol_ref(self, expr: dict) -> gtirb.Symbol:
         assert expr["kind"] == "symbolRef"
 
@@ -280,14 +291,13 @@ class Assembler:
                 attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
         return attributes
 
-    def _fixup_to_symbolic_operand(
-        self, fixup: dict, encoding: bytes, is_branch: bool
+    def _mcexpr_to_symbolic_operand(
+        self, expr: dict, is_branch: bool
     ) -> gtirb.SymAddrConst:
         """
-        Converts an LLVM fixup to a GTIRB SymbolicExpression.
+        Converts an MC expression to a GTIRB SymbolicExpression.
         """
         attributes = set()
-        expr = fixup["value"]
 
         if expr["kind"] == "targetExpr" and expr["target"] == "aarch64":
             elfName = expr["elfName"]
@@ -308,17 +318,6 @@ class Assembler:
                 )
             expr = expr["expr"]
 
-        # LLVM will automatically add a negative value to make the expression
-        # be PC-relative. We don't care about that and just want to unwrap it.
-        if (
-            "IsPCRel" in fixup["flags"]
-            and expr["kind"] == "binaryExpr"
-            and expr["opcode"] == "Add"
-            and expr["rhs"]["kind"] == "constant"
-            and fixup["offset"] - expr["rhs"]["value"] == len(encoding)
-        ):
-            expr = expr["lhs"]
-
         # TODO: Do we need to support SymAddrAddr fixup types?
         if (
             expr["kind"] == "binaryExpr"
@@ -338,6 +337,27 @@ class Assembler:
             return gtirb.SymAddrConst(0, sym, attributes)
 
         assert False, "Unsupported symbolic expression"
+
+    def _fixup_to_symbolic_operand(
+        self, fixup: dict, encoding: bytes, is_branch: bool
+    ) -> gtirb.SymAddrConst:
+        """
+        Converts an LLVM fixup to a GTIRB SymbolicExpression.
+        """
+        expr = fixup["value"]
+
+        # LLVM will automatically add a negative value to make the expression
+        # be PC-relative. We don't care about that and just want to unwrap it.
+        if (
+            "IsPCRel" in fixup["flags"]
+            and expr["kind"] == "binaryExpr"
+            and expr["opcode"] == "Add"
+            and expr["rhs"]["kind"] == "constant"
+            and fixup["offset"] - expr["rhs"]["value"] == len(encoding)
+        ):
+            expr = expr["lhs"]
+
+        return self._mcexpr_to_symbolic_operand(expr, is_branch)
 
     def _symbol_lookup(self, name: str) -> Optional[gtirb.Symbol]:
         """
@@ -435,6 +455,7 @@ class Assembler:
             cfg=self._cfg,
             blocks=self._blocks,
             symbolic_expressions=self._symbolic_expressions,
+            symbolic_expression_sizes=self._symbolic_expression_sizes,
             symbols=list(self._local_symbols.values()),
             proxies=self._proxies,
             section_name=self._section_name,
@@ -476,6 +497,12 @@ class Assembler:
         symbolic_expressions: Dict[int, gtirb.SymbolicExpression]
         """
         A map of offset to symbolic expression, with 0 being the start of
+        `data`.
+        """
+
+        symbolic_expression_sizes: Dict[int, int]
+        """
+        A map of offset to symbolic expression size, with 0 being the start of
         `data`.
         """
 

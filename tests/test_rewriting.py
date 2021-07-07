@@ -815,3 +815,52 @@ def test_insert_byte_directive_as_data_due_to_unreachable_entrypoint():
     assert bi.contents == b"\xC3\x66\x90"
     assert isinstance(new_block, gtirb.DataBlock)
     assert m.aux_data["functionBlocks"].data[func.uuid] == {b}
+
+
+def test_insert_sym_expr_in_data():
+    ir, m, bi = create_test_module()
+
+    # This mimics:
+    #   func:
+    #   ret
+    b = add_code_block(bi, b"\xC3")
+    func = add_function(m, "func", b)
+    add_edge(ir.cfg, b, add_proxy_block(m), gtirb.Edge.Type.Return)
+    set_all_blocks_alignment(m, 1)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(
+        func,
+        b,
+        0,
+        literal_patch(
+            """
+            jmp foo
+            str:
+            .string "*"
+            strptr:
+            .quad str
+            foo:
+            """
+        ),
+    )
+    ctx.apply()
+
+    str_sym = next(sym for sym in m.symbols if sym.name == "str")
+    str_block = str_sym.referent
+    assert isinstance(str_block, gtirb.DataBlock)
+    assert str_block.contents == b"*\x00"
+
+    strptr_sym = next(sym for sym in m.symbols if sym.name == "strptr")
+    strptr_block = strptr_sym.referent
+    assert isinstance(strptr_block, gtirb.DataBlock)
+    assert strptr_block.contents == b"\x00\x00\x00\x00\x00\x00\x00\x00"
+
+    assert strptr_block.offset in bi.symbolic_expressions
+    assert bi.symbolic_expressions[strptr_block.offset] == gtirb.SymAddrConst(
+        0, str_sym
+    )
+
+    assert "symbolicExpressionSizes" in m.aux_data
+    expr_sizes = m.aux_data["symbolicExpressionSizes"].data
+    assert expr_sizes[gtirb.Offset(bi, strptr_block.offset)] == 8
