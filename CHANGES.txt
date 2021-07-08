@@ -1,7 +1,5 @@
-0.0.22:
-- Added support for symbolic expressions in data.
-
 0.0.21:
+- Added support for symbolic expressions in data.
 - Fixed CallPatch redundantly aligning the stack
 - Made CallPatch default to aligning the stack and preserving caller-saved
   registers. Clients can opt out of this by specifying align_stack=False and
