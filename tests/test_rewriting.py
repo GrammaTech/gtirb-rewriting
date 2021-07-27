@@ -888,8 +888,9 @@ def test_multiple_rewrites_with_red_zone():
     ctx.apply()
     set_all_blocks_alignment(m, 1)
 
-    assert "redZoneFunctions" in m.aux_data
-    assert func.uuid in m.aux_data["redZoneFunctions"].data
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert m.aux_data["leafFunctions"].data[func.uuid]
     assert bi.contents == (
         # lea	rsp, [rsp - 0x80]
         b"\x48\x8D\x64\x24\x80"
@@ -911,8 +912,9 @@ def test_multiple_rewrites_with_red_zone():
     ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
     ctx.apply()
 
-    assert "redZoneFunctions" in m.aux_data
-    assert func.uuid in m.aux_data["redZoneFunctions"].data
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert m.aux_data["leafFunctions"].data[func.uuid]
     assert bi.contents == (
         # lea	rsp, [rsp - 0x80]
         b"\x48\x8D\x64\x24\x80"
@@ -961,36 +963,29 @@ def test_multiple_rewrites_without_red_zone():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
+    ctx.replace_at(func, b1, 0, 5, literal_patch("nop"))
     ctx.apply()
     set_all_blocks_alignment(m, 1)
 
-    assert (
-        "redZoneFunctions" not in m.aux_data
-        or func.uuid not in m.aux_data["redZoneFunctions"].data
-    )
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert not m.aux_data["leafFunctions"].data[func.uuid]
     assert bi.contents == (
-        # push  rax
-        b"\x50"
-        # call  0
-        b"\xE8\x00\x00\x00\x00"
-        # pop   rax
-        b"\x58"
-        # call  0
-        b"\xE8\x00\x00\x00\x00"
+        # nop
+        b"\x90"
         # ret
         b"\xC3"
     )
 
-    # Now try inserting calls again
+    # Now try inserting new code and verify that we don't insert code to
+    # protect the red zone.
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
     ctx.apply()
 
-    assert (
-        "redZoneFunctions" not in m.aux_data
-        or func.uuid not in m.aux_data["redZoneFunctions"].data
-    )
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert not m.aux_data["leafFunctions"].data[func.uuid]
     assert bi.contents == (
         # push  rax
         b"\x50"
@@ -998,14 +993,8 @@ def test_multiple_rewrites_without_red_zone():
         b"\xE8\x00\x00\x00\x00"
         # pop   rax
         b"\x58"
-        # push  rax
-        b"\x50"
-        # call  0
-        b"\xE8\x00\x00\x00\x00"
-        # pop   rax
-        b"\x58"
-        # call  0
-        b"\xE8\x00\x00\x00\x00"
+        # nop
+        b"\x90"
         # ret
         b"\xC3"
     )

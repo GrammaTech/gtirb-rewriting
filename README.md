@@ -56,6 +56,20 @@ A pass may optionally be called back after all patches have been applied with
 the `end_module` method. This provides an opportunity to do per-module work,
 such as writing an edge map for a profiling pass.
 
+## Aux Data Tables
+
+gtirb-rewriting uses some non-standardized aux data tables for preserving
+state across rewrites.
+
+| <!-- --> | <!-- -->                                                 |
+|----------|----------------------------------------------------------|
+| Label    | ```"leafFunctions"``` .                                  |
+| Type     | ```std::map<gtirb:UUID,uint8_t>```                       |
+| Key      | The gtirb::UUID of a function.                           |
+| Value    | Whether or not the function was a leaf function (0/1).   |
+| AttachedTo | gtirb::Module                                          |
+| Notes    | This table tracks whether functions were leaf functions when gtirb-rewriting initially saw them, which may not reflect the current state as rewriting passes can add calls. |
+
 ## Copyright and Acknowledgments
 
 Copyright (C) 2020 GrammaTech, Inc.

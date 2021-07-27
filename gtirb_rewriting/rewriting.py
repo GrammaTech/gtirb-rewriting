@@ -25,7 +25,7 @@ import logging
 import operator
 import pathlib
 import uuid
-from typing import List, NamedTuple, Sequence, Set, Tuple, Union
+from typing import Dict, List, NamedTuple, Sequence, Tuple, Union
 
 import gtirb
 import gtirb_functions
@@ -88,9 +88,7 @@ class RewritingContext:
         self._logger = logger
         self._patch_id = 0
         self._expensive_assertions = expensive_assertions
-        self._leaf_functions = {
-            f.uuid: self._might_be_leaf_function(f) for f in self._functions
-        }
+        self._leaf_functions = self._update_leaf_functions()
 
     def _might_be_leaf_function(self, func: gtirb_functions.Function) -> bool:
         """
@@ -98,34 +96,32 @@ class RewritingContext:
         calls in the CFG. This should only be used _before_ applying rewrites
         because the status may change if a patch inserts a call.
         """
-        if "redZoneFunctions" in self._module.aux_data:
-            red_zone_functions: Set[uuid.UUID] = self._module.aux_data[
-                "redZoneFunctions"
-            ].data
-            if func.uuid in red_zone_functions:
-                return True
-
         return all(
             not edge.label or edge.label.type != gtirb.Edge.Type.Call
             for block in func.get_all_blocks()
             for edge in block.outgoing_edges
         )
 
-    def _update_red_zone_aux_data(self) -> None:
+    def _update_leaf_functions(self) -> Dict[uuid.UUID, bool]:
         """
-        Writes the leaf function map to an aux data table for later rewrites,
-        if the ABI has a red zone.
+        Updates the leafFunctions aux data table, creating it if needed, in
+        order to track leaf functions across multiple rewritings (which may
+        add new calls to the functions).
         """
-        if not self._abi.red_zone_size():
-            return
 
-        red_zone_table = self._module.aux_data.setdefault(
-            "redZoneFunctions", gtirb.AuxData(set(), "set<UUID>")
+        # GTIRB doesn't have a "bool" aux data type, so we'll use uint8 and
+        # only store 0/1.
+        leaf_function_table = self._module.aux_data.setdefault(
+            "leafFunctions", gtirb.AuxData(dict(), "mapping<UUID,uint8_t>")
         )
-        red_zone_functions: Set[uuid.UUID] = red_zone_table.data
-        red_zone_functions.update(
-            func for func, leaf in self._leaf_functions.items() if leaf
-        )
+        leaf_functions: Dict[uuid.UUID, int] = leaf_function_table.data
+        for func in self._functions:
+            if func.uuid not in leaf_functions:
+                leaf_functions[func.uuid] = int(
+                    self._might_be_leaf_function(func)
+                )
+
+        return leaf_functions
 
     def _log_patch_error(
         self,
@@ -178,7 +174,7 @@ class RewritingContext:
         ) = self._abi._create_prologue_and_epilogue(
             patch.constraints,
             registers,
-            self._leaf_functions.get(func.uuid, True),
+            bool(self._leaf_functions.get(func.uuid, 1)),
         )
 
         asm = patch.get_asm(
@@ -547,8 +543,6 @@ class RewritingContext:
         """
         Applies all of the patches to the module.
         """
-
-        self._update_red_zone_aux_data()
 
         with prepare_for_rewriting(self._module, self._abi.nop()):
             self._functions_by_block = {
