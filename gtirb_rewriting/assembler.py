@@ -309,9 +309,10 @@ class Assembler:
             elif elfName == ":got:":
                 attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
             elif elfName == ":lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Part0)
+                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
             elif elfName == ":got_lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Part1)
+                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
             else:
                 raise NotImplementedError(
                     f"unknown aarch64-specific fixup: {elfName}"

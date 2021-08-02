@@ -429,7 +429,7 @@ def test_arm64_sym_attribute_lo12():
     assert result.symbolic_expressions[4].symbol is sym
     assert result.symbolic_expressions[4].offset == 0
     assert result.symbolic_expressions[4].attributes == {
-        gtirb.SymbolicExpression.Attribute.Part0
+        gtirb.SymbolicExpression.Attribute.Lo12
     }
 
 
@@ -463,5 +463,6 @@ def test_arm64_sym_attribute_got():
     assert result.symbolic_expressions[4].symbol is sym
     assert result.symbolic_expressions[4].offset == 0
     assert result.symbolic_expressions[4].attributes == {
-        gtirb.SymbolicExpression.Attribute.Part1
+        gtirb.SymbolicExpression.Attribute.Lo12,
+        gtirb.SymbolicExpression.Attribute.GotRef,
     }
