@@ -79,7 +79,11 @@ def test_e2e(tmpdir):
     # modified binary will print out integers, the original string and then
     # exit 42.
 
-    ir = gtirb.IR.load_protobuf(pathlib.Path(__file__).parent / "e2e.gtirb")
+    test_dir = pathlib.Path(__file__).parent
+    if gtirb_rewriting.is_gtirb_at_least_version("1.10.5.dev"):
+        ir = gtirb.IR.load_protobuf(test_dir / "e2e.3.gtirb")
+    else:
+        ir = gtirb.IR.load_protobuf(test_dir / "e2e.2.gtirb")
 
     pm = gtirb_rewriting.PassManager()
     pm.add(E2EPass())

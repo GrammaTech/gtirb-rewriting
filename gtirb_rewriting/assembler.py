@@ -27,7 +27,12 @@ import gtirb
 import mcasm
 
 from .assembly import X86Syntax
-from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
+from .utils import (
+    _is_elf_pie,
+    _is_fallthrough_edge,
+    _target_triple,
+    is_gtirb_at_least_version,
+)
 
 
 class Assembler:
@@ -309,10 +314,16 @@ class Assembler:
             elif elfName == ":got:":
                 attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
             elif elfName == ":lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                if is_gtirb_at_least_version("1.10.5"):
+                    attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                else:
+                    attributes.add(gtirb.SymbolicExpression.Attribute.Part0)
             elif elfName == ":got_lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+                if is_gtirb_at_least_version("1.10.5"):
+                    attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                    attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+                else:
+                    attributes.add(gtirb.SymbolicExpression.Attribute.Part1)
             else:
                 raise NotImplementedError(
                     f"unknown aarch64-specific fixup: {elfName}"

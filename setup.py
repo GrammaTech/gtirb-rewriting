@@ -41,6 +41,7 @@ setuptools.setup(
         "mcasm > 0.1.2",
         "more-itertools",
         "dataclasses ; python_version<'3.7.0'",
+        "packaging",
     ],
     classifiers=["Programming Language :: Python :: 3"],
     url="https://github.com/grammatech/gtirb-rewriting",
