@@ -1,4 +1,5 @@
 0.0.22:
+- Updated to new ARM symbolic expression types
 
 0.0.21:
 - Added support for symbolic expressions in data.

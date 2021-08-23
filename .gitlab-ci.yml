@@ -28,25 +28,28 @@ check-format:
       EOF
       ) && exit 1)
 
-test:
+test-stable:
   stage: test
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
   script:
-    - mkdir pkgs
-    - pushd pkgs
-    - curl -L https://git.grammatech.com/rewriting/extra-packages/-/jobs/artifacts/master/download?job=capstone-linux-deb --output "capstone-artifacts.zip"
-    - unzip capstone-artifacts.zip
-    - curl -L https://git.grammatech.com/rewriting/gtirb/-/jobs/artifacts/master/download?job=debian-installer-ubuntu20 --output "gtirb-ubuntu20-artifacts.zip"
-    - unzip gtirb-ubuntu20-artifacts.zip
-    - curl -L https://git.grammatech.com/rewriting/gtirb-pprinter/-/jobs/artifacts/master/download?job=debian-installer-ubuntu20 --output "gtirb-pprinter-ubuntu20-artifacts.zip"
-    - unzip gtirb-pprinter-ubuntu20-artifacts.zip
-    - dpkg-scanpackages . /dev/null > Packages
-    - echo -e "\ndeb [trusted=yes] file:$PWD ./\n" >> /etc/apt/sources.list
+    - wget -O - https://download.grammatech.com/gtirb/files/apt-repo/conf/apt.gpg.key | apt-key add -
+    - echo "deb https://download.grammatech.com/gtirb/files/apt-repo focal stable" >> /etc/apt/sources.list
     - apt-get update -y
-    - apt-get install -y --allow-unauthenticated gtirb-pprinter
-    - popd
+    - apt-get install -y gtirb-pprinter ddisasm
     - pip3 install -r requirements-dev.txt
     - pip3 install -e .
+    - pytest --cov=gtirb_rewriting --cov-fail-under=50
+
+test-unstable:
+  stage: test
+  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  script:
+    - wget -O - https://download.grammatech.com/gtirb/files/apt-repo/conf/apt.gpg.key | apt-key add -
+    - echo "deb $INTERNAL_APT_REPO focal unstable" >> /etc/apt/sources.list
+    - apt-get update -y
+    - apt-get install -y gtirb-pprinter ddisasm
+    - pip3 install -r requirements-dev.txt
+    - pip3 install -e . --pre --extra-index-url "$EXTRA_INDEX_URL"
     - pytest --cov=gtirb_rewriting --cov-fail-under=50
 
 # This job ensures that:
