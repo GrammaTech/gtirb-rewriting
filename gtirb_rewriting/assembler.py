@@ -314,12 +314,12 @@ class Assembler:
             elif elfName == ":got:":
                 attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
             elif elfName == ":lo12:":
-                if is_gtirb_at_least_version("1.10.5"):
+                if is_gtirb_at_least_version("1.10.5-dev"):
                     attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
                 else:
                     attributes.add(gtirb.SymbolicExpression.Attribute.Part0)
             elif elfName == ":got_lo12:":
-                if is_gtirb_at_least_version("1.10.5"):
+                if is_gtirb_at_least_version("1.10.5-dev"):
                     attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
                     attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
                 else:
