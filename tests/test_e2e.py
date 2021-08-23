@@ -80,10 +80,12 @@ def test_e2e(tmpdir):
     # exit 42.
 
     test_dir = pathlib.Path(__file__).parent
-    if gtirb_rewriting.is_gtirb_at_least_version("1.10.5.dev"):
-        ir = gtirb.IR.load_protobuf(test_dir / "e2e.3.gtirb")
-    else:
-        ir = gtirb.IR.load_protobuf(test_dir / "e2e.2.gtirb")
+
+    subprocess.run(
+        ["ddisasm", test_dir / "e2e", "--ir", tmpdir / "e2e.gtirb", "-j1"],
+        check=True,
+    )
+    ir = gtirb.IR.load_protobuf(tmpdir / "e2e.gtirb")
 
     pm = gtirb_rewriting.PassManager()
     pm.add(E2EPass())
