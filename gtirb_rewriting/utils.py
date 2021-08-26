@@ -336,7 +336,7 @@ def align_address(address: int, alignment: int) -> int:
     return (address + alignment - 1) & -alignment
 
 
-@functools.lru_cache
+@functools.lru_cache(maxsize=None)
 def is_gtirb_at_least_version(version: str):
     """
     Determines if the version of gtirb installed is at least a given version.
