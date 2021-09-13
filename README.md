@@ -8,6 +8,12 @@ The gtirb-rewriting package provides a Python API for rewriting GTIRB files.
 
 See the documentation in the [Getting Started guide](doc/Getting-Started.md).
 
+Watch the [gtirb-rewriting presentation][] which introduces
+gtirb-rewriting and then demonstrates writing an example binary
+transform from scratch.
+
+[gtirb-rewriting presentation]: https://download.grammatech.com/research/gtirb-rewriting.mp4
+
 ## Supported ABIs
 
 | ISA          | File Format |
