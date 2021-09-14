@@ -25,7 +25,7 @@ import logging
 import operator
 import pathlib
 import uuid
-from typing import List, NamedTuple, Sequence, Tuple, Union
+from typing import Dict, List, NamedTuple, Sequence, Tuple, Union
 
 import gtirb
 import gtirb_functions
@@ -88,9 +88,7 @@ class RewritingContext:
         self._logger = logger
         self._patch_id = 0
         self._expensive_assertions = expensive_assertions
-        self._leaf_functions = {
-            f.uuid: self._might_be_leaf_function(f) for f in self._functions
-        }
+        self._leaf_functions = self._update_leaf_functions()
 
     def _might_be_leaf_function(self, func: gtirb_functions.Function) -> bool:
         """
@@ -103,6 +101,27 @@ class RewritingContext:
             for block in func.get_all_blocks()
             for edge in block.outgoing_edges
         )
+
+    def _update_leaf_functions(self) -> Dict[uuid.UUID, bool]:
+        """
+        Updates the leafFunctions aux data table, creating it if needed, in
+        order to track leaf functions across multiple rewritings (which may
+        add new calls to the functions).
+        """
+
+        # GTIRB doesn't have a "bool" aux data type, so we'll use uint8 and
+        # only store 0/1.
+        leaf_function_table = self._module.aux_data.setdefault(
+            "leafFunctions", gtirb.AuxData(dict(), "mapping<UUID,uint8_t>")
+        )
+        leaf_functions: Dict[uuid.UUID, int] = leaf_function_table.data
+        for func in self._functions:
+            if func.uuid not in leaf_functions:
+                leaf_functions[func.uuid] = int(
+                    self._might_be_leaf_function(func)
+                )
+
+        return leaf_functions
 
     def _log_patch_error(
         self,
@@ -155,7 +174,7 @@ class RewritingContext:
         ) = self._abi._create_prologue_and_epilogue(
             patch.constraints,
             registers,
-            self._leaf_functions.get(func.uuid, True),
+            bool(self._leaf_functions.get(func.uuid, 1)),
         )
 
         asm = patch.get_asm(

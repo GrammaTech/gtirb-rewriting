@@ -864,3 +864,137 @@ def test_insert_sym_expr_in_data():
     assert "symbolicExpressionSizes" in m.aux_data
     expr_sizes = m.aux_data["symbolicExpressionSizes"].data
     assert expr_sizes[gtirb.Offset(bi, strptr_block.offset)] == 8
+
+
+def test_multiple_rewrites_with_red_zone():
+    @gtirb_rewriting.patch_constraints(clobbers_registers=("rax",))
+    def patch(insertion_ctx):
+        return "call foo"
+
+    ir, m, bi = create_test_module(
+        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+    )
+    add_symbol(m, "foo", add_proxy_block(m))
+
+    # This mimics:
+    #   leaf_func:
+    #   ret
+    b1 = add_code_block(bi, b"\xC3")
+    func = add_function(m, "leaf_func", b1)
+    set_all_blocks_alignment(m, 1)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
+    ctx.apply()
+    set_all_blocks_alignment(m, 1)
+
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert m.aux_data["leafFunctions"].data[func.uuid]
+    assert bi.contents == (
+        # lea	rsp, [rsp - 0x80]
+        b"\x48\x8D\x64\x24\x80"
+        # push  rax
+        b"\x50"
+        # call  0
+        b"\xE8\x00\x00\x00\x00"
+        # pop   rax
+        b"\x58"
+        # lea   rsp, [rsp + 0x80]
+        b"\x48\x8D\xA4\x24\x80\x00\x00\x00"
+        # ret
+        b"\xC3"
+    )
+
+    # Now try inserting calls again, which should still be going out of its
+    # way to protect the red zone.
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
+    ctx.apply()
+
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert m.aux_data["leafFunctions"].data[func.uuid]
+    assert bi.contents == (
+        # lea	rsp, [rsp - 0x80]
+        b"\x48\x8D\x64\x24\x80"
+        # push  rax
+        b"\x50"
+        # call  0
+        b"\xE8\x00\x00\x00\x00"
+        # pop   rax
+        b"\x58"
+        # lea   rsp, [rsp + 0x80]
+        b"\x48\x8D\xA4\x24\x80\x00\x00\x00"
+        # lea	rsp, [rsp - 0x80]
+        b"\x48\x8D\x64\x24\x80"
+        # push  rax
+        b"\x50"
+        # call  0
+        b"\xE8\x00\x00\x00\x00"
+        # pop   rax
+        b"\x58"
+        # lea   rsp, [rsp + 0x80]
+        b"\x48\x8D\xA4\x24\x80\x00\x00\x00"
+        # ret
+        b"\xC3"
+    )
+
+
+def test_multiple_rewrites_without_red_zone():
+    @gtirb_rewriting.patch_constraints(clobbers_registers=("rax",))
+    def patch(insertion_ctx):
+        return "call foo"
+
+    ir, m, bi = create_test_module(
+        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+    )
+    foo_sym = add_symbol(m, "foo", add_proxy_block(m))
+
+    # This mimics:
+    #   nonleaf_func:
+    #   call foo
+    #   ret
+    b1 = add_code_block(bi, b"\xE8\x00\x00\x00\x00")
+    b2 = add_code_block(bi, b"\xC3")
+    func = add_function(m, "nonleaf_func", b1, {b2})
+    add_edge(ir.cfg, b1, foo_sym.referent, gtirb.Edge.Type.Call)
+    add_edge(ir.cfg, b1, b2, gtirb.Edge.Type.Return)
+    set_all_blocks_alignment(m, 1)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.replace_at(func, b1, 0, 5, literal_patch("nop"))
+    ctx.apply()
+    set_all_blocks_alignment(m, 1)
+
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert not m.aux_data["leafFunctions"].data[func.uuid]
+    assert bi.contents == (
+        # nop
+        b"\x90"
+        # ret
+        b"\xC3"
+    )
+
+    # Now try inserting new code and verify that we don't insert code to
+    # protect the red zone.
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
+    ctx.apply()
+
+    assert "leafFunctions" in m.aux_data
+    assert func.uuid in m.aux_data["leafFunctions"].data
+    assert not m.aux_data["leafFunctions"].data[func.uuid]
+    assert bi.contents == (
+        # push  rax
+        b"\x50"
+        # call  0
+        b"\xE8\x00\x00\x00\x00"
+        # pop   rax
+        b"\x58"
+        # nop
+        b"\x90"
+        # ret
+        b"\xC3"
+    )
