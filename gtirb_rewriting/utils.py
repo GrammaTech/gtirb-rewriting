@@ -19,6 +19,7 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+import functools
 import logging
 import uuid
 from typing import (
@@ -36,6 +37,7 @@ from typing import (
 
 import capstone
 import gtirb
+import packaging.version
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 T = TypeVar("T")
@@ -332,3 +334,13 @@ def effective_alignment(address: int, max_alignment: int = 8) -> int:
 def align_address(address: int, alignment: int) -> int:
     """Increase an address to the next alignment boundary, if necessary."""
     return (address + alignment - 1) & -alignment
+
+
+@functools.lru_cache(maxsize=None)
+def is_gtirb_at_least_version(version: str):
+    """
+    Determines if the version of gtirb installed is at least a given version.
+    """
+    return packaging.version.Version(
+        gtirb.__version__
+    ) >= packaging.version.Version(version)

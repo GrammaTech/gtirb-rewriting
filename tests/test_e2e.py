@@ -79,7 +79,13 @@ def test_e2e(tmpdir):
     # modified binary will print out integers, the original string and then
     # exit 42.
 
-    ir = gtirb.IR.load_protobuf(pathlib.Path(__file__).parent / "e2e.gtirb")
+    test_dir = pathlib.Path(__file__).parent
+
+    subprocess.run(
+        ["ddisasm", test_dir / "e2e", "--ir", tmpdir / "e2e.gtirb", "-j1"],
+        check=True,
+    )
+    ir = gtirb.IR.load_protobuf(tmpdir / "e2e.gtirb")
 
     pm = gtirb_rewriting.PassManager()
     pm.add(E2EPass())

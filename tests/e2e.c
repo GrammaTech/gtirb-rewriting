@@ -1,4 +1,4 @@
-// gcc e2e.c -o e2e && ddisasm e2e --ir e2e.gtirb
+// gcc e2e.c -o e2e
 
 #include <stdio.h>
 #include <unistd.h>

@@ -41,7 +41,12 @@ from .scopes import (
     SingleBlockScope,
     pattern_match,
 )
-from .utils import OffsetMapping, decorate_extern_symbol, show_block_asm
+from .utils import (
+    OffsetMapping,
+    decorate_extern_symbol,
+    is_gtirb_at_least_version,
+    show_block_asm,
+)
 from .version import __version__
 
 __all__ = [
@@ -57,6 +62,7 @@ __all__ = [
     "ENTRYPOINT_NAME",
     "FunctionPosition",
     "InsertionContext",
+    "is_gtirb_at_least_version",
     "join_byte_intervals",
     "MAIN_NAME",
     "OffsetMapping",
