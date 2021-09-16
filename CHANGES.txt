@@ -1,3 +1,5 @@
+0.0.23: (UNRELEASED)
+
 0.0.22:
 - Fixed an issue where running rewriting over leaf functions multiple times
   could cause the red zone to be clobbered on 64-bit ELF
