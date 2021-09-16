@@ -35,7 +35,7 @@ from typing import (
     overload,
 )
 
-import capstone
+import capstone_gt
 import gtirb
 import packaging.version
 from gtirb_capstone.instructions import GtirbInstructionDecoder
@@ -150,18 +150,18 @@ def _target_triple(module: gtirb.Module) -> str:
 
 
 def _is_partial_disassembly(
-    block: gtirb.CodeBlock, disassembly: Iterable[capstone.CsInsn]
+    block: gtirb.CodeBlock, disassembly: Iterable[capstone_gt.CsInsn]
 ) -> bool:
     """
     Determines if disassembly of a block is complete or only partial, which
-    can happen when capstone is unable to disassemble an instruction.
+    can happen when capstone_gt is unable to disassemble an instruction.
     """
     return sum(inst.size for inst in disassembly) != block.size
 
 
 def _nonterminator_instructions(
-    block: gtirb.CodeBlock, disassembly: Sequence[capstone.CsInsn]
-) -> Iterator[capstone.CsInsn]:
+    block: gtirb.CodeBlock, disassembly: Sequence[capstone_gt.CsInsn]
+) -> Iterator[capstone_gt.CsInsn]:
     """
     Yields all instructions in a block of diassembly except for the terminator,
     if present.
