@@ -22,7 +22,7 @@
 import re
 import unittest.mock
 
-import capstone
+import capstone_gt
 import gtirb
 import gtirb_functions
 import gtirb_rewriting
@@ -55,7 +55,7 @@ def test_all_block_scope_anywhere():
     code_bytes = b"\x31\xC0\x31\xC9"
     block.size = len(code_bytes)
 
-    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
     disasm = tuple(cs.disasm(code_bytes, 0))
 
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
@@ -78,7 +78,7 @@ def test_all_block_scope_exit():
     code_bytes = b"\x31\xC0\x31\xC9"
     block.size = len(code_bytes)
 
-    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
     disasm = tuple(cs.disasm(code_bytes, 0))
 
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
