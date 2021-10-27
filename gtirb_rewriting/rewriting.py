@@ -560,7 +560,7 @@ class RewritingContext:
                     func.symbol, func.block, func.patch
                 )
 
-            for f in self._functions:
+            for f in sorted(self._functions, key=lambda f: f.uuid):
                 func_insertions = [
                     insertion
                     for insertion in self._insertions
@@ -571,7 +571,7 @@ class RewritingContext:
 
                 # Iterate over initial function blocks; ignore added blocks
                 # from patches.
-                for b in tuple(f.get_all_blocks()):
+                for b in sorted(f.get_all_blocks(), key=lambda b: b.address):
                     block_insertions = [
                         insertion
                         for insertion in func_insertions
