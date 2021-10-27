@@ -500,7 +500,12 @@ def _modify_block_insert_cfg(
             del code.blocks[-1]
         elif len(fallthrough_edges) == 1:
             # If we know where the "next" block is, substitute that for our
-            # last block.
+            # last block. Because the block is empty, there should be no
+            # outgoing edges from it except for the fallthrough edge (which
+            # we will delete).
+            code.cfg.discard(fallthrough_edges[0])
+            assert not any(code.cfg.out_edges(code.blocks[-1]))
+
             _substitute_block(
                 code.blocks[-1],
                 fallthrough_edges[0].target,

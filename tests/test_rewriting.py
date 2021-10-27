@@ -542,6 +542,11 @@ def test_replace_bytes_with_trailing_zerosized_block():
     assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
     assert edges[0].target == new_block
 
+    edges = list(b2.incoming_edges)
+    assert len(edges) == 1
+    assert edges[0].label.type == gtirb.Edge.Type.Branch
+    assert edges[0].source == new_block
+
     edges = list(new_block.outgoing_edges)
     assert len(edges) == 1
     assert edges[0].label.type == gtirb.Edge.Type.Branch
