@@ -281,9 +281,8 @@ def _update_patch_return_edges_to_match(
     for func_block in _get_function_blocks(block.module, func_uuid):
         return_targets.update(
             edge.target
-            for edge in func_block.outgoing_edges
-            if _is_return_edge(edge)
-            and not isinstance(edge.target, gtirb.ProxyBlock)
+            for edge in cache.block_return_edges(func_block)
+            if not isinstance(edge.target, gtirb.ProxyBlock)
         )
 
     if not return_targets:
