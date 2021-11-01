@@ -34,7 +34,7 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .abi import ABI
 from .assembler import Assembler
-from .modify import _modify_block_insert
+from .modify import _modify_block_insert, _ModifyCache
 from .patch import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
@@ -215,29 +215,13 @@ class RewritingContext:
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
 
         _modify_block_insert(
+            self._modify_cache,
             block,
             offset,
             replacement_length,
             assembler_result,
-            self._functions_by_block,
         )
 
-        if "functionBlocks" in self._module.aux_data:
-            function_blocks = self._module.aux_data["functionBlocks"].data
-            if func.uuid in function_blocks:
-                function_blocks[func.uuid].update(
-                    b
-                    for b in assembler_result.blocks
-                    if isinstance(b, gtirb.CodeBlock)
-                )
-
-        self._functions_by_block.update(
-            {
-                b: func.uuid
-                for b in assembler_result.blocks
-                if isinstance(b, gtirb.CodeBlock)
-            }
-        )
         self._symbols_by_name.update(
             {sym.name: sym for sym in assembler_result.symbols}
         )
@@ -396,6 +380,7 @@ class RewritingContext:
 
         return_proxy = gtirb.ProxyBlock()
         self._module.proxies.add(return_proxy)
+
         self._module.ir.cfg.add(
             gtirb.Edge(
                 source=block,
@@ -423,7 +408,7 @@ class RewritingContext:
         if "functionNames" in self._module.aux_data:
             self._module.aux_data["functionNames"].data[func_uuid] = sym
 
-        self._functions_by_block[block] = func_uuid
+        self._modify_cache.functions_by_block[block] = func_uuid
 
     def _apply_function_insertion(
         self, sym: gtirb.Symbol, block: gtirb.CodeBlock, patch: Patch
@@ -446,7 +431,11 @@ class RewritingContext:
         ), "function patches should not set align_stack"
 
         func = gtirb_functions.Function(
-            self._functions_by_block[block], {block}, {block}, {sym}, set()
+            self._modify_cache.functions_by_block[block],
+            {block},
+            {block},
+            {sym},
+            set(),
         )
         context = InsertionContext(self._module, func, block, 0)
 
@@ -544,13 +533,11 @@ class RewritingContext:
         Applies all of the patches to the module.
         """
 
-        with prepare_for_rewriting(self._module, self._abi.nop()):
-            self._functions_by_block = {
-                block: func.uuid
-                for func in self._functions
-                for block in func.get_all_blocks()
-            }
+        with prepare_for_rewriting(
+            self._module, self._abi.nop()
+        ), _ModifyCache(self._module, self._functions) as modify_cache:
             self._symbols_by_name = {s.name: s for s in self._module.symbols}
+            self._modify_cache = modify_cache
 
             for func in self._function_insertions:
                 self._insert_function_stub(func.symbol, func.block)

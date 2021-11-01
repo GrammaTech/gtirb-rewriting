@@ -258,10 +258,6 @@ def _is_call_edge(edge: gtirb.Edge) -> bool:
     return edge.label and edge.label.type == gtirb.Edge.Type.Call
 
 
-def _block_return_edges(block: gtirb.CodeBlock) -> Set[gtirb.Edge]:
-    return {edge for edge in block.outgoing_edges if _is_return_edge(edge)}
-
-
 def _block_fallthrough_targets(block: gtirb.CodeBlock) -> Set[gtirb.CodeBlock]:
     return {
         edge.target
