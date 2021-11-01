@@ -363,11 +363,7 @@ def _update_return_edges_from_changing_fallthrough(
     for target_block in _get_function_blocks(
         call_edge.target.module, target_func_uuid
     ):
-        return_edges = cache.block_return_edges(target_block)
-        if not return_edges:
-            continue
-
-        for edge in return_edges:
+        for edge in cache.block_return_edges(target_block):
             if edge.target in fallthrough_targets:
                 _update_edge(
                     edge, target_block.ir.cfg, new_cfg, target=new_fallthrough
