@@ -23,16 +23,16 @@ import gtirb
 import gtirb_functions
 import gtirb_rewriting
 import pytest
-from helpers import (
+from gtirb_test_helpers import (
     add_code_block,
     add_edge,
-    add_function,
     add_proxy_block,
     add_symbol,
+    add_text_section,
     create_test_module,
-    literal_patch,
     set_all_blocks_alignment,
 )
+from helpers import add_function_object, literal_patch
 
 
 @gtirb_rewriting.patch_constraints()
@@ -46,10 +46,13 @@ def dummy_patch(insertion_ctx):
 
 
 def test_multiple_insertions():
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     b = add_code_block(bi, b"\x50\x51\x52\x53\x54\x55\x56\x57")
-    func = add_function(m, "hi", b)
+    func = add_function_object(m, "hi", b)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.insert_at(func, b, 0, gtirb_rewriting.Patch.from_function(dummy_patch))
@@ -87,9 +90,12 @@ def test_multiple_replacements():
     def nop_patch(context):
         return "nop"
 
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     b = add_code_block(bi, b"\x50\x51\x52\x53\x54\x55\x56\x57")
-    func = add_function(m, "hi", b)
+    func = add_function_object(m, "hi", b)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.replace_at(
@@ -106,9 +112,12 @@ def test_multiple_replacements():
 
 
 def test_added_function_blocks():
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     b = add_code_block(bi, b"\x50\x51\x52\x53\x54\x55\x56\x57")
-    func = add_function(m, "hi", b)
+    func = add_function_object(m, "hi", b)
 
     functions = gtirb_functions.Function.build_functions(m)
     assert len(functions) == 1
@@ -129,9 +138,12 @@ def test_added_function_blocks():
 
 
 def test_expensive_assertions():
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     b = add_code_block(bi, b"\xE8\x00\x00\x00\x00\xE8\x00\x00\x00\x00")
-    func = add_function(m, "hi", b)
+    func = add_function_object(m, "hi", b)
 
     ctx = gtirb_rewriting.RewritingContext(
         m, [func], expensive_assertions=True
@@ -162,9 +174,12 @@ def test_expensive_assertions():
 
 
 def test_conflicting_insertion_replacement():
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     b = add_code_block(bi, b"\x90\x90\x90\x90\x90\x90\x90\x90")
-    func = add_function(m, "hi", b)
+    func = add_function_object(m, "hi", b)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.insert_at(func, b, 7, gtirb_rewriting.Patch.from_function(dummy_patch))
@@ -176,9 +191,12 @@ def test_conflicting_insertion_replacement():
 
 
 def test_inserting_function_and_call():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     main_block = add_code_block(bi, b"\x90")
-    func = add_function(m, "main", main_block)
+    func = add_function_object(m, "main", main_block)
 
     @gtirb_rewriting.patch_constraints()
     def function_patch(ctx):
@@ -221,7 +239,10 @@ def test_inserting_function_calling_inserted_function():
     def call_function_patch(ctx):
         return "call target; ud2"
 
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     ctx = gtirb_rewriting.RewritingContext(m, [])
     caller_sym = ctx.register_insert_function(
@@ -248,7 +269,10 @@ def test_inserting_function_calling_inserted_function():
 
 
 def test_insert_bytes_offset0():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     extern_func_sym = add_symbol(m, "puts", add_proxy_block(m))
     # This mimics:
     #   func:
@@ -260,7 +284,7 @@ def test_insert_bytes_offset0():
         {3: gtirb.SymAddrConst(0, extern_func_sym)},
     )
     b2 = add_code_block(bi, b"\x50")
-    func = add_function(m, "func", b, {b2})
+    func = add_function_object(m, "func", b, {b2})
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
     set_all_blocks_alignment(m, 1)
 
@@ -283,7 +307,10 @@ def test_insert_bytes_offset0():
 
 
 def test_insert_bytes_last():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     # this mimics:
     #   jne foo
@@ -295,7 +322,7 @@ def test_insert_bytes_last():
     b2 = add_code_block(bi, b"\x50")
     b3 = add_code_block(bi, b"\x51")
     foo_sym.referent = b3
-    func = add_function(m, "func", b1, {b2, b3})
+    func = add_function_object(m, "func", b1, {b2, b3})
 
     add_edge(ir.cfg, b1, b3, gtirb.Edge.Type.Branch, conditional=True)
     add_edge(ir.cfg, b1, b2, gtirb.Edge.Type.Fallthrough)
@@ -340,11 +367,14 @@ def test_insert_bytes_last():
 
 
 def test_insert_bytes_last_no_fallthrough():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     b = add_code_block(bi, b"\xB8\x2A\x00\x00\x00\xC3")
     return_proxy = add_proxy_block(m)
     add_edge(ir.cfg, b, return_proxy, gtirb.Edge.Type.Return)
-    func = add_function(m, "func", b)
+    func = add_function_object(m, "func", b)
     set_all_blocks_alignment(m, 1)
 
     # Test inserting after a ret
@@ -375,7 +405,10 @@ def test_insert_bytes_last_no_fallthrough():
 
 
 def test_replace_bytes_offset0():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     extern_func_sym = add_symbol(m, "puts", add_proxy_block(m))
     # This mimics:
     #   func:
@@ -391,7 +424,7 @@ def test_replace_bytes_offset0():
         },
     )
     b2 = add_code_block(bi, b"\x50")
-    func = add_function(m, "func", b, {b2})
+    func = add_function_object(m, "func", b, {b2})
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
     set_all_blocks_alignment(m, 1)
 
@@ -413,7 +446,10 @@ def test_replace_bytes_offset0():
 
 
 def test_replace_bytes_last():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     extern_func_proxy = add_proxy_block(m)
     extern_func_sym = add_symbol(m, "puts", extern_func_proxy)
@@ -423,9 +459,13 @@ def test_replace_bytes_last():
     #   pushq %rdi
     #   call puts
     #   ud2
-    b = add_code_block(bi, b"\x57\xE8\x00\x00\x00\x00", {2: extern_func_sym})
+    b = add_code_block(
+        bi,
+        b"\x57\xE8\x00\x00\x00\x00",
+        {2: gtirb.SymAddrConst(0, extern_func_sym)},
+    )
     b2 = add_code_block(bi, b"\x0F\x0B")
-    func = add_function(m, "func", b, {b2})
+    func = add_function_object(m, "func", b, {b2})
 
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
     add_edge(ir.cfg, b, extern_func_proxy, gtirb.Edge.Type.Call)
@@ -461,7 +501,10 @@ def test_replace_bytes_last():
 
 
 def test_replace_bytes_all():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     extern_func_proxy = add_proxy_block(m)
     extern_func_sym = add_symbol(m, "puts", extern_func_proxy)
@@ -471,9 +514,13 @@ def test_replace_bytes_all():
     #   pushq %rdi
     #   call puts
     #   ud2
-    b = add_code_block(bi, b"\x57\xE8\x00\x00\x00\x00", {2: extern_func_sym})
+    b = add_code_block(
+        bi,
+        b"\x57\xE8\x00\x00\x00\x00",
+        {2: gtirb.SymAddrConst(0, extern_func_sym)},
+    )
     b2 = add_code_block(bi, b"\x0F\x0B")
-    func = add_function(m, "func", b, {b2})
+    func = add_function_object(m, "func", b, {b2})
 
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
     add_edge(ir.cfg, b, extern_func_proxy, gtirb.Edge.Type.Call)
@@ -500,7 +547,10 @@ def test_replace_bytes_all():
 
 
 def test_replace_bytes_with_trailing_zerosized_block():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     extern_func_proxy = add_proxy_block(m)
     extern_func_sym = add_symbol(m, "puts", extern_func_proxy)
@@ -510,9 +560,13 @@ def test_replace_bytes_with_trailing_zerosized_block():
     #   pushq %rdi
     #   call puts
     #   ud2
-    b = add_code_block(bi, b"\x57\xE8\x00\x00\x00\x00", {2: extern_func_sym})
+    b = add_code_block(
+        bi,
+        b"\x57\xE8\x00\x00\x00\x00",
+        {2: gtirb.SymAddrConst(0, extern_func_sym)},
+    )
     b2 = add_code_block(bi, b"\x0F\x0B")
-    func = add_function(m, "func", b, {b2})
+    func = add_function_object(m, "func", b, {b2})
 
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
     add_edge(ir.cfg, b, extern_func_proxy, gtirb.Edge.Type.Call)
@@ -554,9 +608,12 @@ def test_replace_bytes_with_trailing_zerosized_block():
 
 
 def test_replace_bytes_in_place_no_symbol():
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     b = add_code_block(bi, b"\x50\x51\x52")
-    func = add_function(m, "func", b)
+    func = add_function_object(m, "func", b)
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
@@ -577,9 +634,12 @@ def test_replace_bytes_in_place_no_symbol():
 
 def test_replace_bytes_in_place_with_symbol():
     # in place replacement is expected not to happen because of the symbol
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     b = add_code_block(bi, b"\x50\x51\x52")
-    func = add_function(m, "func", b)
+    func = add_function_object(m, "func", b)
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
@@ -609,20 +669,23 @@ def test_replace_bytes_in_place_with_symbol():
 
 
 def test_insert_call_edges():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #   func1:
     #   ret
     func1_block = add_code_block(bi, b"\xC3")
-    func1 = add_function(m, "func1", func1_block)
+    func1 = add_function_object(m, "func1", func1_block)
     add_edge(ir.cfg, func1_block, add_proxy_block(m), gtirb.Edge.Type.Return)
 
     # This mimics:
     #   func2:
     #   nop
     b = add_code_block(bi, b"\x90")
-    func2 = add_function(m, "func2", b)
+    func2 = add_function_object(m, "func2", b)
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func1, func2])
@@ -648,14 +711,17 @@ def test_insert_call_edges():
 
 
 def test_remove_call_edges():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #   func1:
     #   ret
     func1_block = add_code_block(bi, b"\xC3")
     func1_sym = add_symbol(m, "func1", func1_block)
-    func1 = add_function(m, func1_sym, func1_block)
+    func1 = add_function_object(m, func1_sym, func1_block)
 
     # This mimics:
     #   func2:
@@ -665,7 +731,7 @@ def test_remove_call_edges():
         bi, b"\xEB\x00\x00\x00\x00", {1: gtirb.SymAddrConst(0, func1_sym)}
     )
     b2 = add_code_block(bi, b"\x90")
-    func2 = add_function(m, "func2", b, {b2})
+    func2 = add_function_object(m, "func2", b, {b2})
 
     add_edge(ir.cfg, b, func1_block, gtirb.Edge.Type.Call)
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
@@ -695,14 +761,17 @@ def test_remove_call_edges():
 
 
 def test_insert_after_call_edges():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #   func1:
     #   ret
     func1_block = add_code_block(bi, b"\xC3")
     func1_sym = add_symbol(m, "func1", func1_block)
-    func1 = add_function(m, func1_sym, func1_block)
+    func1 = add_function_object(m, func1_sym, func1_block)
 
     # This mimics:
     #   func2:
@@ -712,7 +781,7 @@ def test_insert_after_call_edges():
         bi, b"\xEB\x00\x00\x00\x00", {1: gtirb.SymAddrConst(0, func1_sym)}
     )
     b2 = add_code_block(bi, b"\x90")
-    func2 = add_function(m, "func2", b, {b2})
+    func2 = add_function_object(m, "func2", b, {b2})
 
     add_edge(ir.cfg, b, func1_block, gtirb.Edge.Type.Call)
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
@@ -740,14 +809,17 @@ def test_insert_after_call_edges():
 
 
 def test_new_return_edges():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #   func1:
     #   ret
     func1_block = add_code_block(bi, b"\xC3")
     func1_sym = add_symbol(m, "func1", func1_block)
-    func1 = add_function(m, func1_sym, func1_block)
+    func1 = add_function_object(m, func1_sym, func1_block)
 
     # This mimics:
     #   func2:
@@ -757,7 +829,7 @@ def test_new_return_edges():
         bi, b"\xEB\x00\x00\x00\x00", {1: gtirb.SymAddrConst(0, func1_sym)}
     )
     b2 = add_code_block(bi, b"\x90")
-    func2 = add_function(m, "func2", b, {b2})
+    func2 = add_function_object(m, "func2", b, {b2})
 
     add_edge(ir.cfg, b, func1_block, gtirb.Edge.Type.Call)
     add_edge(ir.cfg, b, b2, gtirb.Edge.Type.Fallthrough)
@@ -782,13 +854,16 @@ def test_new_return_edges():
 
 
 def test_insert_byte_directive_as_code():
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #   func:
     #   nop
     b = add_code_block(bi, b"\x90")
-    func = add_function(m, "func", b)
+    func = add_function_object(m, "func", b)
     set_all_blocks_alignment(m, 1)
 
     # Insert some bytes to verify we get a code block
@@ -801,13 +876,16 @@ def test_insert_byte_directive_as_code():
 
 
 def test_insert_byte_directive_as_data_due_to_unreachable_entrypoint():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #   func:
     #   ret
     b = add_code_block(bi, b"\xC3")
-    func = add_function(m, "func", b)
+    func = add_function_object(m, "func", b)
     add_edge(ir.cfg, b, add_proxy_block(m), gtirb.Edge.Type.Return)
     set_all_blocks_alignment(m, 1)
 
@@ -823,13 +901,16 @@ def test_insert_byte_directive_as_data_due_to_unreachable_entrypoint():
 
 
 def test_insert_sym_expr_in_data():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
 
     # This mimics:
     #   func:
     #   ret
     b = add_code_block(bi, b"\xC3")
-    func = add_function(m, "func", b)
+    func = add_function_object(m, "func", b)
     add_edge(ir.cfg, b, add_proxy_block(m), gtirb.Edge.Type.Return)
     set_all_blocks_alignment(m, 1)
 
@@ -876,16 +957,17 @@ def test_multiple_rewrites_with_red_zone():
     def patch(insertion_ctx):
         return "call foo"
 
-    ir, m, bi = create_test_module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
+    _, bi = add_text_section(m, address=0x1000)
     add_symbol(m, "foo", add_proxy_block(m))
 
     # This mimics:
     #   leaf_func:
     #   ret
     b1 = add_code_block(bi, b"\xC3")
-    func = add_function(m, "leaf_func", b1)
+    func = add_function_object(m, "leaf_func", b1)
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
@@ -951,9 +1033,10 @@ def test_multiple_rewrites_without_red_zone():
     def patch(insertion_ctx):
         return "call foo"
 
-    ir, m, bi = create_test_module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
+    _, bi = add_text_section(m, address=0x1000)
     foo_sym = add_symbol(m, "foo", add_proxy_block(m))
 
     # This mimics:
@@ -962,7 +1045,7 @@ def test_multiple_rewrites_without_red_zone():
     #   ret
     b1 = add_code_block(bi, b"\xE8\x00\x00\x00\x00")
     b2 = add_code_block(bi, b"\xC3")
-    func = add_function(m, "nonleaf_func", b1, {b2})
+    func = add_function_object(m, "nonleaf_func", b1, {b2})
     add_edge(ir.cfg, b1, foo_sym.referent, gtirb.Edge.Type.Call)
     add_edge(ir.cfg, b1, b2, gtirb.Edge.Type.Return)
     set_all_blocks_alignment(m, 1)

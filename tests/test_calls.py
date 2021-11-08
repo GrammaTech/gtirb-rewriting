@@ -26,12 +26,8 @@ import gtirb
 import gtirb_rewriting
 import pytest
 from gtirb_rewriting.patches import CallPatch
-from helpers import (
-    add_proxy_block,
-    add_symbol,
-    create_test_module,
-    remove_indentation,
-)
+from gtirb_test_helpers import add_proxy_block, add_symbol, create_test_module
+from helpers import remove_indentation
 
 
 def create_mock_context(m, stack_adjustment=None):
@@ -59,7 +55,7 @@ def call_patch_targets():
 
 @pytest.mark.parametrize("isa,file_format", call_patch_targets())
 def test_call_0_args(isa, file_format):
-    ir, m, bi = create_test_module(isa=isa, file_format=file_format)
+    _, m = create_test_module(file_format, isa)
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
     patch = CallPatch(sym)
@@ -98,7 +94,7 @@ def test_call_0_args(isa, file_format):
 
 @pytest.mark.parametrize("isa,file_format", call_patch_targets())
 def test_call_3_args(isa, file_format):
-    ir, m, bi = create_test_module(isa=isa, file_format=file_format)
+    _, m = create_test_module(file_format, isa)
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
     patch = CallPatch(sym, args=(1, 2, 3))
@@ -150,7 +146,7 @@ def test_call_3_args(isa, file_format):
 
 @pytest.mark.parametrize("isa,file_format", call_patch_targets())
 def test_call_11_args(isa, file_format):
-    ir, m, bi = create_test_module(isa=isa, file_format=file_format)
+    _, m = create_test_module(file_format, isa)
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
     patch = CallPatch(sym, args=(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11))
@@ -242,7 +238,7 @@ def test_call_11_args(isa, file_format):
 
 @pytest.mark.parametrize("isa,file_format", call_patch_targets())
 def test_call_symbol_arg(isa, file_format):
-    ir, m, bi = create_test_module(isa=isa, file_format=file_format)
+    _, m = create_test_module(file_format, isa)
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
     patch = CallPatch(sym, args=(sym,))
@@ -286,8 +282,8 @@ def test_call_symbol_arg(isa, file_format):
 
 
 def test_x64_stack_align():
-    ir, m, bi = create_test_module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
     sym = add_symbol(m, "foo", add_proxy_block)
 
@@ -305,7 +301,7 @@ def test_x64_stack_align():
 
 @pytest.mark.parametrize("isa,file_format", call_patch_targets())
 def test_stack_align_opt_out(isa, file_format):
-    ir, m, bi = create_test_module(isa=isa, file_format=file_format)
+    _, m = create_test_module(file_format, isa)
     sym = add_symbol(m, "foo", add_proxy_block)
 
     patch = CallPatch(
@@ -316,7 +312,9 @@ def test_stack_align_opt_out(isa, file_format):
 
 
 def test_call_big_imm_arm64():
-    ir, m, bi = create_test_module(isa=gtirb.Module.ISA.ARM64)
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.ARM64
+    )
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
     patch = CallPatch(sym, args=(0xDEADBEEFFEEDFACE,))
