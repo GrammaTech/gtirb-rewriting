@@ -22,15 +22,14 @@
 
 import gtirb
 import gtirb_rewriting
-from helpers import add_proxy_block, add_symbol, create_test_module
+from gtirb_test_helpers import add_proxy_block, add_symbol, create_test_module
 
 
 def test_return_edges():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
+
     assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         "ret", gtirb_rewriting.X86Syntax.INTEL,
@@ -53,7 +52,9 @@ def test_return_edges():
 
 
 def test_symbolic_expr():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
+    )
     puts_sym = add_symbol(m, "puts", add_proxy_block(m))
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -71,7 +72,9 @@ def test_symbolic_expr():
 
 
 def test_symbolic_expr_sym_offset():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
+    )
     puts_sym = add_symbol(m, "puts", add_proxy_block(m))
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -89,11 +92,10 @@ def test_symbolic_expr_sym_offset():
 
 
 def test_byte_directive_as_code_due_to_entrypoint():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
+
     assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
         """
@@ -111,13 +113,8 @@ def test_byte_directive_as_code_due_to_entrypoint():
 
 
 def test_byte_directive_as_code_due_to_cfg():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    m.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["DYN"]
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     # This gets treated as code because control flow can execute it.
@@ -150,13 +147,8 @@ def test_byte_directive_as_code_due_to_cfg():
 
 
 def test_byte_directive_as_code_due_to_mixing():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    m.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["DYN"]
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     # This gets treated as code because it has other code in the block.
@@ -190,13 +182,8 @@ def test_byte_directive_as_code_due_to_mixing():
 
 
 def test_byte_directive_as_data():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    m.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["DYN"]
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -228,13 +215,8 @@ def test_byte_directive_as_data():
 
 
 def test_asciz_directive_as_data():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    m.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["DYN"]
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -272,11 +254,10 @@ def test_asciz_directive_as_data():
 
 
 def test_byte_directive_as_data_due_to_unreachable_entrypoint():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
+
     assembler = gtirb_rewriting.Assembler(m, trivially_unreachable=True)
     assembler.assemble(
         """
@@ -294,13 +275,8 @@ def test_byte_directive_as_data_due_to_unreachable_entrypoint():
 
 
 def test_multiple_data_labels():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    m.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["DYN"]
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -346,13 +322,8 @@ def test_multiple_data_labels():
 
 
 def test_sym_expr_in_data():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    m.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["DYN"]
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -375,10 +346,8 @@ def test_sym_expr_in_data():
 
 
 def test_temp_symbol_suffix():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     assembler = gtirb_rewriting.Assembler(m, temp_symbol_suffix="_1")
@@ -402,10 +371,10 @@ def test_temp_symbol_suffix():
 
 
 def test_arm64_sym_attribute_lo12():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.ARM64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.ARM64,
+        binary_type=["DYN"],
     )
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
@@ -439,10 +408,10 @@ def test_arm64_sym_attribute_lo12():
 
 
 def test_arm64_sym_attribute_got():
-    m = gtirb.Module(
-        isa=gtirb.Module.ISA.ARM64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.ARM64,
+        binary_type=["DYN"],
     )
     sym = add_symbol(m, "foo", add_proxy_block(m))
 
