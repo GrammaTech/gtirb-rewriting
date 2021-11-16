@@ -23,7 +23,7 @@
 import collections
 import contextlib
 import uuid
-from typing import Any, Container, Dict, Iterable, Iterator, MutableSet, Set
+from typing import Container, Dict, Iterable, Iterator, Set
 
 import gtirb
 import gtirb_functions
@@ -40,114 +40,58 @@ from .utils import (
 )
 
 
-class _ModifyCache(contextlib.AbstractContextManager):
+class _ReturnEdgeCache(gtirb.CFG):
     """
-    State that should be preserved across calls to _modify_block_insert to
-    improve performance.
+    A CFG subclass that provides a cache for return edges and proxy return
+    edges.
     """
 
-    class _ReturnEdgeCache(MutableSet[gtirb.Edge]):
-        """
-        Wraps a CFG object and provides a cache for return edges and proxy
-        return edges. It is API-compatible with gtirb.CFG and replaces the
-        IR's cfg object.
-        """
+    def __init__(self, edges=None) -> None:
+        self._return_edges = collections.defaultdict(set)
+        self._proxy_return_edges = collections.defaultdict(set)
+        super().__init__(edges)
 
-        def __init__(self, real_cfg: gtirb.CFG) -> None:
-            self._cfg = real_cfg
-            self._return_edges = collections.defaultdict(set)
-            self._proxy_return_edges = collections.defaultdict(set)
-            for edge in self._cfg:
-                if _is_return_edge(edge):
-                    self._return_edges[edge.source].add(edge)
-                    if isinstance(edge.target, gtirb.ProxyBlock):
-                        self._proxy_return_edges[edge.source].add(edge)
+    def add(self, edge: gtirb.Edge) -> None:
+        super().add(edge)
+        if _is_return_edge(edge):
+            self._return_edges[edge.source].add(edge)
+            if isinstance(edge.target, gtirb.ProxyBlock):
+                self._proxy_return_edges[edge.source].add(edge)
 
-        def __contains__(self, edge: gtirb.Edge) -> bool:
-            return edge in self._cfg
+    def _dict_set_discard(self, setdict, key, value):
+        value_set = setdict[key]
+        value_set.discard(value)
+        if not value_set:
+            del setdict[key]
 
-        def __iter__(self) -> Iterator[gtirb.Edge]:
-            return iter(self._cfg)
+    def clear(self) -> None:
+        super().clear()
+        self._return_edges.clear()
+        self._proxy_return_edges.clear()
 
-        def __len__(self) -> int:
-            return len(self._cfg)
-
-        def update(self, edges: Iterable[gtirb.Edge]) -> None:
-            for edge in edges:
-                self.add(edge)
-
-        def add(self, edge: gtirb.Edge) -> None:
-            self._cfg.add(edge)
-            if _is_return_edge(edge):
-                self._return_edges[edge.source].add(edge)
-                if isinstance(edge.target, gtirb.ProxyBlock):
-                    self._proxy_return_edges[edge.source].add(edge)
-
-        def _dict_set_discard(self, setdict, key, value):
-            value_set = setdict[key]
-            value_set.discard(value)
-            if not value_set:
-                del setdict[key]
-
-        def clear(self) -> None:
-            self._cfg.clear()
-            self._return_edges.clear()
-            self._proxy_return_edges.clear()
-
-        def discard(self, edge: gtirb.Edge) -> None:
-            self._cfg.discard(edge)
-            if _is_return_edge(edge):
-                self._dict_set_discard(self._return_edges, edge.source, edge)
-                if isinstance(edge.target, gtirb.ProxyBlock):
-                    self._dict_set_discard(
-                        self._proxy_return_edges, edge.source, edge
-                    )
-
-        def __repr__(self) -> str:
-            return repr(self._cfg)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._cfg, name)
-
-    def __init__(
-        self,
-        module: gtirb.Module,
-        functions: Iterable[gtirb_functions.Function],
-    ) -> None:
-        self.module = module
-        self.original_cfg = module.ir.cfg
-        self._return_cache = self._ReturnEdgeCache(module.ir.cfg)
-        self.functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID] = {
-            block: func.uuid
-            for func in functions
-            for block in func.get_all_blocks()
-        }
-
-    def __enter__(self):
-        assert (
-            self.module.ir.cfg is not self._return_cache
-        ), "Cannot re-enter cache context manager"
-        self.module.ir.cfg = self._return_cache
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.module.ir.cfg = self.original_cfg
-        return None
+    def discard(self, edge: gtirb.Edge) -> None:
+        super().discard(edge)
+        if _is_return_edge(edge):
+            self._dict_set_discard(self._return_edges, edge.source, edge)
+            if isinstance(edge.target, gtirb.ProxyBlock):
+                self._dict_set_discard(
+                    self._proxy_return_edges, edge.source, edge
+                )
 
     def any_return_edges(self, block: gtirb.CodeBlock) -> bool:
         """
         Determines if a block has any return edges.
         """
-        return block in self._return_cache._return_edges
+        return block in self._return_edges
 
     def block_return_edges(self, block: gtirb.CodeBlock) -> Set[gtirb.Edge]:
         """
         Gets the set of return edges for a block.
         """
-        if block not in self._return_cache._return_edges:
+        if block not in self._return_edges:
             return set()
 
-        return set(self._return_cache._return_edges[block])
+        return set(self._return_edges[block])
 
     def block_proxy_return_edges(
         self, block: gtirb.CodeBlock
@@ -155,10 +99,46 @@ class _ModifyCache(contextlib.AbstractContextManager):
         """
         Gets the set of return edges that target proxy blocks for a block.
         """
-        if block not in self._return_cache._proxy_return_edges:
+        if block not in self._proxy_return_edges:
             return set()
 
-        return set(self._return_cache._proxy_return_edges[block])
+        return set(self._proxy_return_edges[block])
+
+
+@contextlib.contextmanager
+def _make_return_cache(ir: gtirb.IR) -> Iterator[_ReturnEdgeCache]:
+    if isinstance(ir.cfg, _ReturnEdgeCache):
+        yield ir.cfg
+    else:
+        old_cfg = ir.cfg
+        cache = _ReturnEdgeCache(old_cfg)
+        ir.cfg = cache
+        yield cache
+        old_cfg.clear()
+        old_cfg.update(cache)
+        ir.cfg = old_cfg
+
+
+class _ModifyCache:
+    """
+    State that should be preserved across calls to _modify_block_insert to
+    improve performance.
+    """
+
+    def __init__(
+        self,
+        module: gtirb.Module,
+        functions: Iterable[gtirb_functions.Function],
+        return_cache: _ReturnEdgeCache,
+    ) -> None:
+        self.module = module
+        self.original_cfg = module.ir.cfg
+        self.return_cache = return_cache
+        self.functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID] = {
+            block: func.uuid
+            for func in functions
+            for block in func.get_all_blocks()
+        }
 
 
 def _update_edge(
@@ -209,10 +189,10 @@ def _add_return_edges_to_one_function(
     Adds a new return edge to all returns in the function.
     """
     for block in _get_function_blocks(module, func_uuid):
-        if not cache.any_return_edges(block):
+        if not cache.return_cache.any_return_edges(block):
             continue
 
-        for return_edge in cache.block_proxy_return_edges(block):
+        for return_edge in cache.return_cache.block_proxy_return_edges(block):
             # We are intentionally leaving the proxy block in the module's
             # proxies.
             block.ir.cfg.discard(return_edge)
@@ -281,7 +261,7 @@ def _update_patch_return_edges_to_match(
     for func_block in _get_function_blocks(block.module, func_uuid):
         return_targets.update(
             edge.target
-            for edge in cache.block_return_edges(func_block)
+            for edge in cache.return_cache.block_return_edges(func_block)
             if not isinstance(edge.target, gtirb.ProxyBlock)
         )
 
@@ -319,7 +299,7 @@ def _update_return_edges_from_removing_call(
         return
 
     for block in _get_function_blocks(call_edge.target.module, func_uuid):
-        return_edges = cache.block_return_edges(block)
+        return_edges = cache.return_cache.block_return_edges(block)
         if not return_edges:
             continue
 
@@ -363,7 +343,7 @@ def _update_return_edges_from_changing_fallthrough(
     for target_block in _get_function_blocks(
         call_edge.target.module, target_func_uuid
     ):
-        for edge in cache.block_return_edges(target_block):
+        for edge in cache.return_cache.block_return_edges(target_block):
             if edge.target in fallthrough_targets:
                 _update_edge(
                     edge, target_block.ir.cfg, new_cfg, target=new_fallthrough
@@ -379,13 +359,14 @@ def _modify_block_insert(
 ) -> None:
     """
     Insert bytes into a block and adjusts the IR as needed.
+    :param cache: The modify cache, which should be reused across multiple
+                  modifications.
     :param block: The code block to insert into.
     :param offset: The byte offset into the code block.
     :param replacement_length: The number of bytes after `offset` that should
                                be removed.
     :param code: The assembled code to be inserted. It will be modified to
                  reflect what actually gets inserted in the binary.
-    :param functions_by_block: Map from code block to containing function UUID.
     """
 
     assert cache.module is block.module
@@ -514,13 +495,14 @@ def _modify_block_insert_cfg(
 ) -> None:
     """
     Adjust codeblock sizes, create CFG edges, remove 0-size blocks.
+    :param cache: The modify cache, which should be reused across multiple
+                  modifications.
     :param block: The code block to insert into.
     :param offset: The byte offset into the code block.
     :param replacement_length: The number of bytes after `offset` that should
                                be removed.
     :param code: The assembled code to be inserted. It will be modified to
                  reflect what actually gets inserted in the binary.
-    :param functions_by_block: Map from code block to containing function UUID.
     """
 
     bi = block.byte_interval

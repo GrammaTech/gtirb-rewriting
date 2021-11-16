@@ -32,7 +32,7 @@ from helpers import (
 )
 
 
-def test_modify_cache():
+def test_return_cache():
     ir, m, bi = create_test_module()
 
     # This mimics:
@@ -42,8 +42,6 @@ def test_modify_cache():
     foo_sym = add_symbol(m, "foo", add_proxy_block(m))
     b1 = add_code_block(bi, b"\x75\x00", {1: gtirb.SymAddrConst(0, foo_sym)})
     b2 = add_code_block(bi, b"\xC3")
-    func = add_function(m, "func", b1, {b2})
-    b3 = add_code_block(bi, b"\x0F\x0B")
 
     return_proxy = add_proxy_block(m)
     add_edge(
@@ -54,29 +52,66 @@ def test_modify_cache():
         ir.cfg, b2, return_proxy, gtirb.Edge.Type.Return
     )
 
-    with gtirb_rewriting.modify._ModifyCache(m, [func]) as cache:
-        assert cache.functions_by_block[b1] == func.uuid
-        assert cache.functions_by_block[b2] == func.uuid
-        assert b3 not in cache.functions_by_block
+    with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
+        assert not return_cache.any_return_edges(b1)
+        assert return_cache.block_return_edges(b1) == set()
+        assert return_cache.block_proxy_return_edges(b1) == set()
 
-        assert not cache.any_return_edges(b1)
-        assert cache.block_return_edges(b1) == set()
-        assert cache.block_proxy_return_edges(b1) == set()
-
-        assert cache.any_return_edges(b2)
-        assert cache.block_return_edges(b2) == {proxy_return_edge}
-        assert cache.block_proxy_return_edges(b2) == {proxy_return_edge}
+        assert return_cache.any_return_edges(b2)
+        assert return_cache.block_return_edges(b2) == {proxy_return_edge}
+        assert return_cache.block_proxy_return_edges(b2) == {proxy_return_edge}
 
         # Discard the return edge and try again
         ir.cfg.discard(proxy_return_edge)
 
-        assert not cache.any_return_edges(b2)
-        assert cache.block_return_edges(b2) == set()
-        assert cache.block_proxy_return_edges(b2) == set()
+        assert not return_cache.any_return_edges(b2)
+        assert return_cache.block_return_edges(b2) == set()
+        assert return_cache.block_proxy_return_edges(b2) == set()
 
         # Then add a new edge that isn't a proxy block
         return_edge = add_edge(ir.cfg, b2, b1, gtirb.Edge.Type.Return)
 
-        assert cache.any_return_edges(b2)
-        assert cache.block_return_edges(b2) == {return_edge}
-        assert cache.block_proxy_return_edges(b2) == set()
+        assert return_cache.any_return_edges(b2)
+        assert return_cache.block_return_edges(b2) == {return_edge}
+        assert return_cache.block_proxy_return_edges(b2) == set()
+
+
+def test_return_cache_decorator():
+    ir, m, bi = create_test_module()
+    orig_cfg = ir.cfg
+
+    b1 = add_code_block(bi, b"\x90")
+    b2 = add_code_block(bi, b"\xC3")
+    edge1 = add_edge(ir.cfg, b1, b2, gtirb.Edge.Type.Fallthrough)
+
+    with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
+        with gtirb_rewriting.modify._make_return_cache(ir) as return_cache2:
+            assert return_cache is return_cache2
+            assert ir.cfg is return_cache
+
+        assert ir.cfg is return_cache
+        assert set(ir.cfg) == set(orig_cfg)
+
+        edge2 = add_edge(ir.cfg, b2, b1, gtirb.Edge.Type.Return)
+        ir.cfg.discard(edge1)
+
+    assert ir.cfg is orig_cfg
+    assert set(ir.cfg) == {edge2}
+
+
+def test_modify_cache():
+    ir, m, bi = create_test_module()
+
+    # This mimics:
+    #  ret
+    #  ud2
+    b1 = add_code_block(bi, b"\xC3")
+    b2 = add_code_block(bi, b"\x0F\x0B")
+    func = add_function(m, "func", b1)
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+
+    assert modify_cache.functions_by_block[b1] == func.uuid
+    assert b2 not in modify_cache.functions_by_block

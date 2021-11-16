@@ -25,6 +25,7 @@ from typing import Sequence
 import gtirb
 import gtirb_functions
 
+from .modify import _make_return_cache
 from .rewriting import RewritingContext
 
 
@@ -89,19 +90,21 @@ class PassManager:
         """
         Runs the passes on the GTIRB IR.
         """
-        for mod in ir.modules:
-            functions = gtirb_functions.Function.build_functions(mod)
-            context = RewritingContext(
-                mod,
-                functions,
-                logger=self._logger,
-                expensive_assertions=self._expensive_assertions,
-            )
 
-            for pass_inst in self._passes:
-                pass_inst.begin_module(mod, functions, context)
+        with _make_return_cache(ir):
+            for mod in ir.modules:
+                functions = gtirb_functions.Function.build_functions(mod)
+                context = RewritingContext(
+                    mod,
+                    functions,
+                    logger=self._logger,
+                    expensive_assertions=self._expensive_assertions,
+                )
 
-            context.apply()
+                for pass_inst in self._passes:
+                    pass_inst.begin_module(mod, functions, context)
 
-            for pass_inst in self._passes:
-                pass_inst.end_module(mod, functions)
+                context.apply()
+
+                for pass_inst in self._passes:
+                    pass_inst.end_module(mod, functions)
