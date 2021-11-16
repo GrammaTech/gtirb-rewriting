@@ -25,6 +25,7 @@ import unittest.mock
 import gtirb
 import gtirb_functions
 import gtirb_rewriting
+from gtirb_test_helpers import create_test_module
 
 
 def test_register_fmt():
@@ -36,13 +37,8 @@ def test_register_fmt():
 
 
 def test_decorate_symbol_elf_pic():
-    mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
-    )
-    mod.aux_data["binaryType"] = gtirb.AuxData(
-        type_name="vector<string>", data=["DYN"],
+    _, mod = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
     )
 
     block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)

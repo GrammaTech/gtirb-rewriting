@@ -26,11 +26,12 @@ import capstone_gt
 import gtirb
 import gtirb_rewriting.utils
 import pytest
-from helpers import (
+from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
     add_proxy_block,
     add_symbol,
+    add_text_section,
     create_test_module,
 )
 
@@ -157,7 +158,10 @@ def test_nonterminator_instructions_fallthrough():
 
 
 def test_show_code_block_asm(caplog):
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     sym = add_symbol(m, "puts", add_proxy_block(m))
 
     # pushfq; popfq; call puts+4
@@ -174,7 +178,10 @@ def test_show_code_block_asm(caplog):
 
 
 def test_show_data_block_asm(caplog):
-    ir, m, bi = create_test_module()
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
     block = add_data_block(bi, b"\x01\x02\x03\x04")
 
     with caplog.at_level(logging.DEBUG):
