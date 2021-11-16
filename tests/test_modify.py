@@ -22,18 +22,22 @@
 
 import gtirb
 import gtirb_rewriting
-from helpers import (
+from gtirb_test_helpers import (
     add_code_block,
     add_edge,
-    add_function,
     add_proxy_block,
     add_symbol,
+    add_text_section,
     create_test_module,
 )
+from helpers import add_function_object
 
 
 def test_return_cache():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m)
 
     # This mimics:
     #  func1:
@@ -77,7 +81,10 @@ def test_return_cache():
 
 
 def test_return_cache_decorator():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m)
     orig_cfg = ir.cfg
 
     b1 = add_code_block(bi, b"\x90")
@@ -100,14 +107,17 @@ def test_return_cache_decorator():
 
 
 def test_modify_cache():
-    ir, m, bi = create_test_module()
+    ir, m = create_test_module(
+        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m)
 
     # This mimics:
     #  ret
     #  ud2
     b1 = add_code_block(bi, b"\xC3")
     b2 = add_code_block(bi, b"\x0F\x0B")
-    func = add_function(m, "func", b1)
+    func = add_function_object(m, "func", b1)
 
     modify_cache = gtirb_rewriting.modify._ModifyCache(
         m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
