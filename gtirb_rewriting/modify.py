@@ -132,7 +132,6 @@ class _ModifyCache:
         return_cache: _ReturnEdgeCache,
     ) -> None:
         self.module = module
-        self.original_cfg = module.ir.cfg
         self.return_cache = return_cache
         self.functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID] = {
             block: func.uuid
