@@ -22,6 +22,8 @@
 
 import collections
 import contextlib
+import functools
+import operator
 import uuid
 from typing import Container, Dict, Iterable, Iterator, Set
 
@@ -107,13 +109,29 @@ class _ReturnEdgeCache(gtirb.CFG):
 
 @contextlib.contextmanager
 def _make_return_cache(ir: gtirb.IR) -> Iterator[_ReturnEdgeCache]:
+    def _weak_cfg_hash(cfg):
+        # This is meant to be a quick and dirty hash of the CFG to detect
+        # modifications.
+        return functools.reduce(operator.xor, (hash(edge) for edge in cfg), 0,)
+
     if isinstance(ir.cfg, _ReturnEdgeCache):
         yield ir.cfg
     else:
         old_cfg = ir.cfg
         cache = _ReturnEdgeCache(old_cfg)
+        old_hash = _weak_cfg_hash(old_cfg)
         ir.cfg = cache
+
         yield cache
+
+        # We can't catch all uses of the old CFG, but we can at least error if
+        # someone modifies it.
+        if _weak_cfg_hash(old_cfg) != old_hash:
+            raise RuntimeError(
+                "original CFG object should not be modified during rewriting; "
+                "use ir.cfg instead of referring to the original CFG"
+            )
+
         old_cfg.clear()
         old_cfg.update(cache)
         ir.cfg = old_cfg

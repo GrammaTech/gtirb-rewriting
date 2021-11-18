@@ -22,6 +22,7 @@
 
 import gtirb
 import gtirb_rewriting
+import pytest
 from gtirb_test_helpers import (
     add_code_block,
     add_edge,
@@ -97,13 +98,20 @@ def test_return_cache_decorator():
             assert ir.cfg is return_cache
 
         assert ir.cfg is return_cache
-        assert set(ir.cfg) == set(orig_cfg)
+        assert set(ir.cfg) == {edge1}
 
         edge2 = add_edge(ir.cfg, b2, b1, gtirb.Edge.Type.Return)
         ir.cfg.discard(edge1)
 
     assert ir.cfg is orig_cfg
     assert set(ir.cfg) == {edge2}
+
+    # Now test that we catch modifications to the original CFG
+    with pytest.raises(RuntimeError) as exc_info:
+        with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
+            orig_cfg.discard(edge2)
+            orig_cfg.add(edge1)
+    assert "cfg" in str(exc_info.value).lower()
 
 
 def test_modify_cache():
