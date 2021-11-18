@@ -34,7 +34,7 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .abi import ABI
 from .assembler import Assembler
-from .modify import _modify_block_insert
+from .modify import _make_return_cache, _modify_block_insert, _ModifyCache
 from .patch import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
@@ -147,6 +147,7 @@ class RewritingContext:
 
     def _invoke_patch(
         self,
+        modify_cache: _ModifyCache,
         func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         offset: int,
@@ -157,6 +158,8 @@ class RewritingContext:
         """
         Invokes a patch at a concrete location and applies its results to the
         target module.
+        :param modify_cache: The modify cache, which should be reused across
+                             multiple modifications.
         :param func: The function to insert at.
         :param block: The block to insert at.
         :param offset: The offset within the block to insert at.
@@ -215,29 +218,9 @@ class RewritingContext:
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
 
         _modify_block_insert(
-            block,
-            offset,
-            replacement_length,
-            assembler_result,
-            self._functions_by_block,
+            modify_cache, block, offset, replacement_length, assembler_result,
         )
 
-        if "functionBlocks" in self._module.aux_data:
-            function_blocks = self._module.aux_data["functionBlocks"].data
-            if func.uuid in function_blocks:
-                function_blocks[func.uuid].update(
-                    b
-                    for b in assembler_result.blocks
-                    if isinstance(b, gtirb.CodeBlock)
-                )
-
-        self._functions_by_block.update(
-            {
-                b: func.uuid
-                for b in assembler_result.blocks
-                if isinstance(b, gtirb.CodeBlock)
-            }
-        )
         self._symbols_by_name.update(
             {sym.name: sym for sym in assembler_result.symbols}
         )
@@ -317,6 +300,7 @@ class RewritingContext:
 
     def _apply_insertions(
         self,
+        modify_cache: _ModifyCache,
         insertions: Sequence[_Insertion],
         func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
@@ -357,6 +341,7 @@ class RewritingContext:
         for insertion, offset in insertions_and_offsets:
             block_delta = actual_block.offset - block.offset
             actual_block, insert_len = self._invoke_patch(
+                modify_cache,
                 func,
                 actual_block,
                 offset + total_insert_len - block_delta,
@@ -369,7 +354,10 @@ class RewritingContext:
             )
 
     def _insert_function_stub(
-        self, sym: gtirb.Symbol, block: gtirb.CodeBlock
+        self,
+        modify_cache: _ModifyCache,
+        sym: gtirb.Symbol,
+        block: gtirb.CodeBlock,
     ) -> None:
         """
         Inserts a stub that just contains a return instruction and
@@ -396,6 +384,7 @@ class RewritingContext:
 
         return_proxy = gtirb.ProxyBlock()
         self._module.proxies.add(return_proxy)
+
         self._module.ir.cfg.add(
             gtirb.Edge(
                 source=block,
@@ -423,10 +412,14 @@ class RewritingContext:
         if "functionNames" in self._module.aux_data:
             self._module.aux_data["functionNames"].data[func_uuid] = sym
 
-        self._functions_by_block[block] = func_uuid
+        modify_cache.functions_by_block[block] = func_uuid
 
     def _apply_function_insertion(
-        self, sym: gtirb.Symbol, block: gtirb.CodeBlock, patch: Patch
+        self,
+        modify_cache: _ModifyCache,
+        sym: gtirb.Symbol,
+        block: gtirb.CodeBlock,
+        patch: Patch,
     ) -> None:
         assert sym.referent == block
         assert (
@@ -446,11 +439,17 @@ class RewritingContext:
         ), "function patches should not set align_stack"
 
         func = gtirb_functions.Function(
-            self._functions_by_block[block], {block}, {block}, {sym}, set()
+            modify_cache.functions_by_block[block],
+            {block},
+            {block},
+            {sym},
+            set(),
         )
         context = InsertionContext(self._module, func, block, 0)
 
-        self._invoke_patch(func, block, 0, block.size, patch, context)
+        self._invoke_patch(
+            modify_cache, func, block, 0, block.size, patch, context
+        )
 
     def _validate_offset_and_length(
         self, block: gtirb.CodeBlock, offset: int, length: int
@@ -544,20 +543,22 @@ class RewritingContext:
         Applies all of the patches to the module.
         """
 
-        with prepare_for_rewriting(self._module, self._abi.nop()):
-            self._functions_by_block = {
-                block: func.uuid
-                for func in self._functions
-                for block in func.get_all_blocks()
-            }
+        with prepare_for_rewriting(
+            self._module, self._abi.nop()
+        ), _make_return_cache(self._module.ir) as return_cache:
             self._symbols_by_name = {s.name: s for s in self._module.symbols}
+            modify_cache = _ModifyCache(
+                self._module, self._functions, return_cache
+            )
 
             for func in self._function_insertions:
-                self._insert_function_stub(func.symbol, func.block)
+                self._insert_function_stub(
+                    modify_cache, func.symbol, func.block
+                )
 
             for func in self._function_insertions:
                 self._apply_function_insertion(
-                    func.symbol, func.block, func.patch
+                    modify_cache, func.symbol, func.block, func.patch
                 )
 
             for f in sorted(self._functions, key=lambda f: f.uuid):
@@ -580,7 +581,9 @@ class RewritingContext:
                     if not block_insertions:
                         continue
 
-                    self._apply_insertions(block_insertions, f, b)
+                    self._apply_insertions(
+                        modify_cache, block_insertions, f, b
+                    )
 
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.
