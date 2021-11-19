@@ -111,6 +111,18 @@ def test_return_cache_decorator():
         with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
             orig_cfg.discard(edge2)
             orig_cfg.add(edge1)
+    assert ir.cfg is orig_cfg
+
+    with pytest.raises(gtirb_rewriting.CFGModifiedError):
+        with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
+            ir.cfg = gtirb.CFG()
+    assert ir.cfg is orig_cfg
+
+    # And that we restore the old CFG correctly with exceptions
+    with pytest.raises(ZeroDivisionError):
+        with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
+            0 / 0
+    assert ir.cfg is orig_cfg
 
 
 def test_modify_cache():
