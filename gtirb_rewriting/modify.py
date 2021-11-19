@@ -42,6 +42,10 @@ from .utils import (
 )
 
 
+class CFGModifiedError(RuntimeError):
+    pass
+
+
 class _ReturnEdgeCache(gtirb.CFG):
     """
     A CFG subclass that provides a cache for return edges and proxy return
@@ -127,7 +131,7 @@ def _make_return_cache(ir: gtirb.IR) -> Iterator[_ReturnEdgeCache]:
         # We can't catch all uses of the old CFG, but we can at least error if
         # someone modifies it.
         if _weak_cfg_hash(old_cfg) != old_hash:
-            raise RuntimeError(
+            raise CFGModifiedError(
                 "original CFG object should not be modified during rewriting; "
                 "use ir.cfg instead of referring to the original CFG"
             )

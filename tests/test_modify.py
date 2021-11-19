@@ -107,11 +107,10 @@ def test_return_cache_decorator():
     assert set(ir.cfg) == {edge2}
 
     # Now test that we catch modifications to the original CFG
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(gtirb_rewriting.CFGModifiedError):
         with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
             orig_cfg.discard(edge2)
             orig_cfg.add(edge1)
-    assert "cfg" in str(exc_info.value).lower()
 
 
 def test_modify_cache():
