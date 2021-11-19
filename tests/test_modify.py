@@ -121,7 +121,7 @@ def test_return_cache_decorator():
     # And that we restore the old CFG correctly with exceptions
     with pytest.raises(ZeroDivisionError):
         with gtirb_rewriting.modify._make_return_cache(ir) as return_cache:
-            0 / 0
+            raise ZeroDivisionError()
     assert ir.cfg is orig_cfg
 
 
