@@ -27,6 +27,7 @@ from .intervalutils import (
     join_byte_intervals,
     split_byte_interval,
 )
+from .modify import CFGModifiedError
 from .passes import Pass, PassManager
 from .patch import InsertionContext, Patch, patch_constraints
 from .rewriting import RewritingContext
@@ -58,6 +59,7 @@ __all__ = [
     "BlockPosition",
     "CallingConventionDesc",
     "Constraints",
+    "CFGModifiedError",
     "decorate_extern_symbol",
     "ENTRYPOINT_NAME",
     "FunctionPosition",
