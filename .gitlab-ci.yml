@@ -42,11 +42,12 @@ test-stable-18:
     - pip3 install --upgrade pip
     - pip3 install -r requirements-dev.txt
     - pip3 install -e .
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --junitxml=report.xml
+    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
   artifacts:
     when: always
     reports:
       junit: report.xml
+      cobertura: coverage.xml
 
 test-unstable-18:
   stage: test
@@ -59,11 +60,12 @@ test-unstable-18:
     - pip3 install --upgrade pip
     - pip3 install -r requirements-dev.txt
     - pip3 install -e . --pre --extra-index-url "$EXTRA_INDEX_URL"
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --junitxml=report.xml
+    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
   artifacts:
     when: always
     reports:
       junit: report.xml
+      cobertura: coverage.xml
 
 test-stable-20:
   stage: test
@@ -75,11 +77,12 @@ test-stable-20:
     - apt-get install -y gtirb-pprinter ddisasm
     - pip3 install -r requirements-dev.txt
     - pip3 install -e .
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --junitxml=report.xml
+    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
   artifacts:
     when: always
     reports:
       junit: report.xml
+      cobertura: coverage.xml
 
 test-unstable-20:
   stage: test
@@ -91,11 +94,12 @@ test-unstable-20:
     - apt-get install -y gtirb-pprinter ddisasm
     - pip3 install -r requirements-dev.txt
     - pip3 install -e . --pre --extra-index-url "$EXTRA_INDEX_URL"
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --junitxml=report.xml
+    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
   artifacts:
     when: always
     reports:
       junit: report.xml
+      cobertura: coverage.xml
 
 # This job ensures that:
 #   - Release branches never publish -dev packages, and packages
