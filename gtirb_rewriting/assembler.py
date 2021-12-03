@@ -282,14 +282,16 @@ class Assembler:
         name = expr["symbol"]["name"]
         sym = self._symbol_lookup(name)
 
-        if not sym and self._allow_undef_symbols:
+        if not sym:
+            if not self._allow_undef_symbols:
+                raise UndefSymbolError(
+                    f"{name} is an undefined symbol reference"
+                )
+
             proxy = gtirb.ProxyBlock()
             sym = gtirb.Symbol(name, payload=proxy)
             self._local_symbols[name] = sym
             self._proxies.add(proxy)
-
-        if not sym:
-            raise UndefSymbolError(f"{name} is an undefined symbol reference")
 
         return sym
 
