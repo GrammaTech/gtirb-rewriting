@@ -69,6 +69,7 @@ def test_symbolic_expr():
     assert sym_expr.symbol == puts_sym
     assert sym_expr.offset == 0
     assert sym_expr.attributes == {gtirb.SymbolicExpression.Attribute.PltRef}
+    assert result.symbolic_expression_sizes == {1: 4}
 
 
 def test_symbolic_expr_sym_offset():

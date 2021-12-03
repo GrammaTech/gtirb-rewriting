@@ -181,6 +181,7 @@ class Assembler:
             self._symbolic_expressions[pos] = self._fixup_to_symbolic_operand(
                 fixup, data, inst["desc"]["isCall"] or inst["desc"]["isBranch"]
             )
+            self._symbolic_expression_sizes[pos] = fixup["targetSize"] // 8
 
         self._data += data
         self._current_block.size += len(data)

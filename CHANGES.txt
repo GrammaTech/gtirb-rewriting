@@ -1,4 +1,5 @@
 0.0.24: (UNRELEASED)
+- symbolicExpressionSizes is now populated for expressions in code
 
 0.0.23:
 - Dramatically sped up the time spent applying patches with calls
