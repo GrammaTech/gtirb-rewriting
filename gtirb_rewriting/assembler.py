@@ -35,6 +35,14 @@ from .utils import (
 )
 
 
+class UndefSymbolError(ValueError):
+    """
+    A symbol was referenced that was not defined.
+    """
+
+    pass
+
+
 class Assembler:
     """
     Assembles chunks of assembly, creating a control flow graph and other
@@ -48,6 +56,7 @@ class Assembler:
         temp_symbol_suffix: str = None,
         module_symbols: Dict[str, gtirb.Symbol] = None,
         trivially_unreachable: bool = False,
+        allow_undef_symbols: bool = False,
     ) -> None:
         """
         :param module: The module the patch will be inserted into.
@@ -62,6 +71,9 @@ class Assembler:
         :param trivially_unreachable: Is the entry block of the patch
                                       obviously unreachable? For example,
                                       inserting after a ret instruction.
+        :param allow_undef_symbols: Allows the assembly to refer to undefined
+                                    symbols. Such symbols will be created and
+                                    set to refer to a proxy block.
         """
         self._module = module
         self._temp_symbol_suffix = temp_symbol_suffix
@@ -76,6 +88,7 @@ class Assembler:
         else:
             self._module_symbols = {sym.name: sym for sym in module.symbols}
         self._trivially_unreachable = trivially_unreachable
+        self._allow_undef_symbols = allow_undef_symbols
         self._section_name = None
         self._proxies = set()
         self._blocks_with_code = set()
@@ -268,7 +281,16 @@ class Assembler:
 
         name = expr["symbol"]["name"]
         sym = self._symbol_lookup(name)
-        assert sym, f"{name} is an undefined symbol reference"
+
+        if not sym and self._allow_undef_symbols:
+            proxy = gtirb.ProxyBlock()
+            sym = gtirb.Symbol(name, payload=proxy)
+            self._local_symbols[name] = sym
+            self._proxies.add(proxy)
+
+        if not sym:
+            raise UndefSymbolError(f"{name} is an undefined symbol reference")
+
         return sym
 
     def _get_symbol_ref_attrs(
@@ -481,6 +503,7 @@ class Assembler:
             temp_symbol_suffix=self._temp_symbol_suffix,
             module_symbols=self._module_symbols,
             trivially_unreachable=self._trivially_unreachable,
+            allow_undef_symbols=self._allow_undef_symbols,
         )
 
         return result

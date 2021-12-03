@@ -20,7 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 from .abi import ABI, CallingConventionDesc
-from .assembler import Assembler
+from .assembler import Assembler, UndefSymbolError
 from .assembly import Constraints, Register, X86Syntax
 from .intervalutils import (
     PaddingError,
@@ -80,5 +80,6 @@ __all__ = [
     "SingleBlockScope",
     "show_block_asm",
     "split_byte_interval",
+    "UndefSymbolError",
     "X86Syntax",
 ]
