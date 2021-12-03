@@ -22,6 +22,7 @@
 
 import gtirb
 import gtirb_rewriting
+import pytest
 from gtirb_test_helpers import add_proxy_block, add_symbol, create_test_module
 
 
@@ -446,3 +447,23 @@ def test_arm64_sym_attribute_got():
         assert result.symbolic_expressions[4].attributes == {
             gtirb.SymbolicExpression.Attribute.Part1,
         }
+
+
+def test_undef_symbols():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    with pytest.raises(gtirb_rewriting.UndefSymbolError):
+        assembler.assemble("call does_not_exist")
+
+    # Now try again with the flag enabled
+    assembler = gtirb_rewriting.Assembler(m, allow_undef_symbols=True)
+    assembler.assemble("call does_not_exist")
+    result = assembler.finalize()
+
+    assert len(result.symbols) == 1
+    assert result.symbols[0].name == "does_not_exist"
+    assert isinstance(result.symbols[0].referent, gtirb.ProxyBlock)
+    assert result.symbols[0].referent in result.proxies

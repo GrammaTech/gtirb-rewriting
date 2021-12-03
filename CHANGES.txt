@@ -1,5 +1,8 @@
 0.0.24: (UNRELEASED)
 - symbolicExpressionSizes is now populated for expressions in code
+- The Assembler class gained an option, allow_undef_symbols, that allows
+  undefined symbols to be referenced and implicitly created (referring to
+  proxy blocks)
 
 0.0.23:
 - Dramatically sped up the time spent applying patches with calls
