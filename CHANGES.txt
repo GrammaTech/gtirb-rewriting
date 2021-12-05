@@ -3,6 +3,7 @@
 - The Assembler class gained an option, allow_undef_symbols, that allows
   undefined symbols to be referenced and implicitly created (referring to
   proxy blocks)
+- Added support for indirect branches and calls
 
 0.0.23:
 - Dramatically sped up the time spent applying patches with calls

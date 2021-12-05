@@ -43,6 +43,15 @@ class UndefSymbolError(ValueError):
     pass
 
 
+class UnsupportedAssemblyError(ValueError):
+    """
+    The assembly is valid but uses a feature not supported by the Assembler
+    class.
+    """
+
+    pass
+
+
 class Assembler:
     """
     Assembles chunks of assembly, creating a control flow graph and other
@@ -186,6 +195,44 @@ class Assembler:
         ], "Sections other than .text are not supported"
         self._section_name = section["name"]
 
+    def _resolve_instruction_target(
+        self, data: bytes, inst: dict, fixups: List[dict]
+    ) -> gtirb.CfgNode:
+        """
+        Resolves a call or branch instruction's target to a CFG node.
+        """
+        assert inst["desc"]["isCall"] or inst["desc"]["isBranch"]
+
+        # LLVM doesn't seem to have anything to denote an indirect call, but
+        # we can infer it from the lack of fixups.
+        if inst["desc"]["isIndirectBranch"] or (
+            inst["desc"]["isCall"] and not fixups
+        ):
+            proxy = gtirb.ProxyBlock()
+            self._proxies.add(proxy)
+            return proxy
+
+        assert len(fixups) == 1
+        target_expr = self._fixup_to_symbolic_operand(fixups[0], data, True)
+
+        if not isinstance(target_expr, gtirb.SymAddrConst):
+            raise UnsupportedAssemblyError(
+                "Call and branch targets must be simple expressions"
+            )
+
+        if target_expr.offset != 0:
+            raise UnsupportedAssemblyError(
+                "Call and branch targets cannot have offsets"
+            )
+
+        if not isinstance(target_expr.symbol.referent, gtirb.CfgNode):
+            raise UnsupportedAssemblyError(
+                "Call and branch targets cannot be data blocks or other "
+                "non-CFG elements"
+            )
+
+        return target_expr.symbol.referent
+
     def _assemble_instruction(
         self, data: bytes, inst: dict, fixups: List[dict]
     ) -> None:
@@ -217,37 +264,31 @@ class Assembler:
             self._blocks.append(next_block)
 
         elif inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
-            assert not inst["desc"][
-                "isIndirectBranch"
-            ], "Indirect branches are not yet supported"
-
-            assert len(fixups) == 1
-            target_fixup = self._fixup_to_symbolic_operand(
-                fixups[0], data, True
-            )
-            assert isinstance(target_fixup, gtirb.SymAddrConst)
-            assert target_fixup.offset == 0
+            target = self._resolve_instruction_target(data, inst, fixups)
 
             next_block = gtirb.CodeBlock(
                 offset=self._current_block.offset + self._current_block.size
             )
 
-            if isinstance(target_fixup.symbol.referent, gtirb.CfgNode):
-                if inst["desc"]["isCall"]:
-                    edge_label = gtirb.Edge.Label(type=gtirb.Edge.Type.Call)
-                elif inst["desc"]["isBranch"]:
-                    edge_label = gtirb.Edge.Label(
-                        type=gtirb.Edge.Type.Branch,
-                        conditional=inst["desc"]["isConditionalBranch"],
-                    )
-
-                self._cfg.add(
-                    gtirb.Edge(
-                        source=self._current_block,
-                        target=target_fixup.symbol.referent,
-                        label=edge_label,
-                    )
+            if inst["desc"]["isCall"]:
+                edge_label = gtirb.Edge.Label(
+                    type=gtirb.Edge.Type.Call,
+                    direct=not isinstance(target, gtirb.ProxyBlock),
                 )
+            elif inst["desc"]["isBranch"]:
+                edge_label = gtirb.Edge.Label(
+                    type=gtirb.Edge.Type.Branch,
+                    conditional=inst["desc"]["isConditionalBranch"],
+                    direct=not isinstance(target, gtirb.ProxyBlock),
+                )
+
+            self._cfg.add(
+                gtirb.Edge(
+                    source=self._current_block,
+                    target=target,
+                    label=edge_label,
+                )
+            )
 
             # Currently we assume that all calls can return and that they need
             # a fallthrough edge.
