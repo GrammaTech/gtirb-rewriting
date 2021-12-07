@@ -476,7 +476,7 @@ def test_undef_symbols():
 
 
 def test_indirect_jumps():
-    ir, m = create_test_module(
+    _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
     )
 
@@ -496,7 +496,7 @@ def test_indirect_jumps():
 
 
 def test_indirect_calls():
-    ir, m = create_test_module(
+    _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
     )
 
@@ -521,7 +521,7 @@ def test_indirect_calls():
 
 
 def test_assembler_errors():
-    ir, m = create_test_module(
+    _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
     )
     _, bi = add_text_section(m)
