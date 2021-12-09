@@ -21,7 +21,7 @@
 # endorsement should be inferred.
 import dataclasses
 import itertools
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import gtirb
 import mcasm
@@ -197,7 +197,7 @@ class Assembler:
 
     def _resolve_instruction_target(
         self, data: bytes, inst: dict, fixups: List[dict]
-    ) -> gtirb.CfgNode:
+    ) -> Tuple[bool, gtirb.CfgNode]:
         """
         Resolves a call or branch instruction's target to a CFG node.
         """
@@ -210,7 +210,7 @@ class Assembler:
         ):
             proxy = gtirb.ProxyBlock()
             self._proxies.add(proxy)
-            return proxy
+            return False, proxy
 
         assert len(fixups) == 1
         target_expr = self._fixup_to_symbolic_operand(fixups[0], data, True)
@@ -231,7 +231,7 @@ class Assembler:
                 "non-CFG elements"
             )
 
-        return target_expr.symbol.referent
+        return True, target_expr.symbol.referent
 
     def _assemble_instruction(
         self, data: bytes, inst: dict, fixups: List[dict]
@@ -264,7 +264,9 @@ class Assembler:
             self._blocks.append(next_block)
 
         elif inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
-            target = self._resolve_instruction_target(data, inst, fixups)
+            direct, target = self._resolve_instruction_target(
+                data, inst, fixups
+            )
 
             next_block = gtirb.CodeBlock(
                 offset=self._current_block.offset + self._current_block.size
@@ -272,14 +274,13 @@ class Assembler:
 
             if inst["desc"]["isCall"]:
                 edge_label = gtirb.Edge.Label(
-                    type=gtirb.Edge.Type.Call,
-                    direct=not isinstance(target, gtirb.ProxyBlock),
+                    type=gtirb.Edge.Type.Call, direct=direct,
                 )
             elif inst["desc"]["isBranch"]:
                 edge_label = gtirb.Edge.Label(
                     type=gtirb.Edge.Type.Branch,
                     conditional=inst["desc"]["isConditionalBranch"],
-                    direct=not isinstance(target, gtirb.ProxyBlock),
+                    direct=direct,
                 )
 
             self._cfg.add(

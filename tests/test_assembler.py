@@ -495,6 +495,31 @@ def test_indirect_jumps():
     assert result.symbolic_expressions == {}
 
 
+def test_direct_calls():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
+    )
+    exit_sym = add_symbol(m, "exit", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble("call exit", gtirb_rewriting.X86Syntax.INTEL)
+    result = assembler.finalize()
+
+    assert set(result.cfg) == {
+        gtirb.Edge(
+            result.blocks[0],
+            exit_sym.referent,
+            gtirb.Edge.Label(gtirb.Edge.Type.Call, direct=True),
+        ),
+        gtirb.Edge(
+            result.blocks[0],
+            result.blocks[1],
+            gtirb.Edge.Label(gtirb.Edge.Type.Fallthrough),
+        ),
+    }
+    assert result.symbolic_expressions == {1: gtirb.SymAddrConst(0, exit_sym)}
+
+
 def test_indirect_calls():
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
