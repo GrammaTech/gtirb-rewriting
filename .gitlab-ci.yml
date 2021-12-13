@@ -41,7 +41,7 @@ check-format:
     - pip3 install --upgrade pip
     - pip3 install -r requirements-dev.txt
     - pip3 install -e .
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
+    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --cov-report=term --junitxml=report.xml
   artifacts:
     when: always
     reports:
