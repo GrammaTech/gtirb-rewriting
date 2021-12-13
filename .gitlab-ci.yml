@@ -31,75 +31,50 @@ check-format:
       EOF
       ) && exit 1)
 
-test-stable-18:
+.test-template: &test
   stage: test
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu18
   script:
-    - wget -O - https://download.grammatech.com/gtirb/files/apt-repo/conf/apt.gpg.key | apt-key add -
-    - echo "deb https://download.grammatech.com/gtirb/files/apt-repo bionic stable" >> /etc/apt/sources.list
+    - wget -O - $APT_REPO/conf/apt.gpg.key | apt-key add -
+    - echo "deb $APT_REPO $(lsb_release -sc) $APT_COMPONENT" >> /etc/apt/sources.list
     - apt-get update -y
     - apt-get install -y gtirb-pprinter ddisasm
     - pip3 install --upgrade pip
     - pip3 install -r requirements-dev.txt
     - pip3 install -e .
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
+    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --cov-report=term --junitxml=report.xml
   artifacts:
     when: always
     reports:
       junit: report.xml
       cobertura: coverage.xml
+
+test-stable-18:
+  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu18
+  variables:
+    APT_REPO: https://download.grammatech.com/gtirb/files/apt-repo
+    APT_COMPONENT: stable
+  <<: *test
 
 test-unstable-18:
-  stage: test
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu18
-  script:
-    - wget -O - https://download.grammatech.com/gtirb/files/apt-repo/conf/apt.gpg.key | apt-key add -
-    - echo "deb $INTERNAL_APT_REPO bionic unstable" >> /etc/apt/sources.list
-    - apt-get update -y
-    - apt-get install -y gtirb-pprinter ddisasm
-    - pip3 install --upgrade pip
-    - pip3 install -r requirements-dev.txt
-    - pip3 install -e . --pre --extra-index-url "$EXTRA_INDEX_URL"
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-      cobertura: coverage.xml
+  variables:
+    APT_REPO: $INTERNAL_APT_REPO
+    APT_COMPONENT: unstable
+  <<: *test
 
 test-stable-20:
-  stage: test
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
-  script:
-    - wget -O - https://download.grammatech.com/gtirb/files/apt-repo/conf/apt.gpg.key | apt-key add -
-    - echo "deb https://download.grammatech.com/gtirb/files/apt-repo focal stable" >> /etc/apt/sources.list
-    - apt-get update -y
-    - apt-get install -y gtirb-pprinter ddisasm
-    - pip3 install -r requirements-dev.txt
-    - pip3 install -e .
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-      cobertura: coverage.xml
+  variables:
+    APT_REPO: https://download.grammatech.com/gtirb/files/apt-repo
+    APT_COMPONENT: stable
+  <<: *test
 
 test-unstable-20:
-  stage: test
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
-  script:
-    - wget -O - https://download.grammatech.com/gtirb/files/apt-repo/conf/apt.gpg.key | apt-key add -
-    - echo "deb $INTERNAL_APT_REPO focal unstable" >> /etc/apt/sources.list
-    - apt-get update -y
-    - apt-get install -y gtirb-pprinter ddisasm
-    - pip3 install -r requirements-dev.txt
-    - pip3 install -e . --pre --extra-index-url "$EXTRA_INDEX_URL"
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --junitxml=report.xml
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-      cobertura: coverage.xml
+  variables:
+    APT_REPO: $INTERNAL_APT_REPO
+    APT_COMPONENT: unstable
+  <<: *test
 
 # This job ensures that:
 #   - Release branches never publish -dev packages, and packages
