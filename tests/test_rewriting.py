@@ -1086,3 +1086,25 @@ def test_multiple_rewrites_without_red_zone():
         # ret
         b"\xC3"
     )
+
+
+def test_get_or_insert_extern_symbol():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+
+    ctx = gtirb_rewriting.RewritingContext(m, [])
+    sym = ctx.get_or_insert_extern_symbol("blah", "libblah.so")
+    ctx.apply()
+
+    assert sym.name == "blah"
+    assert sym in m.symbols
+    assert sym.referent in m.proxies
+    assert m.aux_data["elfSymbolInfo"].data[sym] == (
+        0,
+        "FUNC",
+        "GLOBAL",
+        "DEFAULT",
+        0,
+    )
+    assert m.aux_data["libraries"].data == ["libblah.so"]
