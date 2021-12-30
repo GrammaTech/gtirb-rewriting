@@ -266,6 +266,7 @@ class RewritingContext:
         proxy = gtirb.ProxyBlock()
         sym = gtirb.Symbol(name, payload=proxy)
         self._module.symbols.add(sym)
+        self._module.proxies.add(proxy)
 
         if self._module.file_format == gtirb.Module.FileFormat.PE:
             # The pprinter uses symbol forwarding to figure out
@@ -281,6 +282,17 @@ class RewritingContext:
             if "peImportEntries" in self._module.aux_data:
                 self._module.aux_data["peImportEntries"].data.append(
                     (0, -1, name, libname)
+                )
+        elif self._module.file_format == gtirb.Module.FileFormat.ELF:
+            # This is required for gtirb-pprinter's dummy-so option to
+            # understand this is an undefined function.
+            if "elfSymbolInfo" in self._module.aux_data:
+                self._module.aux_data["elfSymbolInfo"].data[sym] = (
+                    0,
+                    "FUNC",
+                    "GLOBAL",
+                    "DEFAULT",
+                    0,
                 )
 
         if "libraries" in self._module.aux_data:
