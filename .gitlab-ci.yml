@@ -39,8 +39,8 @@ check-format:
     - apt-get update -y
     - apt-get install -y gtirb-pprinter ddisasm
     - pip3 install --upgrade pip
-    - pip3 install -r requirements-dev.txt
-    - pip3 install -e .
+    - pip3 install -r requirements-dev.txt $EXTRA_PIP_ARGS
+    - pip3 install -e . $EXTRA_PIP_ARGS
     - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --cov-report=term --junitxml=report.xml
   artifacts:
     when: always
@@ -60,6 +60,7 @@ test-unstable-18:
   variables:
     APT_REPO: $INTERNAL_APT_REPO
     APT_COMPONENT: unstable
+    EXTRA_PIP_ARGS: --pre --extra-index-url $EXTRA_INDEX_URL
   <<: *test
 
 test-stable-20:
@@ -67,6 +68,7 @@ test-stable-20:
   variables:
     APT_REPO: https://download.grammatech.com/gtirb/files/apt-repo
     APT_COMPONENT: stable
+    EXTRA_PIP_ARGS: --pre --extra-index-url $EXTRA_INDEX_URL
   <<: *test
 
 test-unstable-20:
