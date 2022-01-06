@@ -43,7 +43,13 @@ setuptools.setup(
         "more-itertools",
         "dataclasses ; python_version<'3.7.0'",
         "packaging",
+        "entrypoints",
     ],
+    entry_points={
+        "console_scripts": [
+            "gtirb-rewriting=gtirb_rewriting.driver:generic_main"
+        ],
+    },
     classifiers=["Programming Language :: Python :: 3"],
     url="https://github.com/grammatech/gtirb-rewriting",
     license="GPLv3",
