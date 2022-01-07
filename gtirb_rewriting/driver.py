@@ -27,12 +27,13 @@ import shutil
 import sys
 import textwrap
 from abc import ABCMeta, abstractmethod
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Tuple, Type, Union
 
 import entrypoints as entrypoints_module
 import gtirb
 import gtirb_capstone
 import gtirb_functions
+from typing_extensions import Protocol
 
 from .passes import Pass, PassManager
 from .version import __version__
@@ -89,7 +90,38 @@ class PassDriver(metaclass=ABCMeta):
         return None
 
 
-class _PassAdaptor(PassDriver):
+class _EntryPointCompatible(Protocol):
+    """
+    A protocol compatible with a subset of entrypoint's Entrypoint class.
+    """
+
+    name: str
+    distro: Optional[entrypoints_module.Distribution]
+
+    def load(self) -> Any:
+        ...
+
+
+class _PassEntryPointAdaptor:
+    """
+    An entrypoint-compatible class that exposes a pass or pass driver as an
+    entrypoint.
+    """
+
+    def __init__(self, pass_or_driver: Type[Union[Pass, PassDriver]]) -> None:
+        self.pass_or_driver = pass_or_driver
+        self.name = pass_or_driver.__name__
+        self.distro = None
+
+    def load(self) -> Any:
+        return self.pass_or_driver
+
+
+class _PassDriverAdaptor(PassDriver):
+    """
+    Exposes a Pass class as a PassDriver.
+    """
+
     def __init__(self, pass_: Pass) -> None:
         self.pass_ = pass_
 
@@ -100,9 +132,7 @@ class _PassAdaptor(PassDriver):
         return self.pass_
 
 
-def _make_version_string(
-    entrypoints: Iterable[entrypoints_module.EntryPoint],
-) -> str:
+def _make_version_string(entrypoints: Iterable[_EntryPointCompatible],) -> str:
     """
     Creates a version string for all of the rewriting infrastructure and the
     entrypoints.
@@ -129,7 +159,7 @@ class _ListPassesAction(argparse.Action):
     def __init__(
         self,
         option_strings,
-        entrypoints: List[entrypoints_module.EntryPoint],
+        entrypoints: List[_EntryPointCompatible],
         dest=argparse.SUPPRESS,
         default=argparse.SUPPRESS,
         help=None,
@@ -172,7 +202,7 @@ class _ListPassesAction(argparse.Action):
 
 
 def _driver_core(
-    entrypoints: Iterable[entrypoints_module.EntryPoint],
+    entrypoints: Iterable[_EntryPointCompatible],
     is_generic_driver: bool,
     argv: List[str],
 ) -> None:
@@ -211,9 +241,7 @@ def _driver_core(
             passes_ap.error("pass names cannot be repeated")
 
         entrypoints_by_name = {ep.name: ep for ep in entrypoints}
-        loaded_drivers: List[
-            Tuple[entrypoints_module.EntryPoint, PassDriver]
-        ] = []
+        loaded_drivers: List[Tuple[_EntryPointCompatible, PassDriver]] = []
         for name in passes_args.passes:
             ep = entrypoints_by_name[name]
             try:
@@ -288,15 +316,28 @@ def _driver_core(
                     shutil.copy(str(lib), args.lib_dir)
 
 
-def main(name: str, *, argv: List[str] = sys.argv) -> None:
+def main(
+    name_or_class: Union[str, Type[Pass], Type[PassDriver]],
+    *,
+    argv: List[str] = sys.argv,
+) -> None:
     """
     Provides a standard command-line driver for a single rewriting transform.
-    :param name: The entrypoint name (must match setup.py).
+    :param name_or_class: The entrypoint name (must match setup.py) or the
+                          Pass class or PassDriver class.
     :param argv: The argv to use (defaults to sys.argv).
     """
-    _driver_core(
-        [entrypoints_module.get_single("gtirb_rewriting", name)], False, argv
-    )
+
+    if isinstance(name_or_class, str):
+        entrypoint = entrypoints_module.get_single(
+            "gtirb_rewriting", name_or_class
+        )
+    else:
+        # We go out of our way to allow this for simple command line scripts
+        # that are not packages (mostly useful in examples).
+        entrypoint = _PassEntryPointAdaptor(name_or_class)
+
+    _driver_core([entrypoint], False, argv)
 
 
 def generic_main(argv: List[str] = sys.argv) -> None:
@@ -310,7 +351,7 @@ def generic_main(argv: List[str] = sys.argv) -> None:
     )
 
 
-def _load_entrypoint(ep: entrypoints_module.EntryPoint) -> PassDriver:
+def _load_entrypoint(ep: _EntryPointCompatible) -> PassDriver:
     """
     Loads an entrypoint to get a PassDriver or raises DriverLoadError.
     """
@@ -331,7 +372,7 @@ def _load_entrypoint(ep: entrypoints_module.EntryPoint) -> PassDriver:
     if isinstance(pass_or_driver, PassDriver):
         driver = pass_or_driver
     elif isinstance(pass_or_driver, Pass):
-        driver = _PassAdaptor(pass_or_driver)
+        driver = _PassDriverAdaptor(pass_or_driver)
     else:
         raise DriverLoadError(
             f"failed to instantiate {ep.name}: object was not a Pass or "

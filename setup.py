@@ -44,6 +44,7 @@ setuptools.setup(
         "dataclasses ; python_version<'3.7.0'",
         "packaging",
         "entrypoints",
+        "typing-extensions",
     ],
     entry_points={
         "console_scripts": [

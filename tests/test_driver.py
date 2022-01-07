@@ -149,6 +149,20 @@ def test_module_main_with_driver(tmp_path: pathlib.Path):
     assert (libs_dir / "test_driver.py").exists()
 
 
+def test_module_main_with_class(tmp_path):
+    input_file = write_test_module(tmp_path)
+    output_file = tmp_path / "output.gtirb"
+
+    ret = run_driver(
+        gtirb_rewriting.driver.main,
+        MyPass,
+        argv=["__main__.py", str(input_file), str(output_file)],
+    )
+
+    assert ret == 0
+    assert_test_module_data(output_file, ["MyPass"])
+
+
 def test_module_main_errors(tmp_path):
     ir, m = gtirb_test_helpers.create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
