@@ -26,7 +26,7 @@ import os
 import shutil
 import sys
 import textwrap
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, Iterable, List, Optional, Tuple, Type, Union
 
 import entrypoints as entrypoints_module
@@ -47,7 +47,7 @@ class DriverLoadError(RuntimeError):
     pass
 
 
-class PassDriver(metaclass=ABCMeta):
+class PassDriver(ABC):
     """
     A driver that provides command line options and creates a rewriting pass.
     """
@@ -132,7 +132,7 @@ class _PassDriverAdaptor(PassDriver):
         return self.pass_
 
 
-def _make_version_string(entrypoints: Iterable[_EntryPointCompatible],) -> str:
+def _make_version_string(entrypoints: Iterable[_EntryPointCompatible]) -> str:
     """
     Creates a version string for all of the rewriting infrastructure and the
     entrypoints.
