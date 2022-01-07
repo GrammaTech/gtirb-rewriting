@@ -10,21 +10,22 @@ the passed `RewritingContext`.
 
 ## Starting Template
 
-The below example has a simple command line driver, along with a pass that
-just adds a `nop` instruction at the entry of all code blocks.
+The below example defines a pass that just adds a `nop` instruction at the
+entry of all functions.
 
 ```python
-import argparse
-import logging
-
-import gtirb
+import gtirb_rewriting.driver
 from gtirb_rewriting import *
 
 
 class NopPass(Pass):
+    """
+    Inserts a nop at the start of every function.
+    """
+
     def begin_module(self, module, functions, context):
         context.register_insert(
-            AllBlocksScope(BlockPosition.ENTRY),
+            AllFunctionsScope(FunctionPosition.ENTRY, BlockPosition.ENTRY),
             Patch.from_function(self.nop_patch),
         )
 
@@ -33,29 +34,10 @@ class NopPass(Pass):
         return "nop"
 
 
-def main():
-    logging.basicConfig(format="%(message)s")
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("infile")
-    ap.add_argument("outfile")
-    ap.add_argument("--verbose", action="store_true")
-    args = ap.parse_args()
-
-    if args.verbose:
-        logging.getLogger("gtirb_rewriting").setLevel(logging.DEBUG)
-
-    ir = gtirb.IR.load_protobuf(args.infile)
-
-    pass_man = PassManager()
-    pass_man.add(NopPass())
-    pass_man.run(ir)
-
-    ir.save_protobuf(args.outfile)
-
-
 if __name__ == "__main__":
-    main()
+    # Allow gtirb-rewriting to provide us a command line driver. See
+    # docs/Drivers.md for details.
+    gtirb_rewriting.driver.main(NopPass)
 ```
 
 ## Disassembling
