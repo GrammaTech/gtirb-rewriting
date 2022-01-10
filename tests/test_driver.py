@@ -84,6 +84,15 @@ class MyOtherPassDriver(gtirb_rewriting.driver.PassDriver):
         return "Adds a customizable message."
 
 
+class MyUnregisteredPass(gtirb_rewriting.Pass):
+    """
+    Adds a hardcoded message.
+    """
+
+    def end_module(self, module, functions) -> None:
+        module.aux_data["test-data"].data.append("MyUnregisteredPass")
+
+
 def write_test_module(tmp_path) -> pathlib.Path:
     ir, m = gtirb_test_helpers.create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
@@ -211,6 +220,36 @@ def test_generic_main(tmp_path):
 
     assert ret == 0
     assert_test_module_data(output_file, ["hi", "MyPass"])
+
+
+def test_generic_main_extra(tmp_path):
+    input_file = write_test_module(tmp_path)
+    output_file = tmp_path / "output.gtirb"
+
+    ret = run_driver(
+        gtirb_rewriting.driver.generic_main,
+        argv=[
+            "gtirb-rewriting",
+            "--run=my-unregistered-pass",
+            str(input_file),
+            str(output_file),
+        ],
+    )
+    assert ret != 0
+
+    ret = run_driver(
+        gtirb_rewriting.driver.generic_main,
+        argv=[
+            "gtirb-rewriting",
+            "--run=my-unregistered-pass",
+            str(input_file),
+            str(output_file),
+        ],
+        extra={"my-unregistered-pass": MyUnregisteredPass},
+    )
+
+    assert ret == 0
+    assert_test_module_data(output_file, ["MyUnregisteredPass"])
 
 
 def test_generic_main_version(capsys):

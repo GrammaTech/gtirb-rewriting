@@ -27,7 +27,7 @@ import shutil
 import sys
 import textwrap
 from abc import ABC, abstractmethod
-from typing import Any, Iterable, List, Optional, Tuple, Type, Union
+from typing import Any, Iterable, List, Mapping, Optional, Tuple, Type, Union
 
 import entrypoints as entrypoints_module
 import gtirb
@@ -108,9 +108,11 @@ class _PassEntryPointAdaptor:
     entrypoint.
     """
 
-    def __init__(self, pass_or_driver: Type[Union[Pass, PassDriver]]) -> None:
+    def __init__(
+        self, name: str, pass_or_driver: Type[Union[Pass, PassDriver]]
+    ) -> None:
         self.pass_or_driver = pass_or_driver
-        self.name = pass_or_driver.__name__
+        self.name = name
         self.distro = None
 
     def load(self) -> Any:
@@ -335,20 +337,31 @@ def main(
     else:
         # We go out of our way to allow this for simple command line scripts
         # that are not packages (mostly useful in examples).
-        entrypoint = _PassEntryPointAdaptor(name_or_class)
+        entrypoint = _PassEntryPointAdaptor(
+            name_or_class.__name__, name_or_class
+        )
 
     _driver_core([entrypoint], False, argv)
 
 
-def generic_main(argv: List[str] = sys.argv) -> None:
+def generic_main(
+    *,
+    argv: List[str] = sys.argv,
+    extra: Mapping[str, Union[Type[Pass], Type[PassDriver]]] = {},
+) -> None:
     """
     The generic gtirb-rewriting driver, used to implement the gtirb-rewriting
     command line tool.
     :param argv: The argv to use (defaults to sys.argv).
+    :param extra: Extra passes or pass drivers to register.
     """
-    _driver_core(
-        entrypoints_module.get_group_all("gtirb_rewriting"), True, argv
+    entrypoints: List[_EntryPointCompatible] = []
+    entrypoints.extend(entrypoints_module.get_group_all("gtirb_rewriting"))
+    entrypoints.extend(
+        _PassEntryPointAdaptor(name, value) for name, value in extra.items()
     )
+
+    _driver_core(entrypoints, True, argv)
 
 
 def _load_entrypoint(ep: _EntryPointCompatible) -> PassDriver:
