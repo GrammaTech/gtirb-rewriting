@@ -97,7 +97,7 @@ class MyPassDriver(PassDriver):
             )
 ```
 
-## Pass-specific Drivers
+## Pass-specific Command Line Tools
 
 Most gtirb-rewriting-based transforms also expose their passes through a
 standalone command line tool. gtirb-rewriting helps with this by providing a
