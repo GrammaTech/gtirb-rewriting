@@ -6,6 +6,7 @@
 - Added support for indirect branches and calls
 - get_or_insert_extern_sym now puts proxies in the module's proxies set
 - get_or_insert_extern_sym now populates elfSymbolInfo
+- Added a command-line gtirb-rewriting driver
 
 0.0.23:
 - Dramatically sped up the time spent applying patches with calls
