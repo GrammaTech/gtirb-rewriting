@@ -225,17 +225,18 @@ class RewritingContext:
             {sym.name: sym for sym in assembler_result.symbols}
         )
 
+        text_section = assembler_result.text_section
         if self._logger.isEnabledFor(logging.DEBUG):
             self._logger.debug("  After:")
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
-            for patch_block in assembler_result.blocks:
+            for patch_block in text_section.blocks:
                 show_block_asm(
                     patch_block, decoder=self._decoder, logger=self._logger
                 )
 
         return (
-            assembler_result.blocks[-1] if assembler_result.blocks else block,
-            len(assembler_result.data),
+            text_section.blocks[-1] if text_section.blocks else block,
+            len(text_section.data),
         )
 
     def get_or_insert_extern_symbol(
