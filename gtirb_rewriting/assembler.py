@@ -110,12 +110,6 @@ class Assembler:
         return self._optional_current_section
 
     @property
-    def _entry_block(self) -> gtirb.CodeBlock:
-        result = self._current_section.blocks[0]
-        assert isinstance(result, gtirb.CodeBlock)
-        return result
-
-    @property
     def _current_block(self) -> gtirb.CodeBlock:
         result = self._current_section.blocks[-1]
         assert isinstance(result, gtirb.CodeBlock)
