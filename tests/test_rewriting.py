@@ -25,6 +25,7 @@ import gtirb_rewriting
 import pytest
 from gtirb_test_helpers import (
     add_code_block,
+    add_data_section,
     add_edge,
     add_proxy_block,
     add_symbol,
@@ -1108,3 +1109,52 @@ def test_get_or_insert_extern_symbol():
         0,
     )
     assert m.aux_data["libraries"].data == ["libblah.so"]
+
+
+def test_insert_code_other_sections():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+    data, _ = add_data_section(m, address=0x2000)
+
+    # This mimics:
+    #   func:
+    #   nop
+    b = add_code_block(bi, b"\x90")
+    func = add_function_object(m, "func", b)
+    set_all_blocks_alignment(m, 1)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(
+        func,
+        b,
+        b.size,
+        literal_patch(
+            """
+            movzb (.Lmy_cstr), %edi
+
+            .data
+            .Lmy_cstr:
+            .asciz "*"
+
+            .section new, "aw"
+            .byte 42
+            """
+        ),
+    )
+    ctx.apply()
+
+    cstr_sym = next(sym for sym in m.symbols if sym.name == ".Lmy_cstr_1")
+    assert isinstance(cstr_sym.referent, gtirb.DataBlock)
+    assert cstr_sym.referent.section is data
+    assert cstr_sym.referent.contents == b"*\x00"
+
+    assert bi.contents == b"\x90\x0F\xB6\x3C\x25\x00\x00\x00\x00"
+    assert bi.symbolic_expressions[5] == gtirb.SymAddrConst(0, cstr_sym)
+
+    new_sect = next(sect for sect in m.sections if sect.name == "new")
+    new_sect_blocks = list(new_sect.byte_blocks)
+    assert len(new_sect_blocks) == 1
+    assert isinstance(new_sect_blocks[0], gtirb.DataBlock)
+    assert new_sect_blocks[0].contents == b"*"

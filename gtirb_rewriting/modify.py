@@ -520,6 +520,46 @@ def _modify_block_insert(
     for rel_offset, size in text_section.symbolic_expression_sizes.items():
         sym_expr_sizes[gtirb.Offset(bi, offset + rel_offset)] = size
 
+    for sect in code.sections.values():
+        if sect is not code.text_section:
+            _add_other_section_contents(sect, module, sym_expr_sizes)
+
+
+def _add_other_section_contents(
+    sect: Assembler.Result.Section,
+    module: gtirb.Module,
+    sym_expr_sizes: Dict[gtirb.Offset, int],
+) -> None:
+    # TODO: We should check if the existing flags match what the new section
+    # says?
+    gtirb_sect = next(
+        (s for s in module.sections if s.name == sect.name), None
+    )
+    if not gtirb_sect:
+        gtirb_sect = gtirb.Section(
+            name=sect.name, flags=sect.flags, module=module
+        )
+
+        if module.file_format == gtirb.Module.FileFormat.ELF:
+            elf_section_properties = _get_or_insert_aux_data(
+                module,
+                "elfSectionProperties",
+                "mapping<UUID,tuple<uint64_t,uint64_t>>",
+                dict,
+            )
+            elf_section_properties[gtirb_sect] = (
+                sect.elfType,
+                sect.elfFlags,
+            )
+
+    bi = gtirb.ByteInterval(
+        contents=sect.data, symbolic_expressions=sect.symbolic_expressions
+    )
+    bi.blocks.update(sect.blocks)
+    gtirb_sect.byte_intervals.add(bi)
+    for rel_offset, size in sect.symbolic_expression_sizes.items():
+        sym_expr_sizes[gtirb.Offset(bi, rel_offset)] = size
+
 
 def _modify_block_insert_cfg(
     cache: _ModifyCache,
