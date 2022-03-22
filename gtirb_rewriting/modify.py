@@ -522,10 +522,11 @@ def _modify_block_insert(
 
     for sect in code.sections.values():
         if sect is not code.text_section:
-            _add_other_section_contents(sect, module, sym_expr_sizes)
+            _add_other_section_contents(code, sect, module, sym_expr_sizes)
 
 
 def _add_other_section_contents(
+    code: Assembler.Result,
     sect: Assembler.Result.Section,
     module: gtirb.Module,
     sym_expr_sizes: Dict[gtirb.Offset, int],
@@ -560,6 +561,33 @@ def _add_other_section_contents(
     bi = gtirb.ByteInterval(
         contents=sect.data, symbolic_expressions=sect.symbolic_expressions
     )
+
+    # The assembler can leave a zero-sized block at the end, which we need to
+    # deal with because zero-sided blocks cause problems.
+    if not sect.blocks[-1].size:
+        if isinstance(sect.blocks[-1], gtirb.CodeBlock):
+            in_edges = set(code.cfg.in_edges(sect.blocks[-1]))
+            if in_edges:
+                raise NotImplementedError(
+                    "Cannot create a zero-sized block with a incoming edges; "
+                    "try adding an instruction at the end."
+                )
+
+        # If there's any symbols that reference the last block, make them be
+        # at_end symbols pointing at the previous block.
+        for sym in code.symbols:
+            if sym.referent is sect.blocks[-1]:
+                if len(sect.blocks) == 1:
+                    raise NotImplementedError(
+                        "Cannot create a zero-sized block with a label; try "
+                        "adding data after the label."
+                    )
+
+                sym.at_end = True
+                sym.referent = sect.blocks[-2]
+
+        del sect.blocks[-1]
+
     bi.blocks.update(sect.blocks)
     gtirb_sect.byte_intervals.add(bi)
     for rel_offset, size in sect.symbolic_expression_sizes.items():

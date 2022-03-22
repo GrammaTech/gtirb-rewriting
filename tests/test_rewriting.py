@@ -1140,6 +1140,7 @@ def test_insert_code_other_sections():
 
             .section new, "aw"
             .byte 42
+            at_end:
             """
         ),
     )
@@ -1158,3 +1159,7 @@ def test_insert_code_other_sections():
     assert len(new_sect_blocks) == 1
     assert isinstance(new_sect_blocks[0], gtirb.DataBlock)
     assert new_sect_blocks[0].contents == b"*"
+
+    at_end_symbol = next(sym for sym in m.symbols if sym.name == "at_end")
+    assert at_end_symbol.at_end
+    assert at_end_symbol.referent is new_sect_blocks[0]
