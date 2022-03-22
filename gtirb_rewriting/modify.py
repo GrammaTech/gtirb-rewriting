@@ -530,6 +530,11 @@ def _add_other_section_contents(
     module: gtirb.Module,
     sym_expr_sizes: Dict[gtirb.Offset, int],
 ) -> None:
+    """
+    Adds a non-main section from a patch. Its contents are put in a new byte
+    interval in the module's section (creating the section as needed).
+    """
+
     # TODO: We should check if the existing flags match what the new section
     # says?
     gtirb_sect = next(
