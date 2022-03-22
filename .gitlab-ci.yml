@@ -68,7 +68,6 @@ test-stable-20:
   variables:
     APT_REPO: https://download.grammatech.com/gtirb/files/apt-repo
     APT_COMPONENT: stable
-    EXTRA_PIP_ARGS: --pre --extra-index-url $EXTRA_INDEX_URL
   <<: *test
 
 test-unstable-20:
@@ -76,6 +75,7 @@ test-unstable-20:
   variables:
     APT_REPO: $INTERNAL_APT_REPO
     APT_COMPONENT: unstable
+    EXTRA_PIP_ARGS: --pre --extra-index-url $EXTRA_INDEX_URL
   <<: *test
 
 # This job ensures that:
