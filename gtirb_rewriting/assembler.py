@@ -106,13 +106,15 @@ class Assembler:
 
     @property
     def _current_section(self) -> "Assembler.Result.Section":
-        assert self._optional_current_section
+        assert self._optional_current_section, "not in a section yet"
         return self._optional_current_section
 
     @property
     def _current_block(self) -> gtirb.CodeBlock:
         result = self._current_section.blocks[-1]
-        assert isinstance(result, gtirb.CodeBlock)
+        assert isinstance(
+            result, gtirb.CodeBlock
+        ), "current block should be a code block"
         return result
 
     def assemble(
@@ -357,6 +359,9 @@ class Assembler:
                     direct=direct,
                 )
             else:
+                # This if/elif exhaustively covers the cases that let us into
+                # the parent block, so this is just to shut up analysis tools
+                # that don't understant that this is unreachable.
                 assert False
 
             self._cfg.add(
