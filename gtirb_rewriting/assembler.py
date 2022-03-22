@@ -594,8 +594,7 @@ class Assembler:
         Converts blocks that only have data and have no incoming control flow
         to be DataBlocks.
         """
-        for i in range(len(section.blocks)):
-            block = section.blocks[i]
+        for i, block in enumerate(section.blocks):
             assert isinstance(block, gtirb.CodeBlock)
 
             if (

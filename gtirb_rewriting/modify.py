@@ -566,8 +566,7 @@ def _add_other_section_contents(
     # deal with because zero-sided blocks cause problems.
     if not sect.blocks[-1].size:
         if isinstance(sect.blocks[-1], gtirb.CodeBlock):
-            in_edges = set(code.cfg.in_edges(sect.blocks[-1]))
-            if in_edges:
+            if any(code.cfg.in_edges(sect.blocks[-1])):
                 raise NotImplementedError(
                     "Cannot create a zero-sized block with a incoming edges; "
                     "try adding an instruction at the end."
