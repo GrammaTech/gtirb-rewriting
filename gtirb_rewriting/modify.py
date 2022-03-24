@@ -23,6 +23,7 @@
 import collections
 import contextlib
 import functools
+import logging
 import operator
 import uuid
 from typing import Container, Dict, Iterable, Iterator, Set
@@ -40,6 +41,8 @@ from .utils import (
     _is_fallthrough_edge,
     _is_return_edge,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CFGModifiedError(RuntimeError):
@@ -525,6 +528,50 @@ def _modify_block_insert(
             _add_other_section_contents(code, sect, module, sym_expr_sizes)
 
 
+def _check_compatible_sections(
+    module: gtirb.Module,
+    gtirb_sect: gtirb.Section,
+    patch_sect: Assembler.Result.Section,
+):
+    """
+    Checks if an existing section's flags match the patch's section flags.
+    """
+
+    if patch_sect.flags != gtirb_sect.flags:
+        logger.warning(
+            "flags for patch section %s (%s) do not match existing section "
+            "flags (%s)",
+            patch_sect.name,
+            patch_sect.flags,
+            gtirb_sect.flags,
+        )
+
+    elif module.file_format == gtirb.Module.FileFormat.ELF:
+        elf_section_properties = _get_or_insert_aux_data(
+            module,
+            "elfSectionProperties",
+            "mapping<UUID,tuple<uint64_t,uint64_t>>",
+            dict,
+        )
+        type, flags = elf_section_properties.get(gtirb_sect, (None, None))
+        if type and type != patch_sect.elf_type:
+            logger.warning(
+                "ELF type for patch section %s (%s) do not match existing "
+                "section ELF type (%s)",
+                patch_sect.name,
+                patch_sect.elf_type,
+                type,
+            )
+        elif flags and flags != patch_sect.elf_flags:
+            logger.warning(
+                "ELF flags for patch section %s (%X) do not match existing "
+                "section ELF flags (%X)",
+                patch_sect.name,
+                patch_sect.elf_flags,
+                flags,
+            )
+
+
 def _add_other_section_contents(
     code: Assembler.Result,
     sect: Assembler.Result.Section,
@@ -536,12 +583,12 @@ def _add_other_section_contents(
     interval in the module's section (creating the section as needed).
     """
 
-    # TODO: We should check if the existing flags match what the new section
-    # says?
     gtirb_sect = next(
         (s for s in module.sections if s.name == sect.name), None
     )
-    if not gtirb_sect:
+    if gtirb_sect:
+        _check_compatible_sections(module, gtirb_sect, sect)
+    else:
         gtirb_sect = gtirb.Section(
             name=sect.name, flags=sect.flags, module=module
         )
