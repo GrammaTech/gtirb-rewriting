@@ -86,11 +86,7 @@ class Assembler:
         """
         self._module = module
         self._temp_symbol_suffix = temp_symbol_suffix
-        self._data = bytearray()
         self._cfg = gtirb.CFG()
-        self._blocks = [gtirb.CodeBlock()]
-        self._symbolic_expressions = {}
-        self._symbolic_expression_sizes = {}
         self._local_symbols = {}
         if module_symbols is not None:
             self._module_symbols = module_symbols
@@ -98,17 +94,28 @@ class Assembler:
             self._module_symbols = {sym.name: sym for sym in module.symbols}
         self._trivially_unreachable = trivially_unreachable
         self._allow_undef_symbols = allow_undef_symbols
-        self._section_name = None
         self._proxies = set()
         self._blocks_with_code = set()
+        # This isn't set until the assembler runs, but will exist after that
+        # point. Code should use _current_section instead of this, which takes
+        # care of removing the optional-ness.
+        self._optional_current_section: Optional[
+            "Assembler.Result.Section"
+        ] = None
+        self._sections: Dict[str, "Assembler.Result.Section"] = {}
 
     @property
-    def _entry_block(self) -> gtirb.CodeBlock:
-        return self._blocks[0]
+    def _current_section(self) -> "Assembler.Result.Section":
+        assert self._optional_current_section, "not in a section yet"
+        return self._optional_current_section
 
     @property
     def _current_block(self) -> gtirb.CodeBlock:
-        return self._blocks[-1]
+        result = self._current_section.blocks[-1]
+        assert isinstance(
+            result, gtirb.CodeBlock
+        ), "current block should be a code block"
+        return result
 
     def assemble(
         self, asm: str, x86_syntax: X86Syntax = X86Syntax.ATT
@@ -185,15 +192,80 @@ class Assembler:
             )
         )
 
-        self._blocks.append(label_block)
+        self._current_section.blocks.append(label_block)
 
     def _assemble_change_section(self, section: dict) -> None:
-        # We don't have any work to do here, but we want to make sure that
-        # patches don't try to insert anywhere except the text section.
-        assert section["kind"][
-            "isText"
-        ], "Sections other than .text are not supported"
-        self._section_name = section["name"]
+        name = section["name"]
+
+        # LLVM validates that flags don't change when it sees the same section
+        # multiple times, so we don't need to do that here.
+        result = self._sections.get(name)
+        if not result:
+            flags: Set[gtirb.Section.Flag] = set()
+            elf_flags: Optional[int] = None
+            elf_type: Optional[int] = None
+
+            if section["class"] == "MCSectionELF":
+                SHF_WRITE = 0x1
+                SHF_ALLOC = 0x2
+                SHF_EXECINSTR = 0x4
+                SHT_NOBITS = 8
+
+                elf_flags = section["flags"]
+                elf_type = section["type"]
+                assert elf_flags and elf_type
+
+                if elf_flags & SHF_WRITE:
+                    flags.add(gtirb.Section.Flag.Writable)
+
+                if elf_flags & SHF_ALLOC:
+                    flags.add(gtirb.Section.Flag.Loaded)
+                    flags.add(gtirb.Section.Flag.Readable)
+                    if elf_type != SHT_NOBITS:
+                        flags.add(gtirb.Section.Flag.Initialized)
+
+                if elf_flags & SHF_EXECINSTR:
+                    flags.add(gtirb.Section.Flag.Executable)
+
+            elif section["class"] == "MCSectionCOFF":
+                IMAGE_SCN_CNT_UNINITIALIZED_DATA = 0x00000080
+                IMAGE_SCN_MEM_EXECUTE = 0x20000000
+                IMAGE_SCN_MEM_READ = 0x40000000
+                IMAGE_SCN_MEM_WRITE = 0x80000000
+
+                characteristics = section["characteristics"]
+
+                if characteristics & IMAGE_SCN_MEM_READ:
+                    flags.add(gtirb.Section.Flag.Loaded)
+                    flags.add(gtirb.Section.Flag.Readable)
+
+                if characteristics & IMAGE_SCN_MEM_WRITE:
+                    flags.add(gtirb.Section.Flag.Writable)
+
+                if characteristics & IMAGE_SCN_MEM_EXECUTE:
+                    flags.add(gtirb.Section.Flag.Executable)
+
+                if not characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA:
+                    flags.add(gtirb.Section.Flag.Initialized)
+
+            else:
+                raise NotImplementedError(
+                    f"unsupported section class {section['class']}"
+                )
+
+            result = self.Result.Section(
+                name=name,
+                flags=flags,
+                data=b"",
+                blocks=[gtirb.CodeBlock()],
+                symbolic_expressions={},
+                symbolic_expression_sizes={},
+                elf_flags=elf_flags,
+                elf_type=elf_type,
+            )
+            self._sections[name] = result
+
+        self._optional_current_section = result
 
     def _resolve_instruction_target(
         self, data: bytes, inst: dict, fixups: List[dict]
@@ -237,13 +309,17 @@ class Assembler:
         self, data: bytes, inst: dict, fixups: List[dict]
     ) -> None:
         for fixup in fixups:
-            pos = len(self._data) + fixup["offset"]
-            self._symbolic_expressions[pos] = self._fixup_to_symbolic_operand(
+            pos = len(self._current_section.data) + fixup["offset"]
+            self._current_section.symbolic_expressions[
+                pos
+            ] = self._fixup_to_symbolic_operand(
                 fixup, data, inst["desc"]["isCall"] or inst["desc"]["isBranch"]
             )
-            self._symbolic_expression_sizes[pos] = fixup["targetSize"] // 8
+            self._current_section.symbolic_expression_sizes[pos] = (
+                fixup["targetSize"] // 8
+            )
 
-        self._data += data
+        self._current_section.data += data
         self._current_block.size += len(data)
         self._blocks_with_code.add(self._current_block)
 
@@ -261,7 +337,7 @@ class Assembler:
             next_block = gtirb.CodeBlock(
                 offset=self._current_block.offset + self._current_block.size
             )
-            self._blocks.append(next_block)
+            self._current_section.blocks.append(next_block)
 
         elif inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
             direct, target = self._resolve_instruction_target(
@@ -282,6 +358,11 @@ class Assembler:
                     conditional=inst["desc"]["isConditionalBranch"],
                     direct=direct,
                 )
+            else:
+                # This if/elif exhaustively covers the cases that let us into
+                # the parent block, so this is just to shut up analysis tools
+                # that don't understant that this is unreachable.
+                assert False
 
             self._cfg.add(
                 gtirb.Edge(
@@ -304,18 +385,20 @@ class Assembler:
                     )
                 )
 
-            self._blocks.append(next_block)
+            self._current_section.blocks.append(next_block)
 
     def _assemble_bytes(self, data: bytes) -> None:
-        self._data += data
+        self._current_section.data += data
         self._current_block.size += len(data)
 
     def _assemble_emit_value(self, value: dict, size: int) -> None:
-        self._symbolic_expressions[
-            len(self._data)
+        self._current_section.symbolic_expressions[
+            len(self._current_section.data)
         ] = self._mcexpr_to_symbolic_operand(value, False)
-        self._symbolic_expression_sizes[len(self._data)] = size
-        self._data += b"\x00" * size
+        self._current_section.symbolic_expression_sizes[
+            len(self._current_section.data)
+        ] = size
+        self._current_section.data += b"\x00" * size
         self._current_block.size += size
 
     def _resolve_symbol_ref(self, expr: dict) -> gtirb.Symbol:
@@ -465,15 +548,18 @@ class Assembler:
             if sym.referent == old_block:
                 sym.referent = new_block
 
-    def _remove_empty_blocks(self) -> None:
+    def _remove_empty_blocks(
+        self, section: "Assembler.Result.Section"
+    ) -> None:
         final_blocks = []
         for _, group in itertools.groupby(
-            self._blocks, key=lambda b: b.offset
+            section.blocks, key=lambda b: b.offset
         ):
             *extra_blocks, main_block = group
-            assert main_block.size or main_block == self._blocks[-1]
+            assert main_block.size or main_block == section.blocks[-1]
 
             for extra_block in extra_blocks:
+                assert isinstance(extra_block, gtirb.CodeBlock)
                 assert not extra_block.size
 
                 for edge in list(self._cfg.in_edges(extra_block)):
@@ -485,7 +571,10 @@ class Assembler:
                 # Our extra block should only have a single fallthrough edge
                 # that is to another extra block or the main block.
                 for edge in list(self._cfg.out_edges(extra_block)):
-                    assert edge.label.type == gtirb.Edge.Type.Fallthrough
+                    assert (
+                        edge.label
+                        and edge.label.type == gtirb.Edge.Type.Fallthrough
+                    )
                     assert (
                         edge.target in extra_blocks
                         or edge.target == main_block
@@ -496,19 +585,26 @@ class Assembler:
 
             final_blocks.append(main_block)
 
-        self._blocks = final_blocks
+        section.blocks = final_blocks
 
-    def _convert_data_blocks(self) -> None:
+    def _convert_data_blocks(
+        self, section: "Assembler.Result.Section"
+    ) -> None:
         """
         Converts blocks that only have data and have no incoming control flow
         to be DataBlocks.
         """
-        for i in range(len(self._blocks)):
-            block = self._blocks[i]
+        for i, block in enumerate(section.blocks):
+            assert isinstance(block, gtirb.CodeBlock)
+
             if (
                 block.size
                 and block not in self._blocks_with_code
-                and (block != self._entry_block or self._trivially_unreachable)
+                and (
+                    gtirb.Section.Flag.Executable not in section.flags
+                    or i != 0
+                    or self._trivially_unreachable
+                )
                 and not any(self._cfg.in_edges(block))
             ):
                 new_block = gtirb.DataBlock(
@@ -518,26 +614,22 @@ class Assembler:
                 for out_edge in set(self._cfg.out_edges(block)):
                     assert _is_fallthrough_edge(out_edge)
                     self._cfg.discard(out_edge)
-                self._blocks[i] = new_block
+                section.blocks[i] = new_block
 
     def finalize(self) -> "Result":
         """
         Finalizes the assembly contents and returns the result.
         """
-        assert self._section_name
 
-        self._remove_empty_blocks()
-        self._convert_data_blocks()
+        for section in self._sections.values():
+            self._remove_empty_blocks(section)
+            self._convert_data_blocks(section)
 
         result = self.Result(
-            data=bytes(self._data),
+            sections=self._sections,
             cfg=self._cfg,
-            blocks=self._blocks,
-            symbolic_expressions=self._symbolic_expressions,
-            symbolic_expression_sizes=self._symbolic_expression_sizes,
             symbols=list(self._local_symbols.values()),
             proxies=self._proxies,
-            section_name=self._section_name,
         )
 
         # Reinitialize the assembler just in case someone tries to use the
@@ -558,32 +650,56 @@ class Assembler:
         The result of assembling an assembly patch.
         """
 
-        data: bytes
+        @dataclasses.dataclass
+        class Section:
+            name: str
+
+            flags: Set[gtirb.Section.Flag]
+            """
+            Section flags.
+            """
+
+            data: bytes
+            """
+            The encoded bytes from assembling the patch.
+            """
+
+            blocks: List[gtirb.ByteBlock]
+            """
+            All blocks, in order of offset, for the patch. There will be at
+            most one empty block, which will be at the end of the list.
+            """
+
+            symbolic_expressions: Dict[int, gtirb.SymbolicExpression]
+            """
+            A map of offset to symbolic expression, with 0 being the start of
+            `data`.
+            """
+
+            symbolic_expression_sizes: Dict[int, int]
+            """
+            A map of offset to symbolic expression size, with 0 being the
+            start of `data`.
+            """
+
+            elf_type: Optional[int]
+            """
+            The ELF section type (SHT_*) for the section. ELF-only.
+            """
+
+            elf_flags: Optional[int]
+            """
+            The ELF section flags (SHF_*) for the section. ELF-only.
+            """
+
+        sections: Dict[str, Section]
         """
-        The encoded bytes from assembling the patch.
+        Sections in the patch. The first section will be the text section.
         """
 
         cfg: gtirb.CFG
         """
         The control flow graph for the patch.
-        """
-
-        blocks: List[gtirb.ByteBlock]
-        """
-        All blocks, in order of offset, for the patch. There will be at most
-        one empty block, which will be at the end of the list.
-        """
-
-        symbolic_expressions: Dict[int, gtirb.SymbolicExpression]
-        """
-        A map of offset to symbolic expression, with 0 being the start of
-        `data`.
-        """
-
-        symbolic_expression_sizes: Dict[int, int]
-        """
-        A map of offset to symbolic expression size, with 0 being the start of
-        `data`.
         """
 
         symbols: List[gtirb.Symbol]
@@ -596,9 +712,6 @@ class Assembler:
         Proxy blocks that represent unknown targets.
         """
 
-        section_name: str
-        """
-        The name of the section that the bytes are in. This currently will
-        always be the text section (which may be spelled differently across
-        platforms).
-        """
+        @property
+        def text_section(self) -> Section:
+            return next(iter(self.sections.values()))

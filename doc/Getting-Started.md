@@ -238,11 +238,38 @@ def delete_at(rewriting_context, func, block, offset, length):
         func, block, offset, length, Patch.from_function(nop_patch))
 ```
 
-## `.byte` Directive
+## Inserting data with patches
 
-Patches can use the `.byte` directive (and similar directives) to either emit
-raw data in the patch or instructions that the assembler may not understand.
-Instructions added via `.byte` must not have an impact on control flow.
+Patches can add data to non-text sections by switching section with the normal
+assembler directives (`.data`, etc) and using directives like `.byte` to
+specify the data.
+
+For example, this patch would call `__assert_fail` with the assertion message,
+file, line, and function arguments:
+```python
+@patch_constraints(x86_syntax=X86Syntax.INTEL)
+def assert_patch(insertion_context):
+    return """
+        lea rdi, [rip + .Lassertion]
+        lea rsi, [rip + .Lunknown]
+        xor rdx, rdx
+        lea rcx, [rip + .Lunknown]
+        call __assert_fail
+        ud2
+
+        .rodata
+        .Lassertion:
+            .string "something went wrong!"
+        .Lunknown:
+            .string "unknown"
+    """
+```
+
+## Inserting unsupported instructions
+
+Directives like `.byte` can be used to emit instructions that the assembler
+may not understand. Instructions added via `.byte` must not have an impact on
+control flow.
 
 gtirb-rewriting uses a simple heuristic to determine, at the block level,
 code from data: if the block has any incoming edges or contains other
@@ -263,9 +290,6 @@ jmp .L_end
 .L_end:
 nop
 ```
-
-Note that symbolic expressions in `.byte` directives are not currently
-supported; the value must be a literal.
 
 ## `PassManager` Versus Using `RewritingContext` Directly
 

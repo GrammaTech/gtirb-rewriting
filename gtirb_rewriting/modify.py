@@ -23,6 +23,7 @@
 import collections
 import contextlib
 import functools
+import logging
 import operator
 import uuid
 from typing import Container, Dict, Iterable, Iterator, Set
@@ -40,6 +41,8 @@ from .utils import (
     _is_fallthrough_edge,
     _is_return_edge,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CFGModifiedError(RuntimeError):
@@ -403,15 +406,19 @@ def _modify_block_insert(
     assert 0 <= offset <= block.size
     assert 0 <= offset + replacement_length <= block.size
     assert replacement_length >= 0
-    assert code.data
-    assert code.blocks
-    assert block not in code.blocks
-    assert code.blocks[0].size, "must have at least one non-empty block"
+
+    text_section = code.text_section
+    assert text_section.data
+    assert text_section.blocks
+    assert block not in text_section.blocks
+    assert text_section.blocks[
+        0
+    ].size, "must have at least one non-empty block"
     assert all(
-        new_block.size for new_block in code.blocks[:-1]
+        new_block.size for new_block in text_section.blocks[:-1]
     ), "only the last block may be empty"
-    assert isinstance(code.blocks[-1], gtirb.DataBlock) or not any(
-        code.cfg.out_edges(code.blocks[-1])
+    assert isinstance(text_section.blocks[-1], gtirb.DataBlock) or not any(
+        code.cfg.out_edges(text_section.blocks[-1])
     ), "the last block cannot have outgoing cfg edges"
 
     bi = block.byte_interval
@@ -428,14 +435,14 @@ def _modify_block_insert(
     # Adjust codeblock sizes, create CFG edges, remove 0-size blocks
     _modify_block_insert_cfg(cache, block, offset, replacement_length, code)
 
-    size_delta = len(code.data) - replacement_length
+    size_delta = len(text_section.data) - replacement_length
     offset += block.offset
 
     # adjust byte interval the block goes in
     bi.size += size_delta
     bi.contents = (
         bi.contents[:offset]
-        + code.data
+        + text_section.data
         + bi.contents[offset + replacement_length :]
     )
 
@@ -447,14 +454,14 @@ def _modify_block_insert(
 
     # adjust all of the new blocks to be relative to the byte interval and
     # add them to the byte interval
-    for b in code.blocks:
+    for b in text_section.blocks:
         b.offset += offset
 
-    assert block.size and all(b.size for b in code.blocks), (
+    assert block.size and all(b.size for b in text_section.blocks), (
         "_modify_block_insert created a zero-sized block; please file a bug "
         "report against gtirb-rewriting"
     )
-    bi.blocks.update(code.blocks)
+    bi.blocks.update(text_section.blocks)
 
     # adjust sym exprs that occur after the insertion point
     bi.symbolic_expressions = {
@@ -464,7 +471,7 @@ def _modify_block_insert(
     }
 
     # add all of the symbolic expressions from the code we're inserting
-    for rel_offset, expr in code.symbolic_expressions.items():
+    for rel_offset, expr in text_section.symbolic_expressions.items():
         bi.symbolic_expressions[offset + rel_offset] = expr
 
     bi.ir.cfg.update(code.cfg)
@@ -478,13 +485,15 @@ def _modify_block_insert(
             function_blocks = module.aux_data["functionBlocks"].data
             if func_uuid in function_blocks:
                 function_blocks[func_uuid].update(
-                    b for b in code.blocks if isinstance(b, gtirb.CodeBlock)
+                    b
+                    for b in text_section.blocks
+                    if isinstance(b, gtirb.CodeBlock)
                 )
 
         cache.functions_by_block.update(
             {
                 b: func_uuid
-                for b in code.blocks
+                for b in text_section.blocks
                 if isinstance(b, gtirb.CodeBlock)
             }
         )
@@ -511,8 +520,124 @@ def _modify_block_insert(
     sym_expr_sizes = _get_or_insert_aux_data(
         bi.module, "symbolicExpressionSizes", "mapping<Offset,uint64_t>", dict
     )
-    for rel_offset, size in code.symbolic_expression_sizes.items():
+    for rel_offset, size in text_section.symbolic_expression_sizes.items():
         sym_expr_sizes[gtirb.Offset(bi, offset + rel_offset)] = size
+
+    for sect in code.sections.values():
+        if sect is not code.text_section:
+            _add_other_section_contents(code, sect, module, sym_expr_sizes)
+
+
+def _check_compatible_sections(
+    module: gtirb.Module,
+    gtirb_sect: gtirb.Section,
+    patch_sect: Assembler.Result.Section,
+):
+    """
+    Checks if an existing section's flags match the patch's section flags.
+    """
+
+    if patch_sect.flags != gtirb_sect.flags:
+        logger.warning(
+            "flags for patch section %s (%s) do not match existing section "
+            "flags (%s)",
+            patch_sect.name,
+            patch_sect.flags,
+            gtirb_sect.flags,
+        )
+
+    elif module.file_format == gtirb.Module.FileFormat.ELF:
+        elf_section_properties = _get_or_insert_aux_data(
+            module,
+            "elfSectionProperties",
+            "mapping<UUID,tuple<uint64_t,uint64_t>>",
+            dict,
+        )
+        type, flags = elf_section_properties.get(gtirb_sect, (None, None))
+        if type and type != patch_sect.elf_type:
+            logger.warning(
+                "ELF type for patch section %s (%s) do not match existing "
+                "section ELF type (%s)",
+                patch_sect.name,
+                patch_sect.elf_type,
+                type,
+            )
+        elif flags and flags != patch_sect.elf_flags:
+            logger.warning(
+                "ELF flags for patch section %s (%X) do not match existing "
+                "section ELF flags (%X)",
+                patch_sect.name,
+                patch_sect.elf_flags,
+                flags,
+            )
+
+
+def _add_other_section_contents(
+    code: Assembler.Result,
+    sect: Assembler.Result.Section,
+    module: gtirb.Module,
+    sym_expr_sizes: Dict[gtirb.Offset, int],
+) -> None:
+    """
+    Adds a non-main section from a patch. Its contents are put in a new byte
+    interval in the module's section (creating the section as needed).
+    """
+
+    gtirb_sect = next(
+        (s for s in module.sections if s.name == sect.name), None
+    )
+    if gtirb_sect:
+        _check_compatible_sections(module, gtirb_sect, sect)
+    else:
+        gtirb_sect = gtirb.Section(
+            name=sect.name, flags=sect.flags, module=module
+        )
+
+        if module.file_format == gtirb.Module.FileFormat.ELF:
+            elf_section_properties = _get_or_insert_aux_data(
+                module,
+                "elfSectionProperties",
+                "mapping<UUID,tuple<uint64_t,uint64_t>>",
+                dict,
+            )
+            elf_section_properties[gtirb_sect] = (
+                sect.elf_type,
+                sect.elf_flags,
+            )
+
+    bi = gtirb.ByteInterval(
+        contents=sect.data, symbolic_expressions=sect.symbolic_expressions
+    )
+
+    # The assembler can leave a zero-sized block at the end, which we need to
+    # deal with because zero-sided blocks cause problems.
+    if not sect.blocks[-1].size:
+        if isinstance(sect.blocks[-1], gtirb.CodeBlock):
+            if any(code.cfg.in_edges(sect.blocks[-1])):
+                raise NotImplementedError(
+                    "Cannot create a zero-sized block with a incoming edges; "
+                    "try adding an instruction at the end."
+                )
+
+        # If there's any symbols that reference the last block, make them be
+        # at_end symbols pointing at the previous block.
+        for sym in code.symbols:
+            if sym.referent is sect.blocks[-1]:
+                if len(sect.blocks) == 1:
+                    raise NotImplementedError(
+                        "Cannot create a zero-sized block with a label; try "
+                        "adding data after the label."
+                    )
+
+                sym.at_end = True
+                sym.referent = sect.blocks[-2]
+
+        del sect.blocks[-1]
+
+    bi.blocks.update(sect.blocks)
+    gtirb_sect.byte_intervals.add(bi)
+    for rel_offset, size in sect.symbolic_expression_sizes.items():
+        sym_expr_sizes[gtirb.Offset(bi, rel_offset)] = size
 
 
 def _modify_block_insert_cfg(
@@ -535,6 +660,7 @@ def _modify_block_insert_cfg(
     """
 
     bi = block.byte_interval
+    text_section = code.text_section
 
     original_size = block.size
     inserts_at_end = not replacement_length and offset == block.size
@@ -551,35 +677,37 @@ def _modify_block_insert_cfg(
         and not inserts_at_end
         and not replaces_last_instruction
     ):
-        assert len(code.blocks) == 1
-        assert isinstance(code.blocks[0], gtirb.CodeBlock)
+        assert len(text_section.blocks) == 1
+        assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
 
-        block.size = block.size - replacement_length + len(code.data)
+        block.size = block.size - replacement_length + len(text_section.data)
 
         # Remove all the blocks from code.blocks so that they don't get added
         # to the byte_interval in _modify_block_insert.
-        code.blocks.clear()
+        text_section.blocks.clear()
         return
 
     # If the patch ended in a data block, we need to create a new code block
     # that will contain any remaining code from the original block.
-    if isinstance(code.blocks[-1], gtirb.DataBlock):
-        assert code.blocks[-1].size
-        code.blocks.append(gtirb.CodeBlock(offset=len(code.data)))
+    if isinstance(text_section.blocks[-1], gtirb.DataBlock):
+        assert text_section.blocks[-1].size
+        text_section.blocks.append(
+            gtirb.CodeBlock(offset=len(text_section.data))
+        )
 
     # Adjust the target block to be the size of offset. Then extend the last
     # patch block to cover the remaining bytes in the original block.
     block.size = offset
-    code.blocks[-1].size += original_size - offset - replacement_length
+    text_section.blocks[-1].size += original_size - offset - replacement_length
 
     # Now add a fallthrough edge from the original block to the first patch
     # block, unless we're inserting at the end of the block and the block has
     # no fallthrough edges. For example, inserting after a ret instruction.
     if not inserts_at_end or any(_block_fallthrough_targets(block)):
-        assert isinstance(code.blocks[0], gtirb.CodeBlock)
+        assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
         added_fallthrough = gtirb.Edge(
             source=block,
-            target=code.blocks[0],
+            target=text_section.blocks[0],
             label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
         )
         code.cfg.add(added_fallthrough)
@@ -591,17 +719,25 @@ def _modify_block_insert_cfg(
 
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
-                _update_edge(edge, bi.ir.cfg, code.cfg, source=code.blocks[-1])
+                _update_edge(
+                    edge, bi.ir.cfg, code.cfg, source=text_section.blocks[-1]
+                )
             elif _is_call_edge(edge):
                 _update_return_edges_from_changing_fallthrough(
-                    cache, edge, fallthrough_targets, code.blocks[0], code.cfg,
+                    cache,
+                    edge,
+                    fallthrough_targets,
+                    text_section.blocks[0],
+                    code.cfg,
                 )
     elif replaces_last_instruction:
         fallthrough_targets = _block_fallthrough_targets(block)
 
         for edge in set(block.outgoing_edges):
             if _is_fallthrough_edge(edge):
-                _update_edge(edge, bi.ir.cfg, code.cfg, source=code.blocks[-1])
+                _update_edge(
+                    edge, bi.ir.cfg, code.cfg, source=text_section.blocks[-1]
+                )
             elif _is_call_edge(edge):
                 _update_return_edges_from_removing_call(
                     cache, edge, fallthrough_targets, code.cfg
@@ -611,27 +747,29 @@ def _modify_block_insert_cfg(
                 bi.ir.cfg.discard(edge)
     else:
         for edge in set(block.outgoing_edges):
-            _update_edge(edge, bi.ir.cfg, code.cfg, source=code.blocks[-1])
+            _update_edge(
+                edge, bi.ir.cfg, code.cfg, source=text_section.blocks[-1]
+            )
 
     # Now go back and clean up any zero-sized blocks, which trigger
     # nondeterministic behavior in the pretty printer.
     if block.size == 0:
         code.cfg.discard(added_fallthrough)
 
-        block.size = code.blocks[0].size
+        block.size = text_section.blocks[0].size
         _substitute_block(
-            code.blocks[0], block, code.cfg, code.symbols,
+            text_section.blocks[0], block, code.cfg, code.symbols,
         )
-        del code.blocks[0]
+        del text_section.blocks[0]
 
-    if code.blocks and code.blocks[-1].size == 0:
+    if text_section.blocks and text_section.blocks[-1].size == 0:
         has_symbols = any(
-            sym.referent == code.blocks[-1] for sym in code.symbols
+            sym.referent == text_section.blocks[-1] for sym in code.symbols
         )
-        has_incoming_edges = any(code.cfg.in_edges(code.blocks[-1]))
+        has_incoming_edges = any(code.cfg.in_edges(text_section.blocks[-1]))
         fallthrough_edges = [
             edge
-            for edge in code.cfg.out_edges(code.blocks[-1])
+            for edge in code.cfg.out_edges(text_section.blocks[-1])
             if _is_fallthrough_edge(edge)
         ]
 
@@ -639,24 +777,24 @@ def _modify_block_insert_cfg(
             # If nothing refers to the block, we can simply drop it and any
             # outgoing edges that may have been added to it from the earlier
             # steps.
-            for out_edge in set(code.cfg.out_edges(code.blocks[-1])):
+            for out_edge in set(code.cfg.out_edges(text_section.blocks[-1])):
                 code.cfg.discard(out_edge)
-            del code.blocks[-1]
+            del text_section.blocks[-1]
         elif len(fallthrough_edges) == 1:
             # If we know where the "next" block is, substitute that for our
             # last block. Because the block is empty, there should be no
             # outgoing edges from it except for the fallthrough edge (which
             # we will delete).
             code.cfg.discard(fallthrough_edges[0])
-            assert not any(code.cfg.out_edges(code.blocks[-1]))
+            assert not any(code.cfg.out_edges(text_section.blocks[-1]))
 
             _substitute_block(
-                code.blocks[-1],
+                text_section.blocks[-1],
                 fallthrough_edges[0].target,
                 code.cfg,
                 code.symbols,
             )
-            del code.blocks[-1]
+            del text_section.blocks[-1]
         else:
             # We don't know where control flow goes after our patch, so we'll
             # raise an exception for now. There are other ways of resolving
