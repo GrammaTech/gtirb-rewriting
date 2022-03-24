@@ -554,8 +554,8 @@ def _add_other_section_contents(
                 dict,
             )
             elf_section_properties[gtirb_sect] = (
-                sect.elfType,
-                sect.elfFlags,
+                sect.elf_type,
+                sect.elf_flags,
             )
 
     bi = gtirb.ByteInterval(

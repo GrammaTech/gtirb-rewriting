@@ -202,8 +202,8 @@ class Assembler:
         result = self._sections.get(name)
         if not result:
             flags: Set[gtirb.Section.Flag] = set()
-            elfFlags: Optional[int] = None
-            elfType: Optional[int] = None
+            elf_flags: Optional[int] = None
+            elf_type: Optional[int] = None
 
             if section["class"] == "MCSectionELF":
                 SHF_WRITE = 0x1
@@ -211,20 +211,20 @@ class Assembler:
                 SHF_EXECINSTR = 0x4
                 SHT_NOBITS = 8
 
-                elfFlags = section["flags"]
-                elfType = section["type"]
-                assert elfFlags and elfType
+                elf_flags = section["flags"]
+                elf_type = section["type"]
+                assert elf_flags and elf_type
 
-                if elfFlags & SHF_WRITE:
+                if elf_flags & SHF_WRITE:
                     flags.add(gtirb.Section.Flag.Writable)
 
-                if elfFlags & SHF_ALLOC:
+                if elf_flags & SHF_ALLOC:
                     flags.add(gtirb.Section.Flag.Loaded)
                     flags.add(gtirb.Section.Flag.Readable)
-                    if elfType != SHT_NOBITS:
+                    if elf_type != SHT_NOBITS:
                         flags.add(gtirb.Section.Flag.Initialized)
 
-                if elfFlags & SHF_EXECINSTR:
+                if elf_flags & SHF_EXECINSTR:
                     flags.add(gtirb.Section.Flag.Executable)
 
             elif section["class"] == "MCSectionCOFF":
@@ -260,8 +260,8 @@ class Assembler:
                 blocks=[gtirb.CodeBlock()],
                 symbolic_expressions={},
                 symbolic_expression_sizes={},
-                elfFlags=elfFlags,
-                elfType=elfType,
+                elf_flags=elf_flags,
+                elf_type=elf_type,
             )
             self._sections[name] = result
 
@@ -682,12 +682,12 @@ class Assembler:
             start of `data`.
             """
 
-            elfType: Optional[int]
+            elf_type: Optional[int]
             """
             The ELF section type (SHT_*) for the section. ELF-only.
             """
 
-            elfFlags: Optional[int]
+            elf_flags: Optional[int]
             """
             The ELF section flags (SHF_*) for the section. ELF-only.
             """
