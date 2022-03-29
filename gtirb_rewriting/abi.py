@@ -283,10 +283,22 @@ class _IA32(ABI):
 
     def all_registers(self) -> List[Register]:
         return [
-            Register({"8l": "al", "8h": "ah", "16": "ax", "32": "eax"}, "32",),
-            Register({"8l": "bl", "8h": "bh", "16": "bx", "32": "ebx"}, "32",),
-            Register({"8l": "cl", "8h": "ch", "16": "cx", "32": "ecx"}, "32",),
-            Register({"8l": "dl", "8h": "dh", "16": "dx", "32": "edx"}, "32",),
+            Register(
+                {"8l": "al", "8h": "ah", "16": "ax", "32": "eax"},
+                "32",
+            ),
+            Register(
+                {"8l": "bl", "8h": "bh", "16": "bx", "32": "ebx"},
+                "32",
+            ),
+            Register(
+                {"8l": "cl", "8h": "ch", "16": "cx", "32": "ecx"},
+                "32",
+            ),
+            Register(
+                {"8l": "dl", "8h": "dh", "16": "dx", "32": "edx"},
+                "32",
+            ),
             Register({"8l": "sil", "16": "si", "32": "esi"}, "32"),
             Register({"8l": "dil", "16": "di", "32": "edi"}, "32"),
         ]
@@ -298,7 +310,10 @@ class _IA32(ABI):
         return 4
 
     def stack_register(self) -> Register:
-        return Register({"16": "sp", "32": "esp"}, "32",)
+        return Register(
+            {"16": "sp", "32": "esp"},
+            "32",
+        )
 
 
 class _IA32_PE(_IA32):
@@ -433,7 +448,10 @@ class _X86_64(ABI):
         return 8
 
     def stack_register(self) -> Register:
-        return Register({"16": "sp", "32": "esp", "64": "rsp"}, "64",)
+        return Register(
+            {"16": "sp", "32": "esp", "64": "rsp"},
+            "64",
+        )
 
 
 class _X86_64_PE(_X86_64):

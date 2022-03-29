@@ -197,7 +197,9 @@ def test_module_main_errors(tmp_path):
 
     # Ensure that the module-specific driver doesn't have --list
     ret = run_driver(
-        gtirb_rewriting.driver.main, "my-pass", argv=["__main__.py", "--list"],
+        gtirb_rewriting.driver.main,
+        "my-pass",
+        argv=["__main__.py", "--list"],
     )
     assert ret == 2
 
@@ -264,7 +266,7 @@ def test_generic_main_version(capsys):
     # argparse can wrap our text arbitrarily depending on the host env, so
     # use regexes here.
     assert re.search(
-        fr"gtirb_rewriting\s{re.escape(gtirb_rewriting.__version__)}",
+        rf"gtirb_rewriting\s{re.escape(gtirb_rewriting.__version__)}",
         captured.out,
     )
     assert re.search(r"test_driver\s1.0", captured.out)

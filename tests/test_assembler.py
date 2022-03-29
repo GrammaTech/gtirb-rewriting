@@ -39,7 +39,8 @@ def test_return_edges():
 
     assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
-        "ret", gtirb_rewriting.X86Syntax.INTEL,
+        "ret",
+        gtirb_rewriting.X86Syntax.INTEL,
     )
     result = assembler.finalize()
     text_section = result.text_section
@@ -67,7 +68,8 @@ def test_symbolic_expr():
 
     assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
-        "call puts", gtirb_rewriting.X86Syntax.INTEL,
+        "call puts",
+        gtirb_rewriting.X86Syntax.INTEL,
     )
     result = assembler.finalize()
     text_section = result.text_section
@@ -89,7 +91,8 @@ def test_symbolic_expr_sym_offset():
 
     assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
-        "inc byte ptr [puts + 42]", gtirb_rewriting.X86Syntax.INTEL,
+        "inc byte ptr [puts + 42]",
+        gtirb_rewriting.X86Syntax.INTEL,
     )
     result = assembler.finalize()
     text_section = result.text_section
@@ -474,7 +477,8 @@ def test_arm64_sym_attribute_got():
 
 def test_undef_symbols():
     ir, m = create_test_module(
-        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
     )
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -494,7 +498,8 @@ def test_undef_symbols():
 
 def test_indirect_jumps():
     _, m = create_test_module(
-        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
     )
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -515,7 +520,8 @@ def test_indirect_jumps():
 
 def test_direct_calls():
     _, m = create_test_module(
-        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
     )
     exit_sym = add_symbol(m, "exit", add_proxy_block(m))
 
@@ -543,7 +549,8 @@ def test_direct_calls():
 
 def test_indirect_calls():
     _, m = create_test_module(
-        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
     )
 
     assembler = gtirb_rewriting.Assembler(m)
@@ -569,7 +576,8 @@ def test_indirect_calls():
 
 def test_assembler_errors():
     _, m = create_test_module(
-        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64,
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
     )
     _, bi = add_text_section(m)
     add_symbol(m, "blah", add_proxy_block(m))
@@ -584,7 +592,11 @@ def test_assembler_errors():
 
 
 @pytest.mark.parametrize(
-    "file_format", (gtirb.Module.FileFormat.ELF, gtirb.Module.FileFormat.PE,),
+    "file_format",
+    (
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.FileFormat.PE,
+    ),
 )
 def test_assembler_sections(file_format: gtirb.Module.FileFormat):
     if file_format == gtirb.Module.FileFormat.ELF:

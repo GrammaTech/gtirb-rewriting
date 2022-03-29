@@ -218,7 +218,11 @@ class RewritingContext:
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
 
         _modify_block_insert(
-            modify_cache, block, offset, replacement_length, assembler_result,
+            modify_cache,
+            block,
+            offset,
+            replacement_length,
+            assembler_result,
         )
 
         self._symbols_by_name.update(

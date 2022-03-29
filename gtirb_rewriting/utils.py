@@ -69,7 +69,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         return sum(len(subdata) for subdata in self._data.values())
 
     def __iter__(self) -> Iterator[gtirb.Offset]:
-        """"Yield the Offsets in this mapping."""
+        """ "Yield the Offsets in this mapping."""
         for elem, subdata in self._data.items():
             for disp in subdata:
                 yield gtirb.Offset(elem, disp)
