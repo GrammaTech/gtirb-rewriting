@@ -154,22 +154,37 @@ def test_expensive_assertions():
     # Offset is not on an instruction boundary
     with pytest.raises(AssertionError):
         ctx.insert_at(
-            func, b, 1, gtirb_rewriting.Patch.from_function(dummy_patch),
+            func,
+            b,
+            1,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
         )
     # Offset is not on an instruction boundary
     with pytest.raises(AssertionError):
         ctx.replace_at(
-            func, b, 1, 0, gtirb_rewriting.Patch.from_function(dummy_patch),
+            func,
+            b,
+            1,
+            0,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
         )
     # Offset is valid, but end position isn't on an instruction boundary
     with pytest.raises(AssertionError):
         ctx.replace_at(
-            func, b, 0, 6, gtirb_rewriting.Patch.from_function(dummy_patch),
+            func,
+            b,
+            0,
+            6,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
         )
     # Range extends out of the block's bounds
     with pytest.raises(AssertionError):
         ctx.replace_at(
-            func, b, 0, 60, gtirb_rewriting.Patch.from_function(dummy_patch),
+            func,
+            b,
+            0,
+            60,
+            gtirb_rewriting.Patch.from_function(dummy_patch),
         )
     ctx.apply()
 
@@ -185,7 +200,11 @@ def test_conflicting_insertion_replacement():
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.insert_at(func, b, 7, gtirb_rewriting.Patch.from_function(dummy_patch))
     ctx.replace_at(
-        func, b, 0, bi.size, gtirb_rewriting.Patch.from_function(dummy_patch),
+        func,
+        b,
+        0,
+        bi.size,
+        gtirb_rewriting.Patch.from_function(dummy_patch),
     )
     with pytest.raises(AssertionError):
         ctx.apply()
@@ -212,7 +231,10 @@ def test_inserting_function_and_call():
         "target", gtirb_rewriting.Patch.from_function(function_patch)
     )
     ctx.insert_at(
-        func, main_block, 0, gtirb_rewriting.Patch.from_function(call_patch),
+        func,
+        main_block,
+        0,
+        gtirb_rewriting.Patch.from_function(call_patch),
     )
     ctx.apply()
 
@@ -619,7 +641,11 @@ def test_replace_bytes_in_place_no_symbol():
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.replace_at(
-        func, b, 1, 1, literal_patch("pushq %rdi"),
+        func,
+        b,
+        1,
+        1,
+        literal_patch("pushq %rdi"),
     )
     ctx.apply()
 
@@ -645,7 +671,11 @@ def test_replace_bytes_in_place_with_symbol():
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.replace_at(
-        func, b, 1, 1, literal_patch("new: pushq %rdi"),
+        func,
+        b,
+        1,
+        1,
+        literal_patch("new: pushq %rdi"),
     )
     ctx.apply()
 

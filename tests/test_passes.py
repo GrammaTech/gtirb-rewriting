@@ -28,7 +28,10 @@ def test_pass_order():
 
     class DummyPass(gtirb_rewriting.Pass):
         def begin_module(
-            self, module, functions, rewriting_ctx,
+            self,
+            module,
+            functions,
+            rewriting_ctx,
         ):
             events.append((self, "begin", module))
 
@@ -41,7 +44,8 @@ def test_pass_order():
         name="test",
     )
     mod1.aux_data["functionEntries"] = gtirb.AuxData(
-        type_name="mapping<UUID,set<UUID>>", data={},
+        type_name="mapping<UUID,set<UUID>>",
+        data={},
     )
     mod2 = gtirb.Module(
         isa=gtirb.Module.ISA.X64,
@@ -49,7 +53,8 @@ def test_pass_order():
         name="test",
     )
     mod2.aux_data["functionEntries"] = gtirb.AuxData(
-        type_name="mapping<UUID,set<UUID>>", data={},
+        type_name="mapping<UUID,set<UUID>>",
+        data={},
     )
     ir = gtirb.IR(modules=[mod1, mod2])
 

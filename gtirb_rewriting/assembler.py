@@ -350,7 +350,8 @@ class Assembler:
 
             if inst["desc"]["isCall"]:
                 edge_label = gtirb.Edge.Label(
-                    type=gtirb.Edge.Type.Call, direct=direct,
+                    type=gtirb.Edge.Type.Call,
+                    direct=direct,
                 )
             elif inst["desc"]["isBranch"]:
                 edge_label = gtirb.Edge.Label(

@@ -239,7 +239,9 @@ def _add_return_edges_to_one_function(
 
 
 def _add_return_edges_for_patch_calls(
-    cache: _ModifyCache, module: gtirb.Module, new_cfg: gtirb.CFG,
+    cache: _ModifyCache,
+    module: gtirb.Module,
+    new_cfg: gtirb.CFG,
 ) -> None:
     """
     Finds all of the call edges added by the patch and adds new return edges
@@ -428,7 +430,9 @@ def _modify_block_insert(
     assert module
 
     _add_return_edges_for_patch_calls(
-        cache, module, code.cfg,
+        cache,
+        module,
+        code.cfg,
     )
     _update_patch_return_edges_to_match(cache, block, code.cfg, code.proxies)
 
@@ -758,7 +762,10 @@ def _modify_block_insert_cfg(
 
         block.size = text_section.blocks[0].size
         _substitute_block(
-            text_section.blocks[0], block, code.cfg, code.symbols,
+            text_section.blocks[0],
+            block,
+            code.cfg,
+            code.symbols,
         )
         del text_section.blocks[0]
 

@@ -224,7 +224,9 @@ def test_join_byte_intervals_no_tables():
         symbolic_expressions={3: gtirb.SymAddrConst(symbol=s1, offset=0)},
     )
     bi2 = gtirb.ByteInterval(
-        address=0x104, blocks=[b2, b3], contents=b"\x10\x11\x12\x13",
+        address=0x104,
+        blocks=[b2, b3],
+        contents=b"\x10\x11\x12\x13",
     )
     bi3 = gtirb.ByteInterval(
         contents=b"\x20\x21\x22",
@@ -265,11 +267,19 @@ def test_join_byte_intervals_padding():
     b2 = gtirb.DataBlock(offset=0, size=1)
     b3 = gtirb.CodeBlock(offset=1, size=1)
     bi1 = gtirb.ByteInterval(
-        address=0x100, blocks=[b1], contents=b"\x00\x01\x02\x03",
+        address=0x100,
+        blocks=[b1],
+        contents=b"\x00\x01\x02\x03",
     )
-    bi2 = gtirb.ByteInterval(address=0x200, blocks=[b2], contents=b"\x10\x11",)
+    bi2 = gtirb.ByteInterval(
+        address=0x200,
+        blocks=[b2],
+        contents=b"\x10\x11",
+    )
     bi3 = gtirb.ByteInterval(
-        address=0x300, blocks=[b3], contents=b"\x20\x21\x22\x23",
+        address=0x300,
+        blocks=[b3],
+        contents=b"\x20\x21\x22\x23",
     )
 
     bi = gtirb_rewriting.join_byte_intervals(
@@ -307,7 +317,8 @@ def test_join_byte_intervals_default_tables():
     )
 
     m.aux_data["alignment"] = gtirb.AuxData(
-        type_name="mapping<UUID,uint64_t>", data={b2: 4},
+        type_name="mapping<UUID,uint64_t>",
+        data={b2: 4},
     )
     m.aux_data["comments"] = gtirb.AuxData(
         type_name="mapping<Offset,string>",

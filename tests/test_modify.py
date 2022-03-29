@@ -36,7 +36,8 @@ from helpers import add_function_object
 
 def test_return_cache():
     ir, m = create_test_module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
     )
     _, bi = add_text_section(m)
 
@@ -83,7 +84,8 @@ def test_return_cache():
 
 def test_return_cache_decorator():
     ir, m = create_test_module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
     )
     _, bi = add_text_section(m)
     orig_cfg = ir.cfg
@@ -127,7 +129,8 @@ def test_return_cache_decorator():
 
 def test_modify_cache():
     ir, m = create_test_module(
-        isa=gtirb.Module.ISA.X64, file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
     )
     _, bi = add_text_section(m)
 

@@ -30,7 +30,8 @@ def stringify_snippets(snippets):
 
 
 @pytest.mark.parametrize(
-    "abi_class", (gtirb_rewriting.abi._IA32_PE,),
+    "abi_class",
+    (gtirb_rewriting.abi._IA32_PE,),
 )
 def test_ia32_clobbers_regs(abi_class):
     abi = abi_class()
@@ -58,7 +59,8 @@ def test_ia32_clobbers_regs(abi_class):
 
 
 @pytest.mark.parametrize(
-    "abi_class", (gtirb_rewriting.abi._IA32_PE,),
+    "abi_class",
+    (gtirb_rewriting.abi._IA32_PE,),
 )
 def test_ia32_align_stack(abi_class):
     abi = abi_class()
