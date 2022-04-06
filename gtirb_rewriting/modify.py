@@ -26,10 +26,24 @@ import functools
 import logging
 import operator
 import uuid
-from typing import Container, Dict, Iterable, Iterator, Set
+from typing import (
+    Container,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    MutableMapping,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import gtirb
 import gtirb_functions
+from more_itertools import triplewise
 
 from . import _auxdata
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
@@ -43,6 +57,10 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class AmbiguousCFGError(RuntimeError):
+    pass
 
 
 class CFGModifiedError(RuntimeError):
@@ -172,6 +190,273 @@ class _ModifyCache:
             for block in func.get_all_blocks()
         }
 
+    def in_same_function(
+        self, block1: gtirb.CodeBlock, block2: gtirb.CodeBlock
+    ) -> bool:
+        uuid1 = self.functions_by_block.get(block1)
+        uuid2 = self.functions_by_block.get(block2)
+        return uuid1 == uuid2 is not None
+
+    def is_entry_block(self, block: gtirb.CodeBlock) -> bool:
+        func_uuid = self.functions_by_block.get(block)
+        if not func_uuid:
+            return False
+
+        table = _auxdata.function_entries.get(self.module)
+        if table is None:
+            return False
+
+        return block in table[func_uuid]
+
+
+BlockT = TypeVar("BlockT", bound=gtirb.ByteBlock)
+
+
+def _split_block(
+    cache: _ModifyCache, block: BlockT, offset: int
+) -> Tuple[BlockT, BlockT, Optional[gtirb.Edge]]:
+    """
+    Splits a block in two at the requested offset.
+    :param cache: The modify cache.
+    :param offset: The offset to split at; must be within [0, block.size].
+    :return: The modified block, the newly created block, and the fallthrough
+             edge created between them (if needed).
+    """
+
+    assert 0 <= offset <= block.size
+    assert block.module and block.ir, "target block must be in a module"
+
+    end_split = offset == block.size
+
+    new_block = block.__class__()
+    new_block.offset = block.offset + offset
+    new_block.size = block.size - offset
+    new_block.byte_interval = block.byte_interval
+    block.size = offset
+
+    for sym in tuple(block.references):
+        if sym.at_end:
+            sym.referent = new_block
+
+    added_fallthrough = None
+    if isinstance(block, gtirb.CodeBlock):
+        assert isinstance(new_block, gtirb.CodeBlock)
+
+        if not end_split:
+            # If we're splitting in the middle of the block, we are going to
+            # move all of the edges to the new block.
+            for out_edge in tuple(block.outgoing_edges):
+                _update_edge(
+                    out_edge, block.ir.cfg, block.ir.cfg, source=new_block
+                )
+            add_fallthrough = True
+        else:
+            # Otherwise we're splitting at the end of the block and all the
+            # edges remain in the original block -- with the exception of
+            # fallthrough edges and return edges.
+            fallthrough_targets = _block_fallthrough_targets(block)
+            add_fallthrough = any(fallthrough_targets)
+
+            for out_edge in tuple(block.outgoing_edges):
+                if _is_call_edge(out_edge):
+                    _update_return_edges_from_changing_fallthrough(
+                        cache,
+                        out_edge,
+                        fallthrough_targets,
+                        new_block,
+                        block.ir.cfg,
+                    )
+                elif _is_fallthrough_edge(out_edge):
+                    _update_edge(
+                        out_edge, block.ir.cfg, block.ir.cfg, source=new_block
+                    )
+
+        if add_fallthrough:
+            added_fallthrough = gtirb.Edge(
+                source=block,
+                target=new_block,
+                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+            )
+            block.ir.cfg.add(added_fallthrough)
+
+        func_uuid = cache.functions_by_block.get(block)
+        if func_uuid:
+            _add_block_to_function(cache, new_block, func_uuid)
+
+    for table_def in OFFSETMAP_AUX_DATA_TABLES:
+        table_data = table_def.get(block.module)
+        if table_data:
+            displacement_map = table_data.get(block)
+            if displacement_map:
+                table_data[block] = {
+                    k: v for k, v in displacement_map.items() if k < offset
+                }
+                table_data[new_block] = {
+                    k: v for k, v in displacement_map.items() if k >= offset
+                }
+
+    return block, new_block, added_fallthrough
+
+
+def _add_block_to_function(
+    cache: _ModifyCache, new_block: gtirb.CodeBlock, func_uuid: uuid.UUID
+) -> None:
+    assert new_block.module, "block must be in a module"
+
+    function_blocks = _auxdata.function_blocks.get(new_block.module)
+    if function_blocks is not None:
+        function_blocks[func_uuid].add(new_block)
+    cache.functions_by_block[new_block] = func_uuid
+
+
+def _remove_function_block_aux(
+    cache: _ModifyCache, block: gtirb.CodeBlock
+) -> None:
+    assert block.module, "block must be in a module"
+
+    func_uuid = cache.functions_by_block.pop(block, None)
+    function_blocks_data = _auxdata.function_blocks.get(block.module)
+    if func_uuid and function_blocks_data:
+        function_blocks_data[func_uuid].discard(block)
+
+
+class JoinableResult(NamedTuple):
+    result: bool
+    reason: str
+
+    def __bool__(self) -> bool:
+        return self.result
+
+
+def _are_joinable(
+    cache: _ModifyCache, block1: gtirb.ByteBlock, block2: gtirb.ByteBlock
+) -> JoinableResult:
+    """
+    Determines if two blocks can be joined using _join_blocks.
+    """
+
+    if type(block1) != type(block2):
+        return JoinableResult(False, "block types do not match")
+
+    if block1.byte_interval is not block2.byte_interval:
+        return JoinableResult(
+            False, "blocks are not in the same byte interval"
+        )
+
+    module = block1.module
+    if not module:
+        return JoinableResult(False, "blocks are not in a module")
+
+    if block1.offset + block1.size != block2.offset:
+        return JoinableResult(
+            False, "block2 does not immediately follow block1"
+        )
+
+    if not block1.size:
+        return JoinableResult(True, "block1 is empty")
+
+    alignment_data = _auxdata.alignment.get(module)
+    if alignment_data:
+        alignment = alignment_data.get(block2, 1)
+        if alignment != 1:
+            return JoinableResult(False, "block2 has a required aligment")
+
+    any_symbols = any(not sym.at_end for sym in block2.references)
+    if any_symbols:
+        return JoinableResult(False, "block2 has symbols referring to it")
+
+    if isinstance(block1, gtirb.CodeBlock) and isinstance(
+        block2, gtirb.CodeBlock
+    ):
+        any_out_edges = any(
+            edge
+            for edge in block1.outgoing_edges
+            if not _is_fallthrough_edge(edge) or edge.target != block2
+        )
+        if any_out_edges and block2.size != 0:
+            return JoinableResult(False, "block1 has outgoing edges")
+
+        any_in_edges = any(
+            edge
+            for edge in block2.incoming_edges
+            if not _is_fallthrough_edge(edge) or edge.source != block1
+        )
+        if any_in_edges:
+            return JoinableResult(False, "block2 has incoming edges")
+
+        if not cache.in_same_function(block1, block2):
+            return JoinableResult(False, "blocks are not in the same function")
+
+        if cache.is_entry_block(block2):
+            return JoinableResult(
+                False, "block2 is the entry block of the function"
+            )
+
+    return JoinableResult(True, "")
+
+
+def _join_blocks(
+    cache: _ModifyCache,
+    block1: BlockT,
+    block2: BlockT,
+) -> BlockT:
+    joinable = _are_joinable(cache, block1, block2)
+    assert joinable.result, f"these blocks cannot be joined: {joinable.reason}"
+
+    ir = block1.ir
+    module = block1.module
+    assert ir and module
+
+    for sym in tuple(block2.references):
+        if not block1.size:
+            sym.referent = block1
+            sym.at_end = False
+        elif not block2.size:
+            sym.referent = block1
+            sym.at_end = True
+        else:
+            assert sym.at_end, "cannot join blocks if the second has symbols"
+            sym.referent = block1
+
+    if isinstance(block2, gtirb.CodeBlock):
+        assert isinstance(block1, gtirb.CodeBlock)
+
+        for in_edge in tuple(block2.incoming_edges):
+            if _is_fallthrough_edge(in_edge) and in_edge.source is block1:
+                ir.cfg.discard(in_edge)
+
+        if not block1.size:
+            for in_edge in tuple(block2.incoming_edges):
+                _update_edge(in_edge, ir.cfg, ir.cfg, target=block1)
+
+        else:
+            for in_edge in tuple(block2.incoming_edges):
+                ir.cfg.discard(in_edge)
+
+        for out_edge in tuple(block2.outgoing_edges):
+            _update_edge(out_edge, ir.cfg, ir.cfg, source=block1)
+
+        _remove_function_block_aux(cache, block2)
+
+    for table_def in OFFSETMAP_AUX_DATA_TABLES:
+        table_data = table_def.get(module)
+        if table_data:
+            displacement_map = table_data.pop(block2, None)
+            if displacement_map:
+                new_displacement_map = table_data.setdefault(block1, {})
+                new_displacement_map.update(
+                    {block1.size + k: v for k, v in displacement_map.items()}
+                )
+
+    alignment_data = _auxdata.alignment.get(module)
+    if alignment_data:
+        alignment_data.pop(block2, None)
+
+    block1.size = block1.size + block2.size
+    block2.byte_interval = None
+
+    return block1
+
 
 def _update_edge(
     edge: gtirb.Edge, old_cfg: gtirb.CFG, new_cfg: gtirb.CFG, **kwargs
@@ -186,28 +471,6 @@ def _update_edge(
 
     old_cfg.discard(edge)
     new_cfg.add(edge._replace(**kwargs))
-
-
-def _substitute_block(
-    old_block: gtirb.CodeBlock,
-    new_block: gtirb.CodeBlock,
-    cfg: gtirb.CFG,
-    symbols: Iterable[gtirb.Symbol],
-) -> None:
-    """
-    Substitutes one block for another by adjusting the CFG and any symbols
-    pointing at the block.
-    """
-
-    for edge in set(cfg.in_edges(old_block)):
-        _update_edge(edge, cfg, cfg, target=new_block)
-
-    for edge in set(cfg.out_edges(old_block)):
-        _update_edge(edge, cfg, cfg, source=new_block)
-
-    for sym in symbols:
-        if sym.referent == old_block:
-            sym.referent = new_block
 
 
 def _add_return_edges_to_one_function(
@@ -325,6 +588,10 @@ def _update_return_edges_from_removing_call(
     """
     Updates return edges due to removing a call edge.
     """
+
+    assert isinstance(call_edge.target, (gtirb.CodeBlock, gtirb.ProxyBlock))
+    assert call_edge.target.module
+
     if isinstance(call_edge.target, gtirb.ProxyBlock):
         return
 
@@ -333,6 +600,8 @@ def _update_return_edges_from_removing_call(
         return
 
     for block in _get_function_blocks(call_edge.target.module, func_uuid):
+        assert block.module and block.ir
+
         return_edges = cache.return_cache.block_return_edges(block)
         if not return_edges:
             continue
@@ -367,6 +636,10 @@ def _update_return_edges_from_changing_fallthrough(
     Updates all return edges in a function that point to a given return target
     to point to a new target.
     """
+
+    assert isinstance(call_edge.target, (gtirb.ProxyBlock, gtirb.CodeBlock))
+    assert call_edge.target.module
+
     if isinstance(call_edge.target, gtirb.ProxyBlock):
         return
 
@@ -377,11 +650,98 @@ def _update_return_edges_from_changing_fallthrough(
     for target_block in _get_function_blocks(
         call_edge.target.module, target_func_uuid
     ):
+        assert target_block.ir
+
         for edge in cache.return_cache.block_return_edges(target_block):
             if edge.target in fallthrough_targets:
                 _update_edge(
                     edge, target_block.ir.cfg, new_cfg, target=new_fallthrough
                 )
+
+
+def _update_fallthrough_target(
+    cache: _ModifyCache,
+    cfg: gtirb.CFG,
+    source: gtirb.CodeBlock,
+    new_target: gtirb.CodeBlock,
+) -> None:
+    old_targets = _block_fallthrough_targets(source)
+
+    for edge in tuple(source.outgoing_edges):
+        if _is_call_edge(edge):
+            _update_return_edges_from_changing_fallthrough(
+                cache, edge, old_targets, new_target, cfg
+            )
+        elif _is_fallthrough_edge(edge):
+            cfg.discard(edge)
+
+    cfg.add(
+        gtirb.Edge(
+            source=source,
+            target=new_target,
+            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+        )
+    )
+
+
+def _remove_block(
+    cache: _ModifyCache,
+    block: gtirb.CodeBlock,
+    next_block: Union[gtirb.CodeBlock, gtirb.ProxyBlock, None],
+) -> None:
+    """
+    Deletes a block and retargets any symbols or edges pointing at it to be
+    to another block.
+    """
+
+    assert block.module and block.ir
+
+    if next_block is None and (
+        any(block.references)
+        or any(block.incoming_edges)
+        or any(block.outgoing_edges)
+    ):
+        raise AmbiguousCFGError(
+            "removing a block without knowing how to update control flow"
+        )
+
+    for sym in set(block.references):
+        sym.referent = next_block
+        sym.at_end = False
+
+    for edge in set(block.incoming_edges):
+        _update_edge(edge, block.ir.cfg, block.ir.cfg, target=next_block)
+
+    fallthrough_targets = _block_fallthrough_targets(block)
+    for edge in set(block.outgoing_edges):
+        if _is_call_edge(edge):
+            _update_return_edges_from_removing_call(
+                cache, edge, fallthrough_targets, block.ir.cfg
+            )
+        block.ir.cfg.discard(edge)
+
+    function_uuid = cache.functions_by_block.get(block, None)
+    if function_uuid:
+        # If it was previously a function entry block, the next block gets
+        # promoted into that role.
+        aux_function_entries = _auxdata.function_entries.get(block.module)
+        if (
+            aux_function_entries
+            and block in aux_function_entries[function_uuid]
+        ):
+            if isinstance(next_block, gtirb.CodeBlock):
+                aux_function_entries[function_uuid].add(next_block)
+            aux_function_entries[function_uuid].discard(block)
+
+        aux_function_blocks = _auxdata.function_blocks.get(block.module)
+        if aux_function_blocks:
+            aux_function_blocks[function_uuid].discard(block)
+
+    aux_alignment = _auxdata.alignment.get(block.module)
+    if aux_alignment:
+        aux_alignment.pop(block, None)
+
+    block.byte_interval = None
 
 
 def _modify_block_insert(
@@ -390,7 +750,7 @@ def _modify_block_insert(
     offset: int,
     replacement_length: int,
     code: Assembler.Result,
-) -> None:
+) -> gtirb.CodeBlock:
     """
     Insert bytes into a block and adjusts the IR as needed.
     :param cache: The modify cache, which should be reused across multiple
@@ -408,6 +768,7 @@ def _modify_block_insert(
     assert 0 <= offset <= block.size
     assert 0 <= offset + replacement_length <= block.size
     assert replacement_length >= 0
+    assert block.byte_interval and block.module and block.ir
 
     text_section = code.text_section
     assert text_section.data
@@ -419,107 +780,125 @@ def _modify_block_insert(
     assert all(
         new_block.size for new_block in text_section.blocks[:-1]
     ), "only the last block may be empty"
-    assert isinstance(text_section.blocks[-1], gtirb.DataBlock) or not any(
-        code.cfg.out_edges(text_section.blocks[-1])
+    assert isinstance(text_section.blocks[-1], gtirb.DataBlock) or (
+        isinstance(text_section.blocks[-1], gtirb.CodeBlock)
+        and not any(code.cfg.out_edges(text_section.blocks[-1]))
     ), "the last block cannot have outgoing cfg edges"
 
     bi = block.byte_interval
-    assert bi
-
     module = block.module
-    assert module
+    cfg = block.ir.cfg
 
     _add_return_edges_for_patch_calls(
         cache,
         module,
         code.cfg,
     )
+
     _update_patch_return_edges_to_match(cache, block, code.cfg, code.proxies)
 
-    # Adjust codeblock sizes, create CFG edges, remove 0-size blocks
-    _modify_block_insert_cfg(cache, block, offset, replacement_length, code)
+    _, end_block, added_fallthrough = _split_block(cache, block, offset)
 
-    size_delta = len(text_section.data) - replacement_length
-    offset += block.offset
+    if replacement_length:
+        mid_block, end_block, _ = _split_block(
+            cache, end_block, replacement_length
+        )
+        _remove_block(cache, mid_block, end_block)
 
-    # adjust byte interval the block goes in
-    bi.size += size_delta
-    bi.contents = (
-        bi.contents[:offset]
-        + text_section.data
-        + bi.contents[offset + replacement_length :]
+    # Stitch in the new blocks to the CFG
+    if added_fallthrough:
+        assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
+        _update_fallthrough_target(cache, cfg, block, text_section.blocks[0])
+
+    if isinstance(text_section.blocks[-1], gtirb.CodeBlock):
+        cfg.add(
+            gtirb.Edge(
+                source=text_section.blocks[-1],
+                target=end_block,
+                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+            )
+        )
+        _update_fallthrough_target(
+            cache, cfg, text_section.blocks[-1], end_block
+        )
+
+    # Add the patch contents and then we can add everything else from the
+    # patch.
+    _edit_byte_interval(
+        bi,
+        block.offset + block.size,
+        replacement_length,
+        text_section.data,
+        {block},
     )
-
-    # adjust blocks that occur after the insertion point
-    # TODO: what if blocks overlap over the insertion point?
-    for b in bi.blocks:
-        if b != block and b.offset >= offset:
-            b.offset += size_delta
 
     # adjust all of the new blocks to be relative to the byte interval and
     # add them to the byte interval
     for b in text_section.blocks:
-        b.offset += offset
+        b.offset = block.offset + offset + b.offset
 
-    assert block.size and all(b.size for b in text_section.blocks), (
-        "_modify_block_insert created a zero-sized block; please file a bug "
-        "report against gtirb-rewriting"
-    )
-    bi.blocks.update(text_section.blocks)
-
-    # adjust sym exprs that occur after the insertion point
-    bi.symbolic_expressions = {
-        (k + size_delta if k >= offset else k): v
-        for k, v in bi.symbolic_expressions.items()
-        if k < offset or k >= offset + replacement_length
-    }
-
-    # add all of the symbolic expressions from the code we're inserting
     for rel_offset, expr in text_section.symbolic_expressions.items():
-        bi.symbolic_expressions[offset + rel_offset] = expr
+        bi.symbolic_expressions[block.offset + offset + rel_offset] = expr
 
-    bi.ir.cfg.update(code.cfg)
-    bi.module.symbols.update(code.symbols)
-    bi.module.proxies.update(code.proxies)
+    bi.blocks.update(text_section.blocks)
+    cfg.update(code.cfg)
+    module.symbols.update(code.symbols)
+    module.proxies.update(code.proxies)
 
-    # Add new blocks to the functionBlocks aux data and our cache
     func_uuid = cache.functions_by_block.get(block)
     if func_uuid:
-        function_blocks = _auxdata.function_blocks.get(module)
-        if function_blocks is not None and func_uuid in function_blocks:
-            function_blocks[func_uuid].update(
-                b
-                for b in text_section.blocks
-                if isinstance(b, gtirb.CodeBlock)
-            )
+        for b in text_section.blocks:
+            if isinstance(b, gtirb.CodeBlock):
+                _add_block_to_function(cache, b, func_uuid)
 
-        cache.functions_by_block.update(
-            {
-                b: func_uuid
-                for b in text_section.blocks
-                if isinstance(b, gtirb.CodeBlock)
-            }
-        )
-
-    # adjust aux data if present
-    for table_def in OFFSETMAP_AUX_DATA_TABLES:
-        table = table_def.get(bi.module)
-        if table is not None and bi in table:
-            displacement_map = table[bi]
-            del table[bi]
-            table[bi] = {
-                (k + size_delta if k >= offset else k): v
-                for k, v in displacement_map.items()
-                if k < offset or k >= offset + replacement_length
-            }
-
-    sym_expr_sizes = _auxdata.symbolic_expression_sizes.get_or_insert(module)
+    sym_expr_data = _auxdata.symbolic_expression_sizes.get_or_insert(module)
     for rel_offset, size in text_section.symbolic_expression_sizes.items():
-        sym_expr_sizes[gtirb.Offset(bi, offset + rel_offset)] = size
+        sym_expr_data[
+            gtirb.Offset(bi, block.offset + offset + rel_offset)
+        ] = size
 
     for sect in code.sections.values():
         if sect is not code.text_section:
-            _add_other_section_contents(code, sect, module, sym_expr_sizes)
+            _add_other_section_contents(code, sect, module, sym_expr_data)
+
+    # The block splitting from earlier might have left zero-sized blocks that
+    # need to be dealt with.
+    next_blocks = _block_fallthrough_targets(end_block)
+    return _cleanup_modified_blocks(
+        cache,
+        block,
+        text_section.blocks,
+        end_block,
+        next(iter(next_blocks)) if next_blocks else None,
+    )
+
+
+def _cleanup_modified_blocks(
+    cache: _ModifyCache,
+    start_block: gtirb.CodeBlock,
+    patch_blocks: List[gtirb.ByteBlock],
+    end_block: gtirb.CodeBlock,
+    next_block: Union[gtirb.CodeBlock, gtirb.ProxyBlock, None],
+) -> gtirb.CodeBlock:
+    blocks = [start_block, *patch_blocks, end_block, next_block]
+
+    # Clean up blocks until we reach a fixed point where there's no further
+    # changes to be made.
+    while True:
+        for (_, pred), (i, block), (_, succ) in triplewise(enumerate(blocks)):
+            if _are_joinable(cache, pred, block):
+                _join_blocks(cache, pred, block)
+                del blocks[i]
+                break
+            elif not block.size:
+                _remove_block(cache, block, succ)
+                del blocks[i]
+                break
+        else:
+            # No changes were made this iteration, we can be done.
+            break
+
+    return blocks[-2]
 
 
 def _check_compatible_sections(
@@ -567,7 +946,7 @@ def _add_other_section_contents(
     code: Assembler.Result,
     sect: Assembler.Result.Section,
     module: gtirb.Module,
-    sym_expr_sizes: Dict[gtirb.Offset, int],
+    sym_expr_sizes: MutableMapping[gtirb.Offset, int],
 ) -> None:
     """
     Adds a non-main section from a patch. Its contents are put in a new byte
@@ -628,170 +1007,52 @@ def _add_other_section_contents(
         sym_expr_sizes[gtirb.Offset(bi, rel_offset)] = size
 
 
-def _modify_block_insert_cfg(
-    cache: _ModifyCache,
-    block: gtirb.CodeBlock,
+def _edit_byte_interval(
+    bi: gtirb.ByteInterval,
     offset: int,
-    replacement_length: int,
-    code: Assembler.Result,
+    length: int,
+    content: bytes,
+    static_blocks: Set[gtirb.CodeBlock] = set(),
 ) -> None:
     """
-    Adjust codeblock sizes, create CFG edges, remove 0-size blocks.
-    :param cache: The modify cache, which should be reused across multiple
-                  modifications.
-    :param block: The code block to insert into.
-    :param offset: The byte offset into the code block.
-    :param replacement_length: The number of bytes after `offset` that should
-                               be removed.
-    :param code: The assembled code to be inserted. It will be modified to
-                 reflect what actually gets inserted in the binary.
+    Edits a byte interval's contents, moving blocks, symbolic expressions, and
+    aux data as needed.
+    :param bi: The byte interval to edit.
+    :param offset: The offset in the byte interval to insert at.
+    :param length: The number of bytes in the byte interval to overwrite.
+    :param content: The content to insert.
+    :param static_blocks: Blocks whose offsets should not be updated.
     """
 
-    bi = block.byte_interval
-    text_section = code.text_section
+    assert bi.module, "byte interval must be in a module"
 
-    original_size = block.size
-    inserts_at_end = not replacement_length and offset == block.size
-    replaces_last_instruction = (
-        replacement_length and offset + replacement_length == block.size
+    size_delta = len(content) - length
+
+    bi.size += size_delta
+    bi.contents = (
+        bi.contents[:offset] + content + bi.contents[offset + length :]
     )
 
-    # Adjust the target codeblock and discard the new codeblock if no new CFG
-    # edges are created, no new symbols are created, and the replacement is not
-    # at the end of a block.
-    if (
-        not code.cfg
-        and not code.symbols
-        and not inserts_at_end
-        and not replaces_last_instruction
-    ):
-        assert len(text_section.blocks) == 1
-        assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
+    # adjust blocks that occur after the insertion point
+    # TODO: what if blocks overlap over the insertion point?
+    for b in bi.blocks:
+        if b.offset >= offset and b not in static_blocks:
+            b.offset += size_delta
 
-        block.size = block.size - replacement_length + len(text_section.data)
+    # adjust sym exprs that occur after the insertion point
+    bi.symbolic_expressions = {
+        (k + size_delta if k >= offset else k): v
+        for k, v in bi.symbolic_expressions.items()
+        if k < offset or k >= offset + length
+    }
 
-        # Remove all the blocks from code.blocks so that they don't get added
-        # to the byte_interval in _modify_block_insert.
-        text_section.blocks.clear()
-        return
-
-    # If the patch ended in a data block, we need to create a new code block
-    # that will contain any remaining code from the original block.
-    if isinstance(text_section.blocks[-1], gtirb.DataBlock):
-        assert text_section.blocks[-1].size
-        text_section.blocks.append(
-            gtirb.CodeBlock(offset=len(text_section.data))
-        )
-
-    # Adjust the target block to be the size of offset. Then extend the last
-    # patch block to cover the remaining bytes in the original block.
-    block.size = offset
-    text_section.blocks[-1].size += original_size - offset - replacement_length
-
-    # Now add a fallthrough edge from the original block to the first patch
-    # block, unless we're inserting at the end of the block and the block has
-    # no fallthrough edges. For example, inserting after a ret instruction.
-    if not inserts_at_end or any(_block_fallthrough_targets(block)):
-        assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
-        added_fallthrough = gtirb.Edge(
-            source=block,
-            target=text_section.blocks[0],
-            label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
-        )
-        code.cfg.add(added_fallthrough)
-
-    # Alter any outgoing edges from the original block to originate from the
-    # last patch block.
-    if inserts_at_end:
-        fallthrough_targets = _block_fallthrough_targets(block)
-
-        for edge in set(block.outgoing_edges):
-            if _is_fallthrough_edge(edge):
-                _update_edge(
-                    edge, bi.ir.cfg, code.cfg, source=text_section.blocks[-1]
-                )
-            elif _is_call_edge(edge):
-                _update_return_edges_from_changing_fallthrough(
-                    cache,
-                    edge,
-                    fallthrough_targets,
-                    text_section.blocks[0],
-                    code.cfg,
-                )
-    elif replaces_last_instruction:
-        fallthrough_targets = _block_fallthrough_targets(block)
-
-        for edge in set(block.outgoing_edges):
-            if _is_fallthrough_edge(edge):
-                _update_edge(
-                    edge, bi.ir.cfg, code.cfg, source=text_section.blocks[-1]
-                )
-            elif _is_call_edge(edge):
-                _update_return_edges_from_removing_call(
-                    cache, edge, fallthrough_targets, code.cfg
-                )
-                bi.ir.cfg.discard(edge)
-            else:
-                bi.ir.cfg.discard(edge)
-    else:
-        for edge in set(block.outgoing_edges):
-            _update_edge(
-                edge, bi.ir.cfg, code.cfg, source=text_section.blocks[-1]
-            )
-
-    # Now go back and clean up any zero-sized blocks, which trigger
-    # nondeterministic behavior in the pretty printer.
-    if block.size == 0:
-        code.cfg.discard(added_fallthrough)
-
-        block.size = text_section.blocks[0].size
-        _substitute_block(
-            text_section.blocks[0],
-            block,
-            code.cfg,
-            code.symbols,
-        )
-        del text_section.blocks[0]
-
-    if text_section.blocks and text_section.blocks[-1].size == 0:
-        has_symbols = any(
-            sym.referent == text_section.blocks[-1] for sym in code.symbols
-        )
-        has_incoming_edges = any(code.cfg.in_edges(text_section.blocks[-1]))
-        fallthrough_edges = [
-            edge
-            for edge in code.cfg.out_edges(text_section.blocks[-1])
-            if _is_fallthrough_edge(edge)
-        ]
-
-        if not has_symbols and not has_incoming_edges:
-            # If nothing refers to the block, we can simply drop it and any
-            # outgoing edges that may have been added to it from the earlier
-            # steps.
-            for out_edge in set(code.cfg.out_edges(text_section.blocks[-1])):
-                code.cfg.discard(out_edge)
-            del text_section.blocks[-1]
-        elif len(fallthrough_edges) == 1:
-            # If we know where the "next" block is, substitute that for our
-            # last block. Because the block is empty, there should be no
-            # outgoing edges from it except for the fallthrough edge (which
-            # we will delete).
-            code.cfg.discard(fallthrough_edges[0])
-            assert not any(code.cfg.out_edges(text_section.blocks[-1]))
-
-            _substitute_block(
-                text_section.blocks[-1],
-                fallthrough_edges[0].target,
-                code.cfg,
-                code.symbols,
-            )
-            del text_section.blocks[-1]
-        else:
-            # We don't know where control flow goes after our patch, so we'll
-            # raise an exception for now. There are other ways of resolving
-            # this that we could explore (e.g. insert a nop at the end of the
-            # inserted bytes to make it be a non-zero block).
-            raise NotImplementedError(
-                "Attempting to insert a block at the end of another "
-                "block without knowing how to update control flow"
-            )
+    # adjust aux data if present
+    for table_def in OFFSETMAP_AUX_DATA_TABLES:
+        table_data = table_def.get(bi.module)
+        if table_data and bi in table_data:
+            displacement_map = table_data[bi]
+            table_data[bi] = {
+                (k + size_delta if k >= offset else k): v
+                for k, v in displacement_map.items()
+                if k < offset or k >= offset + length
+            }

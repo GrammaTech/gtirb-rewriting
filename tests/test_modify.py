@@ -147,3 +147,38 @@ def test_modify_cache():
 
     assert modify_cache.functions_by_block[b1] == func.uuid
     assert b2 not in modify_cache.functions_by_block
+
+
+def test_split_block():
+    ir, m = create_test_module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"\x90\xC3")
+    func = add_function_object(m, "func", b1)
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    b1_prime, b2, fallthrough = gtirb_rewriting.modify._split_block(
+        modify_cache, b1, 1
+    )
+
+    assert b1_prime is b1
+    assert b1.offset == 0
+    assert b1.size == 1
+    assert b1.byte_interval is bi
+
+    assert b2.offset == 1
+    assert b2.size == 1
+    assert b2.byte_interval is bi
+
+    b1_again = gtirb_rewriting.modify._join_blocks(modify_cache, b1, b2)
+    assert b1_again is b1
+
+    assert b1.offset == 0
+    assert b1.size == 2
+
+    assert b2.byte_interval is None

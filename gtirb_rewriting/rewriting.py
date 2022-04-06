@@ -215,7 +215,7 @@ class RewritingContext:
             self._logger.debug("  Before:")
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
 
-        _modify_block_insert(
+        new_end = _modify_block_insert(
             modify_cache,
             block,
             offset,
@@ -237,7 +237,7 @@ class RewritingContext:
                 )
 
         return (
-            text_section.blocks[-1] if text_section.blocks else block,
+            new_end,
             len(text_section.data),
         )
 

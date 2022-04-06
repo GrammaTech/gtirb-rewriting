@@ -61,6 +61,7 @@ def test_multiple_insertions():
     ctx.apply()
 
     blocks = sorted(bi.blocks, key=lambda b: b.offset)
+
     refs = [list(b.references) for b in blocks]
 
     assert bi.contents == b"\x90\x90\x50\x51\x52\x53\x54\x55\x56\x90\x90\x57"
@@ -74,16 +75,12 @@ def test_multiple_insertions():
     assert len(refs[1]) == 1
     assert refs[1][0].name == ".L_blah_1"
     assert blocks[1].offset == 2
-    assert blocks[1].size == 7
+    assert blocks[1].size == 9
 
-    assert len(refs[2]) == 0
-    assert blocks[2].offset == 9
-    assert blocks[2].size == 2
-
-    assert len(refs[3]) == 1
-    assert refs[3][0].name == ".L_blah_2"
-    assert blocks[3].offset == 11
-    assert blocks[3].size == 1
+    assert len(refs[2]) == 1
+    assert refs[2][0].name == ".L_blah_2"
+    assert blocks[2].offset == 11
+    assert blocks[2].size == 1
 
 
 def test_multiple_replacements():
@@ -130,7 +127,7 @@ def test_added_function_blocks():
     )
     ctx.apply()
 
-    assert len(m.aux_data["functionBlocks"].data[func.uuid]) == 3
+    assert len(m.aux_data["functionBlocks"].data[func.uuid]) == 2
     assert (
         sum(b.size for b in m.aux_data["functionBlocks"].data[func.uuid])
         == bi.size
@@ -502,25 +499,23 @@ def test_replace_bytes_last():
     assert bi.contents == b"\x57\x90\x0f\x0b"
     assert bi.size == 4
     assert b.offset == 0
-    assert b.size == 1
-    (new_block,) = set(bi.blocks) - {b, b2}
-    assert new_block.byte_interval is bi
-    assert new_block.offset == 1
-    assert new_block.size == 1
+    assert b.size == 2
     assert b2.offset == 2
     assert b2.size == 2
     assert set(bi.symbolic_expressions.keys()) == set()
-    assert set(bi.blocks) == {b, new_block, b2}
+    assert set(bi.blocks) == {b, b2}
 
     edges = list(b.outgoing_edges)
     assert len(edges) == 1
     assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
-    assert edges[0].target == new_block
+    assert edges[0].target == b2
 
-    edges = list(new_block.outgoing_edges)
+    edges = list(b2.incoming_edges)
     assert len(edges) == 1
     assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
-    assert edges[0].target == b2
+    assert edges[0].source == b
+
+    assert len(ir.cfg) == 1
 
 
 def test_replace_bytes_all():
@@ -602,10 +597,7 @@ def test_replace_bytes_with_trailing_zerosized_block():
     assert bi.contents == b"\x57\xEB\x00\x0f\x0b"
     assert bi.size == 5
     assert b.offset == 0
-    assert b.size == 1
-    (new_block,) = set(bi.blocks) - {b, b2}
-    assert new_block.offset == 1
-    assert new_block.size == 2
+    assert b.size == 3
     assert b2.offset == 3
     assert b2.size == 2
 
@@ -616,18 +608,13 @@ def test_replace_bytes_with_trailing_zerosized_block():
 
     edges = list(b.outgoing_edges)
     assert len(edges) == 1
-    assert edges[0].label.type == gtirb.Edge.Type.Fallthrough
-    assert edges[0].target == new_block
+    assert edges[0].label.type == gtirb.Edge.Type.Branch
+    assert edges[0].target == b2
 
     edges = list(b2.incoming_edges)
     assert len(edges) == 1
     assert edges[0].label.type == gtirb.Edge.Type.Branch
-    assert edges[0].source == new_block
-
-    edges = list(new_block.outgoing_edges)
-    assert len(edges) == 1
-    assert edges[0].label.type == gtirb.Edge.Type.Branch
-    assert edges[0].target == b2
+    assert edges[0].source == b
 
 
 def test_replace_bytes_in_place_no_symbol():
