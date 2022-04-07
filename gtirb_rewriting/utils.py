@@ -109,7 +109,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         elif not isinstance(value, Mapping):
             raise ValueError("not a mapping: %r" % value)
         else:
-            self._data.setdefault(key, {}).update(value)
+            self._data[key] = dict(value)
 
     def __delitem__(self, key: Union[gtirb.Offset, gtirb.Node]) -> None:
         """Delete the mapping for an Offset or all Offsets given an element."""

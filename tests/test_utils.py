@@ -61,19 +61,17 @@ def test_offset_mapping():
     }
 
     m[1] = {15: "D", 23: "E"}
-    assert len(m) == 4
+    assert len(m) == 3
     assert m == {
         gtirb.Offset(element_id=0, displacement=0): "A",
-        gtirb.Offset(element_id=1, displacement=0): "B",
         gtirb.Offset(element_id=1, displacement=15): "D",
         gtirb.Offset(element_id=1, displacement=23): "E",
     }
 
     del m[gtirb.Offset(element_id=1, displacement=23)]
-    assert len(m) == 3
+    assert len(m) == 2
     assert m == {
         gtirb.Offset(element_id=0, displacement=0): "A",
-        gtirb.Offset(element_id=1, displacement=0): "B",
         gtirb.Offset(element_id=1, displacement=15): "D",
     }
 
