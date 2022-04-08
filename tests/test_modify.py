@@ -220,6 +220,41 @@ def test_split_block_simple():
     assert m.aux_data["functionBlocks"].data == {func.uuid: {b1, b1_end}}
 
 
+def test_split_block_begin():
+    ir, m = create_test_module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"\x90\xC3")
+    func = add_function_object(m, "b1", b1)
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    b1_start, b1_end, fallthrough = gtirb_rewriting.modify._split_block(
+        modify_cache, b1, 0
+    )
+
+    assert b1_start is b1
+    assert b1_start.offset == 0
+    assert b1_start.size == 0
+    assert b1_start.byte_interval is bi
+
+    assert b1_end.offset == 0
+    assert b1_end.size == 2
+    assert b1_end.byte_interval is bi
+
+    assert fallthrough is not None
+    assert fallthrough.source is b1_start
+    assert fallthrough.target is b1_end
+    assert (
+        fallthrough.label
+        and fallthrough.label.type == gtirb.EdgeType.Fallthrough
+    )
+
+
 def test_split_block_end_with_call():
     """
     Test that splitting a block at the end when has a call and a fallthrough
