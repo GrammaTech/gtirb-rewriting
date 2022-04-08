@@ -65,6 +65,9 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         self._data = {}
         self.update(*args, **kw)
 
+    def __bool__(self) -> bool:
+        return any(subdata for subdata in self._data.values())
+
     def __len__(self) -> int:
         """Get the number of Offsets stored in this mapping."""
         return sum(len(subdata) for subdata in self._data.values())
