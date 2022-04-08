@@ -24,6 +24,7 @@ from typing import Iterator
 
 import gtirb
 
+from . import _auxdata
 from .intervalutils import join_byte_intervals, split_byte_interval
 
 
@@ -34,8 +35,8 @@ def prepare_for_rewriting(module: gtirb.Module, nop: bytes) -> Iterator[None]:
     alignment = (
         {} if module.file_format == gtirb.Module.FileFormat.ELF else None
     )
-    if "alignment" in module.aux_data:
-        alignment = module.aux_data["alignment"].data
+    if _auxdata.alignment.exists(module):
+        alignment = _auxdata.alignment.get_or_insert(module)
 
     partitions = []
     for interval in tuple(module.byte_intervals):

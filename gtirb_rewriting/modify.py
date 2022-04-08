@@ -31,12 +31,12 @@ from typing import Container, Dict, Iterable, Iterator, Set
 import gtirb
 import gtirb_functions
 
+from . import _auxdata
+from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .assembler import Assembler
 from .utils import (
-    OffsetMapping,
     _block_fallthrough_targets,
     _get_function_blocks,
-    _get_or_insert_aux_data,
     _is_call_edge,
     _is_fallthrough_edge,
     _is_return_edge,
@@ -485,14 +485,13 @@ def _modify_block_insert(
     # Add new blocks to the functionBlocks aux data and our cache
     func_uuid = cache.functions_by_block.get(block)
     if func_uuid:
-        if "functionBlocks" in module.aux_data:
-            function_blocks = module.aux_data["functionBlocks"].data
-            if func_uuid in function_blocks:
-                function_blocks[func_uuid].update(
-                    b
-                    for b in text_section.blocks
-                    if isinstance(b, gtirb.CodeBlock)
-                )
+        function_blocks = _auxdata.function_blocks.get(module)
+        if function_blocks is not None and func_uuid in function_blocks:
+            function_blocks[func_uuid].update(
+                b
+                for b in text_section.blocks
+                if isinstance(b, gtirb.CodeBlock)
+            )
 
         cache.functions_by_block.update(
             {
@@ -503,27 +502,18 @@ def _modify_block_insert(
         )
 
     # adjust aux data if present
-    def update_aux_data_keyed_by_offset(name):
-        table = bi.module.aux_data.get(name)
-        if table:
-            if not isinstance(table.data, OffsetMapping):
-                table.data = OffsetMapping(table.data)
-            if bi in table.data:
-                displacement_map = table.data[bi]
-                del table.data[bi]
-                table.data[bi] = {
-                    (k + size_delta if k >= offset else k): v
-                    for k, v in displacement_map.items()
-                    if k < offset or k >= offset + replacement_length
-                }
+    for table_def in OFFSETMAP_AUX_DATA_TABLES:
+        table = table_def.get(bi.module)
+        if table is not None and bi in table:
+            displacement_map = table[bi]
+            del table[bi]
+            table[bi] = {
+                (k + size_delta if k >= offset else k): v
+                for k, v in displacement_map.items()
+                if k < offset or k >= offset + replacement_length
+            }
 
-    update_aux_data_keyed_by_offset("comments")
-    update_aux_data_keyed_by_offset("padding")
-    update_aux_data_keyed_by_offset("symbolicExpressionSizes")
-
-    sym_expr_sizes = _get_or_insert_aux_data(
-        bi.module, "symbolicExpressionSizes", "mapping<Offset,uint64_t>", dict
-    )
+    sym_expr_sizes = _auxdata.symbolic_expression_sizes.get_or_insert(module)
     for rel_offset, size in text_section.symbolic_expression_sizes.items():
         sym_expr_sizes[gtirb.Offset(bi, offset + rel_offset)] = size
 
@@ -551,11 +541,8 @@ def _check_compatible_sections(
         )
 
     elif module.file_format == gtirb.Module.FileFormat.ELF:
-        elf_section_properties = _get_or_insert_aux_data(
-            module,
-            "elfSectionProperties",
-            "mapping<UUID,tuple<uint64_t,uint64_t>>",
-            dict,
+        elf_section_properties = _auxdata.elf_section_properties.get_or_insert(
+            module
         )
         type, flags = elf_section_properties.get(gtirb_sect, (None, None))
         if type and type != patch_sect.elf_type:
@@ -598,11 +585,8 @@ def _add_other_section_contents(
         )
 
         if module.file_format == gtirb.Module.FileFormat.ELF:
-            elf_section_properties = _get_or_insert_aux_data(
-                module,
-                "elfSectionProperties",
-                "mapping<UUID,tuple<uint64_t,uint64_t>>",
-                dict,
+            elf_section_properties = (
+                _auxdata.elf_section_properties.get_or_insert(module)
             )
             elf_section_properties[gtirb_sect] = (
                 sect.elf_type,

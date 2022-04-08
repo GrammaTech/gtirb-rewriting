@@ -29,7 +29,6 @@ from typing import (
     MutableMapping,
     Sequence,
     Set,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -39,6 +38,8 @@ import capstone_gt
 import gtirb
 import packaging.version
 from gtirb_capstone.instructions import GtirbInstructionDecoder
+
+from . import _auxdata
 
 T = TypeVar("T")
 
@@ -272,16 +273,19 @@ def _get_function_blocks(
     """
     Gets all blocks associated with a function.
     """
-    if "functionBlocks" in module.aux_data:
-        return module.aux_data["functionBlocks"].data[func_uuid]
+    function_blocks = _auxdata.function_blocks.get(module)
+    if function_blocks is not None:
+        return function_blocks[func_uuid]
     else:
         return set()
 
 
 def _is_elf_pie(module: gtirb.Module) -> bool:
+    binary_type = _auxdata.binary_type.get(module)
     return (
         module.file_format == gtirb.Module.FileFormat.ELF
-        and "DYN" in module.aux_data["binaryType"].data
+        and binary_type is not None
+        and "DYN" in binary_type
     )
 
 
@@ -292,25 +296,6 @@ def _text_section_name(module: gtirb.Module):
         return ".text"
     else:
         assert False, f"unsupported file format: {module.file_format}"
-
-
-def _get_or_insert_aux_data(
-    m: gtirb.Module, name: str, type_name: str, data_type: Type[T]
-) -> T:
-    """
-    Gets an aux data table from a module, creating it if it does not already
-    exist.
-    """
-    table = m.aux_data.get(name)
-    if table:
-        assert (
-            table.type_name == type_name
-        ), "existing aux data is not the right type"
-        return table.data
-
-    table = gtirb.AuxData(data_type(), type_name)
-    m.aux_data[name] = table
-    return table.data
 
 
 def decorate_extern_symbol(module: gtirb.Module, sym: str) -> str:

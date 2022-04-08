@@ -25,14 +25,10 @@ from typing import Iterable, List, Mapping, MutableMapping
 
 import gtirb
 
+from . import _auxdata
+from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .abi import ABI
 from .utils import OffsetMapping, align_address, effective_alignment
-
-standard_byte_interval_aux_data = (
-    "comments",
-    "padding",
-    "symbolicExpressionSizes",
-)
 
 
 class PaddingError(Exception):
@@ -79,12 +75,10 @@ def split_byte_interval(
         tables = []
         module = interval.module
         if module is not None:
-            for name in standard_byte_interval_aux_data:
-                if name in module.aux_data:
-                    aux_data = module.aux_data[name]
-                    if not isinstance(aux_data.data, OffsetMapping):
-                        aux_data.data = OffsetMapping(aux_data.data)
-                    tables.append(aux_data.data)
+            for table_def in OFFSETMAP_AUX_DATA_TABLES:
+                table = table_def.get(module)
+                if table:
+                    tables.append(table)
 
     # Group overlapping blocks so they can be processed as a unit.
     groups = []
@@ -197,15 +191,13 @@ def join_byte_intervals(
         # indexing an OffsetMapping, which means the original aux data will be
         # updated when modifying that sub-dict.
         tables = []
-        for name in standard_byte_interval_aux_data:
+        for table_def in OFFSETMAP_AUX_DATA_TABLES:
             table = {}
             for bi in intervals:
-                if bi.module is not None and name in bi.module.aux_data:
-                    aux_data = bi.module.aux_data[name]
-                    if not isinstance(aux_data.data, OffsetMapping):
-                        aux_data.data = OffsetMapping(aux_data.data)
-                    if bi in aux_data.data:
-                        table[bi] = aux_data.data[bi]
+                if bi.module is not None:
+                    aux_data = table_def.get(bi.module)
+                    if aux_data and bi in aux_data:
+                        table[bi] = aux_data[bi]
             if len(table) > 0:
                 tables.append(table)
 
@@ -251,11 +243,12 @@ def join_byte_intervals(
         # Align the first block if possible, or the interval if not.
         if alignment is not None:
             module_alignment = alignment
-        elif (
-            interval.module is not None
-            and "alignment" in interval.module.aux_data
+        elif interval.module is not None and _auxdata.alignment.exists(
+            interval.module
         ):
-            module_alignment = interval.module.aux_data["alignment"].data
+            module_alignment = _auxdata.alignment.get_or_insert(
+                interval.module
+            )
         else:
             module_alignment = {}
         node = min(

@@ -32,6 +32,7 @@ import gtirb_functions
 import mcasm
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
+from . import _auxdata
 from .abi import ABI
 from .assembler import Assembler
 from .modify import _make_return_cache, _modify_block_insert, _ModifyCache
@@ -102,7 +103,7 @@ class RewritingContext:
             for edge in block.outgoing_edges
         )
 
-    def _update_leaf_functions(self) -> Dict[uuid.UUID, bool]:
+    def _update_leaf_functions(self) -> Dict[uuid.UUID, int]:
         """
         Updates the leafFunctions aux data table, creating it if needed, in
         order to track leaf functions across multiple rewritings (which may
@@ -111,10 +112,7 @@ class RewritingContext:
 
         # GTIRB doesn't have a "bool" aux data type, so we'll use uint8 and
         # only store 0/1.
-        leaf_function_table = self._module.aux_data.setdefault(
-            "leafFunctions", gtirb.AuxData(dict(), "mapping<UUID,uint8_t>")
-        )
-        leaf_functions: Dict[uuid.UUID, int] = leaf_function_table.data
+        leaf_functions = _auxdata.leaf_functions.get_or_insert(self._module)
         for func in self._functions:
             if func.uuid not in leaf_functions:
                 leaf_functions[func.uuid] = int(
@@ -281,37 +279,38 @@ class RewritingContext:
             # ddisasm, with the proper import name being in the forwarding
             # table.  Here, for a new symbol, having it forward to itself is
             # what we actually want.
-            self._module.aux_data["symbolForwarding"].data[sym] = sym
+            _auxdata.symbol_forwarding.get_or_insert(self._module)[sym] = sym
             # May not be neccessary, but should be done for IR consistency
-            self._module.aux_data["peImportedSymbols"].data.append(sym)
-            if "peImportEntries" in self._module.aux_data:
-                self._module.aux_data["peImportEntries"].data.append(
-                    (0, -1, name, libname)
-                )
+            _auxdata.pe_imported_symbols.get_or_insert(self._module).append(
+                sym
+            )
+            _auxdata.pe_import_entries.get_or_insert(self._module).append(
+                (0, -1, name, libname)
+            )
         elif self._module.file_format == gtirb.Module.FileFormat.ELF:
             # This is required for gtirb-pprinter's dummy-so option to
             # understand this is an undefined function.
-            if "elfSymbolInfo" in self._module.aux_data:
-                self._module.aux_data["elfSymbolInfo"].data[sym] = (
-                    0,
-                    "FUNC",
-                    "GLOBAL",
-                    "DEFAULT",
-                    0,
-                )
+            symbol_info = _auxdata.elf_symbol_info.get_or_insert(self._module)
+            symbol_info[sym] = (
+                0,
+                "FUNC",
+                "GLOBAL",
+                "DEFAULT",
+                0,
+            )
 
-        if "libraries" in self._module.aux_data:
-            if preload:
-                self._module.aux_data["libraries"].data.insert(0, libname)
-            else:
-                self._module.aux_data["libraries"].data.append(libname)
+        libraries = _auxdata.libraries.get_or_insert(self._module)
+        if preload:
+            libraries.insert(0, libname)
+        else:
+            libraries.append(libname)
 
-        if libpath is not None and "libraryPaths" in self._module.aux_data:
-            libpath = str(libpath)
+        if libpath is not None:
+            library_paths = _auxdata.library_paths.get_or_insert(self._module)
             if preload:
-                self._module.aux_data["libraryPaths"].data.insert(0, libpath)
+                library_paths.insert(0, str(libpath))
             else:
-                self._module.aux_data["libraryPaths"].data.append(libpath)
+                library_paths.append(str(libpath))
 
         return sym
 
@@ -411,8 +410,9 @@ class RewritingContext:
         )
 
         # TODO: Should there be a mechanism for configuring this?
-        if "elfSymbolInfo" in self._module.aux_data:
-            self._module.aux_data["elfSymbolInfo"].data[sym] = (
+        if self._module.file_format == gtirb.Module.FileFormat.ELF:
+            symbol_info = _auxdata.elf_symbol_info.get_or_insert(self._module)
+            symbol_info[sym] = (
                 0,
                 "FUNC",
                 "GLOBAL",
@@ -420,14 +420,16 @@ class RewritingContext:
                 0,
             )
 
-        if "functionEntries" in self._module.aux_data:
-            self._module.aux_data["functionEntries"].data[func_uuid] = {block}
+        function_entries = _auxdata.function_entries.get_or_insert(
+            self._module
+        )
+        function_entries[func_uuid] = {block}
 
-        if "functionBlocks" in self._module.aux_data:
-            self._module.aux_data["functionBlocks"].data[func_uuid] = {block}
+        function_blocks = _auxdata.function_blocks.get_or_insert(self._module)
+        function_blocks[func_uuid] = {block}
 
-        if "functionNames" in self._module.aux_data:
-            self._module.aux_data["functionNames"].data[func_uuid] = sym
+        function_names = _auxdata.function_names.get_or_insert(self._module)
+        function_names[func_uuid] = sym
 
         modify_cache.functions_by_block[block] = func_uuid
 
@@ -605,5 +607,4 @@ class RewritingContext:
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.
         # TODO: can we not do this?
-        if "cfiDirectives" in self._module.aux_data:
-            del self._module.aux_data["cfiDirectives"]
+        _auxdata.cfi_directives.remove(self._module)
