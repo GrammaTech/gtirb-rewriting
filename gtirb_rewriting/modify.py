@@ -67,6 +67,10 @@ class CFGModifiedError(RuntimeError):
     pass
 
 
+class _UnjoinableBlocksError(RuntimeError):
+    pass
+
+
 class _ReturnEdgeCache(gtirb.CFG):
     """
     A CFG subclass that provides a cache for return edges and proxy return
@@ -292,7 +296,9 @@ def _split_block(
                     k: v for k, v in displacement_map.items() if k < offset
                 }
                 table_data[new_block] = {
-                    k: v for k, v in displacement_map.items() if k >= offset
+                    k - offset: v
+                    for k, v in displacement_map.items()
+                    if k >= offset
                 }
 
     return block, new_block, added_fallthrough
@@ -398,10 +404,11 @@ def _are_joinable(
 def _join_blocks(
     cache: _ModifyCache,
     block1: BlockT,
-    block2: BlockT,
+    block2: gtirb.ByteBlock,
 ) -> BlockT:
     joinable = _are_joinable(cache, block1, block2)
-    assert joinable.result, f"these blocks cannot be joined: {joinable.reason}"
+    if not joinable:
+        raise _UnjoinableBlocksError(joinable.reason)
 
     ir = block1.ir
     module = block1.module
@@ -411,9 +418,6 @@ def _join_blocks(
         if not block1.size:
             sym.referent = block1
             sym.at_end = False
-        elif not block2.size:
-            sym.referent = block1
-            sym.at_end = True
         else:
             assert sym.at_end, "cannot join blocks if the second has symbols"
             sym.referent = block1
@@ -691,7 +695,8 @@ def _remove_block(
 ) -> None:
     """
     Deletes a block and retargets any symbols or edges pointing at it to be
-    to another block.
+    to another block. This does not modify the byte interval; use
+    _edit_byte_interval for that.
     """
 
     assert block.module and block.ir
@@ -736,6 +741,11 @@ def _remove_block(
         aux_function_blocks = _auxdata.function_blocks.get(block.module)
         if aux_function_blocks:
             aux_function_blocks[function_uuid].discard(block)
+
+    for table_def in OFFSETMAP_AUX_DATA_TABLES:
+        table = table_def.get(block.module)
+        if table is not None and block in table:
+            del table[block]
 
     aux_alignment = _auxdata.alignment.get(block.module)
     if aux_alignment:
@@ -886,11 +896,14 @@ def _cleanup_modified_blocks(
     # changes to be made.
     while True:
         for (_, pred), (i, block), (_, succ) in triplewise(enumerate(blocks)):
-            if _are_joinable(cache, pred, block):
+            try:
                 _join_blocks(cache, pred, block)
                 del blocks[i]
                 break
-            elif not block.size:
+            except _UnjoinableBlocksError:
+                pass
+
+            if not block.size:
                 _remove_block(cache, block, succ)
                 del blocks[i]
                 break
