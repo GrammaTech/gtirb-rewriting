@@ -1156,6 +1156,7 @@ def test_insert_code_other_sections():
             .asciz "*"
 
             .section new, "aw"
+            .align 8
             .byte 42
             at_end:
             """
@@ -1176,7 +1177,45 @@ def test_insert_code_other_sections():
     assert len(new_sect_blocks) == 1
     assert isinstance(new_sect_blocks[0], gtirb.DataBlock)
     assert new_sect_blocks[0].contents == b"*"
+    assert m.aux_data["alignment"].data[new_sect_blocks[0]] == 8
 
     at_end_symbol = next(sym for sym in m.symbols if sym.name == "at_end")
     assert at_end_symbol.at_end
     assert at_end_symbol.referent is new_sect_blocks[0]
+
+
+def test_align():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b = add_code_block(bi, b"\x57\x58")
+    func = add_function_object(m, "func", b)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(
+        func,
+        b,
+        1,
+        literal_patch(
+            """
+            .align 4
+            nop
+            """
+        ),
+    )
+    ctx.apply()
+
+    assert bi.contents == b"\x57\x90\x58"
+
+    blocks = sorted(bi.blocks, key=lambda b: b.offset)
+    assert len(blocks) == 2
+
+    assert blocks[0].offset == 0
+    assert blocks[0].size == 1
+
+    assert blocks[1].offset == 1
+    assert blocks[1].size == 2
+
+    assert m.aux_data["alignment"].data[blocks[1]] == 4

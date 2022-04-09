@@ -230,6 +230,8 @@ def test_split_block_begin():
     b1 = add_code_block(bi, b"\x90\xC3")
     func = add_function_object(m, "b1", b1)
 
+    m.aux_data["alignment"].data[b1] = 4
+
     modify_cache = gtirb_rewriting.modify._ModifyCache(
         m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
     )
@@ -253,6 +255,8 @@ def test_split_block_begin():
         fallthrough.label
         and fallthrough.label.type == gtirb.EdgeType.Fallthrough
     )
+
+    assert m.aux_data["alignment"].data == {b1_end: 4}
 
 
 def test_split_block_end_with_call():
@@ -416,6 +420,8 @@ def test_join_blocks_zero_sized():
     b2_symbol = add_symbol(m, "b2", b2)
     func = add_function_object(m, "func", b0, {b1, b2, b3})
 
+    m.aux_data["alignment"].data[b2] = 4
+
     modify_cache = gtirb_rewriting.modify._ModifyCache(
         m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
     )
@@ -433,6 +439,8 @@ def test_join_blocks_zero_sized():
         gtirb.Edge(b0, b1, gtirb.EdgeLabel(gtirb.EdgeType.Branch)),
         gtirb.Edge(b1, b3, gtirb.EdgeLabel(gtirb.EdgeType.Branch)),
     }
+
+    assert m.aux_data["alignment"].data == {b1: 4}
 
 
 def test_unjoinable_due_to_symbol():
