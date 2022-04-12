@@ -384,6 +384,8 @@ def _are_joinable(
         return JoinableResult(False, "block2 has symbols referring to it")
 
     if isinstance(block1, gtirb.CodeBlock):
+        assert isinstance(block2, gtirb.CodeBlock)
+
         any_out_edges = any(
             edge
             for edge in block1.outgoing_edges
