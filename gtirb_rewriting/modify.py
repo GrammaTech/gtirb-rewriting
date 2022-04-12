@@ -197,11 +197,17 @@ class _ModifyCache:
     def in_same_function(
         self, block1: gtirb.CodeBlock, block2: gtirb.CodeBlock
     ) -> bool:
+        """
+        Determines if two blocks are in the same function.
+        """
         uuid1 = self.functions_by_block.get(block1)
         uuid2 = self.functions_by_block.get(block2)
         return uuid1 == uuid2 is not None
 
     def is_entry_block(self, block: gtirb.CodeBlock) -> bool:
+        """
+        Determines if a code block is a function entry.
+        """
         func_uuid = self.functions_by_block.get(block)
         if not func_uuid:
             return False
@@ -285,7 +291,7 @@ def _split_block(
 
         func_uuid = cache.functions_by_block.get(block)
         if func_uuid:
-            _add_block_to_function(cache, new_block, func_uuid)
+            _add_function_block_aux(cache, new_block, func_uuid)
 
     for table_def in OFFSETMAP_AUX_DATA_TABLES:
         table_data = table_def.get(block.module)
@@ -304,9 +310,12 @@ def _split_block(
     return block, new_block, added_fallthrough
 
 
-def _add_block_to_function(
+def _add_function_block_aux(
     cache: _ModifyCache, new_block: gtirb.CodeBlock, func_uuid: uuid.UUID
 ) -> None:
+    """
+    Adds a block to the functionBlocks aux data table.
+    """
     assert new_block.module, "block must be in a module"
 
     function_blocks = _auxdata.function_blocks.get(new_block.module)
@@ -318,6 +327,9 @@ def _add_block_to_function(
 def _remove_function_block_aux(
     cache: _ModifyCache, block: gtirb.CodeBlock
 ) -> None:
+    """
+    Removes a block from the functionBlocks aux data table.
+    """
     assert block.module, "block must be in a module"
 
     func_uuid = cache.functions_by_block.pop(block, None)
@@ -371,9 +383,7 @@ def _are_joinable(
     if any_symbols:
         return JoinableResult(False, "block2 has symbols referring to it")
 
-    if isinstance(block1, gtirb.CodeBlock) and isinstance(
-        block2, gtirb.CodeBlock
-    ):
+    if isinstance(block1, gtirb.CodeBlock):
         any_out_edges = any(
             edge
             for edge in block1.outgoing_edges
@@ -406,6 +416,10 @@ def _join_blocks(
     block1: BlockT,
     block2: gtirb.ByteBlock,
 ) -> BlockT:
+    """
+    Joins two blocks, if possible, or raise _UnjoinableBlocksError.
+    """
+
     joinable = _are_joinable(cache, block1, block2)
     if not joinable:
         raise _UnjoinableBlocksError(joinable.reason)
@@ -669,6 +683,11 @@ def _update_fallthrough_target(
     source: gtirb.CodeBlock,
     new_target: gtirb.CodeBlock,
 ) -> None:
+    """
+    Retargets a block to fall through to a new target. This takes care of also
+    updating the necessary return edges.
+    """
+
     old_targets = _block_fallthrough_targets(source)
 
     for edge in tuple(source.outgoing_edges):
@@ -821,13 +840,6 @@ def _modify_block_insert(
         _update_fallthrough_target(cache, cfg, block, text_section.blocks[0])
 
     if isinstance(text_section.blocks[-1], gtirb.CodeBlock):
-        cfg.add(
-            gtirb.Edge(
-                source=text_section.blocks[-1],
-                target=end_block,
-                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
-            )
-        )
         _update_fallthrough_target(
             cache, cfg, text_section.blocks[-1], end_block
         )
@@ -859,7 +871,7 @@ def _modify_block_insert(
     if func_uuid:
         for b in text_section.blocks:
             if isinstance(b, gtirb.CodeBlock):
-                _add_block_to_function(cache, b, func_uuid)
+                _add_function_block_aux(cache, b, func_uuid)
 
     sym_expr_data = _auxdata.symbolic_expression_sizes.get_or_insert(module)
     for rel_offset, size in text_section.symbolic_expression_sizes.items():
@@ -890,6 +902,11 @@ def _cleanup_modified_blocks(
     end_block: gtirb.CodeBlock,
     next_block: Union[gtirb.CodeBlock, gtirb.ProxyBlock, None],
 ) -> gtirb.CodeBlock:
+    """
+    Cleans up any zero-sized blocks that might have been generated during
+    modification.
+    """
+
     blocks = [start_block, *patch_blocks, end_block, next_block]
 
     # Clean up blocks until we reach a fixed point where there's no further
