@@ -23,6 +23,8 @@ import functools
 import logging
 import uuid
 from typing import (
+    Any,
+    Dict,
     Iterable,
     Iterator,
     Mapping,
@@ -42,6 +44,8 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 from . import _auxdata
 
 T = TypeVar("T")
+ElementT = Union[uuid.UUID, gtirb.Node]
+T2 = TypeVar("T2")
 
 
 class OffsetMapping(MutableMapping[gtirb.Offset, T]):
@@ -62,7 +66,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
 
     def __init__(self, *args, **kw):
         """Create a new OffsetMapping from an iterable and/or keywords."""
-        self._data = {}
+        self._data: Dict[ElementT, Dict[int, T]] = {}
         self.update(*args, **kw)
 
     def __bool__(self) -> bool:
@@ -83,7 +87,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         ...
 
     @overload
-    def __getitem__(self, key: gtirb.Node) -> MutableMapping[int, T]:
+    def __getitem__(self, key: ElementT) -> Dict[int, T]:
         ...
 
     def __getitem__(self, key):
@@ -99,7 +103,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         ...
 
     @overload
-    def __setitem__(self, key: gtirb.Node, value: Mapping[int, T]) -> None:
+    def __setitem__(self, key: ElementT, value: Mapping[int, T]) -> None:
         ...
 
     def __setitem__(self, key, value):
@@ -114,7 +118,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         else:
             self._data[key] = dict(value)
 
-    def __delitem__(self, key: Union[gtirb.Offset, gtirb.Node]) -> None:
+    def __delitem__(self, key: Union[gtirb.Offset, ElementT]) -> None:
         """Delete the mapping for an Offset or all Offsets given an element."""
         if isinstance(key, gtirb.Offset):
             elem, disp = key
@@ -123,6 +127,57 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
             del self._data[elem][disp]
         else:
             del self._data[key]
+
+    # Mapping methods
+    @overload
+    def get(self, key: gtirb.Offset) -> Union[T, None]:
+        ...
+
+    @overload
+    def get(self, key: gtirb.Offset, default: T2) -> Union[T, T2]:
+        ...
+
+    @overload
+    def get(self, key: ElementT) -> Union[Dict[int, T], None]:
+        ...
+
+    @overload
+    def get(self, key: ElementT, default: T2) -> Union[Dict[int, T], T2]:
+        ...
+
+    def get(self, *args, **kwargs) -> Any:
+        return super().get(*args, **kwargs)
+
+    # MutableMapping methods
+    @overload
+    def pop(self, key: gtirb.Offset) -> T:
+        ...
+
+    @overload
+    def pop(self, key: gtirb.Offset, default: T2) -> Union[T, T2]:
+        ...
+
+    @overload
+    def pop(self, key: ElementT) -> Dict[int, T]:
+        ...
+
+    @overload
+    def pop(self, key: ElementT, default: T2) -> Union[Dict[int, T], T2]:
+        ...
+
+    def pop(self, *args, **kwargs) -> Any:
+        return super().pop(*args, **kwargs)
+
+    @overload
+    def setdefault(self, key: gtirb.Offset, default: T) -> T:
+        ...
+
+    @overload
+    def setdefault(self, key: ElementT, default: Dict[int, T]) -> Dict[int, T]:
+        ...
+
+    def setdefault(self, *args, **kwargs) -> Any:
+        return super().setdefault(*args, **kwargs)
 
 
 def _target_triple(module: gtirb.Module) -> str:
