@@ -416,6 +416,15 @@ class Assembler:
         if max_bytes != 0:
             raise UnsupportedAssemblyError("trying to pad with a fixed limit")
 
+        # The assembly parser usually checks this on our behalf, but be
+        # cautious in case we ever add support for an architecture where LLVM
+        # allows it.
+        is_power_of_two = (alignment & (alignment - 1) == 0) and alignment > 0
+        if not is_power_of_two:
+            raise UnsupportedAssemblyError(
+                "alignment values must be powers of 2"
+            )
+
         # Alignment can only be applied to the start of a block, so we need
         # to split the current block.
         if self._current_block.size:
