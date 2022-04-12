@@ -39,7 +39,7 @@ setuptools.setup(
         "gtirb-capstone >= 1.0.1",
         "gtirb-functions",
         "gtirb >= 1.10.4",
-        "mcasm ~= 0.1.4",
+        "mcasm ~= 0.1.5",
         "more-itertools",
         "dataclasses ; python_version<'3.7.0'",
         "packaging",
