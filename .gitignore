@@ -2,6 +2,8 @@
 *.pyc
 __pycache__/
 .mypy_cache/
+.pytest_cache/
+.tox/
 /*.egg-info/
 /build/
 /dist/
@@ -12,3 +14,5 @@ __pycache__/
 # Other files and directories
 core.*
 vgcore.*
+htmlcov
+.coverage
