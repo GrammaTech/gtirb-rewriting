@@ -54,14 +54,18 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
     The keys in this mapping are required to be Offsets. If a non-Offset is
     used as a key, it is assumed to be the element_id of an Offset. In that
     case, the corresponding element is a MutableMapping[int, T] of
-    displacements to values for every Offset that has the given element_id. For
-    example,
-        m = OffsetMapping[str]()
-        m[Offset(x, 0)] = "a"     # insert an offset into the map
-        m[x] = {1: "b", 2: "c"}   # insert two offsets into the map
-        m[x][0] = "d"             # change the value for Offset(x, 0)
-        print(m[Offset(x, 1)])    # get the value for Offset(x, 1)
-        del m[Offset(x, 2)]       # delete Offset(x, 2) from the map
+    displacements to values for every Offset that has the given element_id.
+
+    Examples:
+    >>> m = OffsetMapping[str]()
+    >>> m[Offset(x, 0)] = "a"     # insert an offset into the map
+    >>> m[x] = {1: "b", 2: "c"}   # set all of the offsets associated with x,
+    >>> 0 in m[x]                 # dropping any other values for x
+    False
+    >>> m[x][1] = "d"             # change the value for Offset(x, 1)
+    >>> m[Offset(x, 1)]           # get the value for Offset(x, 1)
+    'd'
+    >>> del m[Offset(x, 2)]       # delete Offset(x, 2) from the map
     """
 
     def __init__(self, *args, **kw):
@@ -107,7 +111,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         ...
 
     def __setitem__(self, key, value):
-        """Set the value for an Offset, or several Offsets given an element."""
+        """Set the value for an Offset, or all Offsets for an element."""
         if isinstance(key, gtirb.Offset):
             elem, disp = key
             if elem not in self._data:
