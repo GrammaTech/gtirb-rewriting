@@ -4,6 +4,7 @@
 - OffsetMapping.__setitem__'s behavior changed when indexing by an element. It
   now behaves as an assignment instead of an update, meaning that it may
   actually shrink the map in some cases. See the docstring for more examples.
+- Added support for the .align directive
 
 0.0.24:
 - symbolicExpressionSizes is now populated for expressions in code

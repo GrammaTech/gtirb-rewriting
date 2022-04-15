@@ -87,7 +87,7 @@ class Assembler:
         self._module = module
         self._temp_symbol_suffix = temp_symbol_suffix
         self._cfg = gtirb.CFG()
-        self._local_symbols = {}
+        self._local_symbols: Dict[str, gtirb.Symbol] = {}
         if module_symbols is not None:
             self._module_symbols = module_symbols
         else:
@@ -153,6 +153,19 @@ class Assembler:
                 self._assemble_bytes(bytes.fromhex(event["data"]))
             elif event["kind"] == "emitValue":
                 self._assemble_emit_value(event["value"], event["size"])
+            elif event["kind"] == "emitValueToAlignment":
+                self._emit_alignment(
+                    event["alignment"],
+                    event["value"],
+                    event["valueSize"],
+                    event["maxBytes"],
+                )
+            elif event["kind"] == "emitCodeAlignment":
+                # We currently handle this the same as the previous case, so
+                # just call the same function.
+                self._emit_alignment(
+                    event["alignment"], 0, 0, event["maxBytes"]
+                )
             else:
                 assert False, f"Unsupported assembler event: {event['kind']}"
 
@@ -260,6 +273,7 @@ class Assembler:
                 blocks=[gtirb.CodeBlock()],
                 symbolic_expressions={},
                 symbolic_expression_sizes={},
+                alignment={},
                 elf_flags=elf_flags,
                 elf_type=elf_type,
             )
@@ -334,18 +348,11 @@ class Assembler:
                 )
             )
 
-            next_block = gtirb.CodeBlock(
-                offset=self._current_block.offset + self._current_block.size
-            )
-            self._current_section.blocks.append(next_block)
+            self._split_block()
 
         elif inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
             direct, target = self._resolve_instruction_target(
                 data, inst, fixups
-            )
-
-            next_block = gtirb.CodeBlock(
-                offset=self._current_block.offset + self._current_block.size
             )
 
             if inst["desc"]["isCall"]:
@@ -375,18 +382,10 @@ class Assembler:
 
             # Currently we assume that all calls can return and that they need
             # a fallthrough edge.
-            if inst["desc"]["isCall"] or inst["desc"]["isConditionalBranch"]:
-                self._cfg.add(
-                    gtirb.Edge(
-                        source=self._current_block,
-                        target=next_block,
-                        label=gtirb.Edge.Label(
-                            type=gtirb.Edge.Type.Fallthrough
-                        ),
-                    )
-                )
-
-            self._current_section.blocks.append(next_block)
+            add_fallthrough = (
+                inst["desc"]["isCall"] or inst["desc"]["isConditionalBranch"]
+            )
+            self._split_block(add_fallthrough=add_fallthrough)
 
     def _assemble_bytes(self, data: bytes) -> None:
         self._current_section.data += data
@@ -401,6 +400,59 @@ class Assembler:
         ] = size
         self._current_section.data += b"\x00" * size
         self._current_block.size += size
+
+    def _emit_alignment(
+        self, alignment: int, value: int, value_size: int, max_bytes: int
+    ) -> None:
+        """
+        Called when the assembler handles a .align directive.
+        """
+
+        if value != 0:
+            raise UnsupportedAssemblyError(
+                "trying to pad with a non-zero byte"
+            )
+
+        if max_bytes != 0:
+            raise UnsupportedAssemblyError("trying to pad with a fixed limit")
+
+        # The assembly parser usually checks this on our behalf, but be
+        # cautious in case we ever add support for an architecture where LLVM
+        # allows it.
+        is_power_of_two = (alignment & (alignment - 1) == 0) and alignment > 0
+        if not is_power_of_two:
+            raise UnsupportedAssemblyError(
+                "alignment values must be powers of 2"
+            )
+
+        # Alignment can only be applied to the start of a block, so we need
+        # to split the current block.
+        if self._current_block.size:
+            self._split_block(add_fallthrough=True)
+
+        self._current_section.alignment[self._current_block] = alignment
+
+    def _split_block(self, add_fallthrough: bool = False) -> gtirb.CodeBlock:
+        """
+        Starts a new block, optionally adding a fallthrough edge from the
+        current block.
+        """
+
+        next_block = gtirb.CodeBlock(
+            offset=self._current_block.offset + self._current_block.size
+        )
+
+        if add_fallthrough:
+            self._cfg.add(
+                gtirb.Edge(
+                    source=self._current_block,
+                    target=next_block,
+                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+                )
+            )
+
+        self._current_section.blocks.append(next_block)
+        return next_block
 
     def _resolve_symbol_ref(self, expr: dict) -> gtirb.Symbol:
         assert expr["kind"] == "symbolRef"
@@ -558,6 +610,7 @@ class Assembler:
         ):
             *extra_blocks, main_block = group
             assert main_block.size or main_block == section.blocks[-1]
+            max_alignment = section.alignment.get(main_block, 0)
 
             for extra_block in extra_blocks:
                 assert isinstance(extra_block, gtirb.CodeBlock)
@@ -584,6 +637,14 @@ class Assembler:
 
                 self._replace_symbol_referents(extra_block, main_block)
 
+                if extra_block in section.alignment:
+                    max_alignment = max(
+                        max_alignment, section.alignment[extra_block]
+                    )
+                    del section.alignment[extra_block]
+
+            if max_alignment:
+                section.alignment[main_block] = max_alignment
             final_blocks.append(main_block)
 
         section.blocks = final_blocks
@@ -616,6 +677,9 @@ class Assembler:
                     assert _is_fallthrough_edge(out_edge)
                     self._cfg.discard(out_edge)
                 section.blocks[i] = new_block
+                if block in section.alignment:
+                    section.alignment[new_block] = section.alignment[block]
+                    del section.alignment[block]
 
     def finalize(self) -> "Result":
         """
@@ -681,6 +745,13 @@ class Assembler:
             """
             A map of offset to symbolic expression size, with 0 being the
             start of `data`.
+            """
+
+            alignment: Dict[gtirb.ByteBlock, int]
+            """
+            A map of block to the requested alignment of the block. Padding is
+            not inserted in the data, so the blocks may not currently be at
+            this alignment.
             """
 
             elf_type: Optional[int]

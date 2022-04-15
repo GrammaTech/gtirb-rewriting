@@ -676,3 +676,33 @@ def test_assembler_sections(file_format: gtirb.Module.FileFormat):
     assert mytext_section.blocks[0].offset == 0
     assert mytext_section.blocks[0].size == 2
     assert mytext_section.data == b"\x0F\x0B"
+
+
+def test_alignment():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        .align 4
+        nop
+        .align 8
+        nop
+    """,
+        gtirb_rewriting.X86Syntax.INTEL,
+    )
+    result = assembler.finalize()
+    text_section = result.text_section
+
+    assert text_section.data == b"\x90\x90"
+    assert len(text_section.blocks) == 2
+
+    b1, b2 = text_section.blocks
+
+    assert text_section.alignment == {
+        b1: 4,
+        b2: 8,
+    }

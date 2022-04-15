@@ -307,6 +307,15 @@ def _split_block(
                     if k >= offset
                 }
 
+    # If the new block gets all of the contents, make the alignment travel with
+    # it.
+    if offset == 0:
+        aux_alignment = _auxdata.alignment.get(block.module)
+        if aux_alignment:
+            block_align = aux_alignment.pop(block, 1)
+            if block_align > 1:
+                aux_alignment[new_block] = block_align
+
     return block, new_block, added_fallthrough
 
 
@@ -470,7 +479,12 @@ def _join_blocks(
 
     alignment_data = _auxdata.alignment.get(module)
     if alignment_data:
-        alignment_data.pop(block2, None)
+        block1_align = alignment_data.get(block1, 1)
+        block2_align = alignment_data.pop(block2, 1)
+
+        if block2_align > block1_align:
+            assert not block1.size
+            alignment_data[block1] = block2_align
 
     block1.size = block1.size + block2.size
     block2.byte_interval = None
@@ -869,6 +883,9 @@ def _modify_block_insert(
     module.symbols.update(code.symbols)
     module.proxies.update(code.proxies)
 
+    alignment_table = _auxdata.alignment.get_or_insert(module)
+    alignment_table.update(text_section.alignment.items())
+
     func_uuid = cache.functions_by_block.get(block)
     if func_uuid:
         for b in text_section.blocks:
@@ -996,6 +1013,8 @@ def _add_other_section_contents(
         )
 
         if module.file_format == gtirb.Module.FileFormat.ELF:
+            assert sect.elf_type is not None and sect.elf_flags is not None
+
             elf_section_properties = (
                 _auxdata.elf_section_properties.get_or_insert(module)
             )
@@ -1037,6 +1056,9 @@ def _add_other_section_contents(
     gtirb_sect.byte_intervals.add(bi)
     for rel_offset, size in sect.symbolic_expression_sizes.items():
         sym_expr_sizes[gtirb.Offset(bi, rel_offset)] = size
+
+    alignment_table = _auxdata.alignment.get_or_insert(module)
+    alignment_table.update(sect.alignment.items())
 
 
 def _edit_byte_interval(
