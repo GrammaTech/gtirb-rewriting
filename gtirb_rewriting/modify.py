@@ -307,15 +307,6 @@ def _split_block(
                     if k >= offset
                 }
 
-    # If the new block gets all of the contents, make the alignment travel with
-    # it.
-    if offset == 0:
-        aux_alignment = _auxdata.alignment.get(block.module)
-        if aux_alignment:
-            block_align = aux_alignment.pop(block, 1)
-            if block_align > 1:
-                aux_alignment[new_block] = block_align
-
     return block, new_block, added_fallthrough
 
 

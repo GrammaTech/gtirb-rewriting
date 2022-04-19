@@ -256,7 +256,7 @@ def test_split_block_begin():
         and fallthrough.label.type == gtirb.EdgeType.Fallthrough
     )
 
-    assert m.aux_data["alignment"].data == {b1_end: 4}
+    assert m.aux_data["alignment"].data == {b1_start: 4}
 
 
 def test_split_block_end_with_call():
