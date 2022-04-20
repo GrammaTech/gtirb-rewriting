@@ -976,25 +976,23 @@ def _check_compatible_sections(
             gtirb_sect.flags,
         )
 
-    elif module.file_format == gtirb.Module.FileFormat.ELF:
-        elf_section_properties = _auxdata.elf_section_properties.get_or_insert(
-            module
-        )
-        type, flags = elf_section_properties.get(gtirb_sect, (None, None))
-        if type and type != patch_sect.elf_type:
+    else:
+        section_properties = _auxdata.compat_section_properties(module)
+        type, flags = section_properties.get(gtirb_sect, (None, None))
+        if type is not None and type != patch_sect.image_type:
             logger.warning(
-                "ELF type for patch section %s (%s) do not match existing "
-                "section ELF type (%s)",
+                "Image type for patch section %s (%s) do not match existing "
+                "section image type (%s)",
                 patch_sect.name,
-                patch_sect.elf_type,
+                patch_sect.image_type,
                 type,
             )
-        elif flags and flags != patch_sect.elf_flags:
+        elif flags is not None and flags != patch_sect.image_flags:
             logger.warning(
-                "ELF flags for patch section %s (%X) do not match existing "
-                "section ELF flags (%X)",
+                "Image flags for patch section %s (%X) do not match existing "
+                "section image flags (%X)",
                 patch_sect.name,
-                patch_sect.elf_flags,
+                patch_sect.image_flags,
                 flags,
             )
 
@@ -1020,16 +1018,11 @@ def _add_other_section_contents(
             name=sect.name, flags=sect.flags, module=module
         )
 
-        if module.file_format == gtirb.Module.FileFormat.ELF:
-            assert sect.elf_type is not None and sect.elf_flags is not None
-
-            elf_section_properties = (
-                _auxdata.elf_section_properties.get_or_insert(module)
-            )
-            elf_section_properties[gtirb_sect] = (
-                sect.elf_type,
-                sect.elf_flags,
-            )
+        section_properties = _auxdata.compat_section_properties(module)
+        section_properties[gtirb_sect] = (
+            sect.image_type,
+            sect.image_flags,
+        )
 
     bi = gtirb.ByteInterval(
         contents=sect.data, symbolic_expressions=sect.symbolic_expressions

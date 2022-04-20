@@ -5,6 +5,8 @@
   now behaves as an assignment instead of an update, meaning that it may
   actually shrink the map in some cases. See the docstring for more examples.
 - Added support for the .align directive
+- The sectionProperties aux data table is now populated when patches add new
+  sections.
 
 0.0.24:
 - symbolicExpressionSizes is now populated for expressions in code

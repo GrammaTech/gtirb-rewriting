@@ -1128,12 +1128,22 @@ def test_get_or_insert_extern_symbol():
     assert m.aux_data["libraries"].data == ["libblah.so"]
 
 
-def test_insert_code_other_sections():
+@pytest.mark.parametrize(
+    "props_table_name", ["sectionProperties", "elfSectionProperties"]
+)
+def test_insert_code_other_sections(props_table_name: str):
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
     _, bi = add_text_section(m, address=0x1000)
     data, _ = add_data_section(m, address=0x2000)
+
+    m.aux_data.pop("sectionProperties", None)
+    m.aux_data.pop("elfSectionProperties", None)
+
+    m.aux_data[props_table_name] = gtirb.AuxData(
+        {}, "mapping<UUID,tuple<uint64_t,uint64_t>>"
+    )
 
     # This mimics:
     #   func:
@@ -1182,6 +1192,14 @@ def test_insert_code_other_sections():
     at_end_symbol = next(sym for sym in m.symbols if sym.name == "at_end")
     assert at_end_symbol.at_end
     assert at_end_symbol.referent is new_sect_blocks[0]
+
+    SHT_PROGBITS = 1
+    SHF_WRITE = 1
+    SHF_ALLOC = 2
+    assert m.aux_data[props_table_name].data[new_sect] == (
+        SHT_PROGBITS,
+        SHF_WRITE | SHF_ALLOC,
+    )
 
 
 def test_align():
