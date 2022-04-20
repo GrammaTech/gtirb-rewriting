@@ -21,11 +21,11 @@
 # endorsement should be inferred.
 import dataclasses
 import itertools
-from typing import Iterable, List, Mapping, MutableMapping
+from typing import Iterable, List, Mapping, MutableMapping, Optional
 
 import gtirb
+import gtirb_rewriting._auxdata as _auxdata
 
-from . import _auxdata
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .abi import ABI
 from .utils import OffsetMapping, align_address, effective_alignment
@@ -49,8 +49,8 @@ class BlockGroup:
 
 def split_byte_interval(
     interval: gtirb.ByteInterval,
-    alignment: MutableMapping[gtirb.Node, int] = None,
-    tables: Iterable[OffsetMapping[object]] = None,
+    alignment: Optional[MutableMapping[gtirb.Node, int]] = None,
+    tables: Optional[Iterable[OffsetMapping[object]]] = None,
 ) -> List[gtirb.ByteInterval]:
     """Split a ByteInterval to put each block in its own interval.
 
@@ -81,7 +81,7 @@ def split_byte_interval(
                     tables.append(table)
 
     # Group overlapping blocks so they can be processed as a unit.
-    groups = []
+    groups: List[BlockGroup] = []
     for block in sorted(interval.blocks, key=lambda b: b.offset):
         block_end = block.offset + block.size
         if groups == [] or groups[-1].end <= block.offset:
@@ -103,7 +103,7 @@ def split_byte_interval(
         groups.pop()
 
     # Create the new byte interval for each group of blocks.
-    intervals = []
+    intervals: List[gtirb.ByteInterval] = []
     offset = interval.size
     for group in groups:
         new_interval = gtirb.ByteInterval(
@@ -145,10 +145,10 @@ def split_byte_interval(
 
 def join_byte_intervals(
     intervals: List[gtirb.ByteInterval],
-    nop: bytes = None,
-    alignment: Mapping[gtirb.Node, int] = None,
-    tables: Iterable[OffsetMapping[object]] = None,
-) -> None:
+    nop: Optional[bytes] = None,
+    alignment: Optional[Mapping[gtirb.Node, int]] = None,
+    tables: Optional[Iterable[OffsetMapping[object]]] = None,
+) -> gtirb.ByteInterval:
     """Concatenate a list of byte intervals.
 
     The first interval in the given list will be trated as the destination. The
@@ -181,7 +181,7 @@ def join_byte_intervals(
     :param tables:  collection of offset mappings to update
     """
     if len(intervals) < 2:
-        return
+        return intervals[0]
 
     if tables is None:
         # This is a bit hacky, but to avoid assuming that the byte intervals

@@ -29,6 +29,7 @@ from typing import (
     Iterator,
     Mapping,
     MutableMapping,
+    Optional,
     Sequence,
     Set,
     TypeVar,
@@ -38,10 +39,9 @@ from typing import (
 
 import capstone_gt
 import gtirb
+import gtirb_rewriting._auxdata as _auxdata
 import packaging.version
 from gtirb_capstone.instructions import GtirbInstructionDecoder
-
-from . import _auxdata
 
 T = TypeVar("T")
 ElementT = Union[uuid.UUID, gtirb.Node]
@@ -153,7 +153,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         return super().get(*args, **kwargs)
 
     # MutableMapping methods
-    @overload
+    @overload  # type: ignore
     def pop(self, key: gtirb.Offset) -> T:
         ...
 
@@ -172,7 +172,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
     def pop(self, *args, **kwargs) -> Any:
         return super().pop(*args, **kwargs)
 
-    @overload
+    @overload  # type: ignore
     def setdefault(self, key: gtirb.Offset, default: T) -> T:
         ...
 
@@ -229,10 +229,7 @@ def _nonterminator_instructions(
     Yields all instructions in a block of diassembly except for the terminator,
     if present.
     """
-    if all(
-        edge.label.type == gtirb.Edge.Type.Fallthrough
-        for edge in block.outgoing_edges
-    ):
+    if all(_is_fallthrough_edge(edge) for edge in block.outgoing_edges):
         yield from disassembly
     else:
         yield from disassembly[:-1]
@@ -257,7 +254,7 @@ def _format_symbolic_expr(expr) -> str:
 
 def show_block_asm(
     block: gtirb.ByteBlock,
-    arch: gtirb.Module.ISA = None,
+    arch: Optional[gtirb.Module.ISA] = None,
     logger=logging.getLogger(),
     decoder=None,
 ) -> None:
@@ -267,6 +264,10 @@ def show_block_asm(
     module. If the block is not in a module, the function throws an error.
     """
 
+    # blocks only have contents when they are in a byte interval
+    if block.byte_interval is None:
+        raise ValueError("block must be in a byte interval")
+
     if not block.contents:
         logger.debug("\t<empty block>")
         return
@@ -275,7 +276,7 @@ def show_block_asm(
         if arch is None:
             if block.module is None:
                 raise ValueError("Undefined architecture")
-            arch = block.byte_interval.section.module.isa
+            arch = block.module.isa
         decoder = GtirbInstructionDecoder(arch)
 
     if isinstance(block, gtirb.CodeBlock):
@@ -299,8 +300,9 @@ def show_block_asm(
             logger.debug("\t<incomplete disassembly>")
 
     elif isinstance(block, gtirb.DataBlock):
+        block_address = block.address or 0
         for offset, byte in enumerate(block.contents):
-            logger.debug("\t0x%x:\t.byte\t%i", block.address + offset, byte)
+            logger.debug("\t0x%x:\t.byte\t%i", block_address + offset, byte)
             expr = block.byte_interval.symbolic_expressions.get(
                 block.offset, None
             )
@@ -310,15 +312,18 @@ def show_block_asm(
 
 def _is_fallthrough_edge(edge: gtirb.Edge) -> bool:
     """Determines if an edge is a fall-through edge."""
-    return edge.label and edge.label.type == gtirb.Edge.Type.Fallthrough
+    return (
+        edge.label is not None
+        and edge.label.type == gtirb.Edge.Type.Fallthrough
+    )
 
 
 def _is_return_edge(edge: gtirb.Edge) -> bool:
-    return edge.label and edge.label.type == gtirb.Edge.Type.Return
+    return edge.label is not None and edge.label.type == gtirb.Edge.Type.Return
 
 
 def _is_call_edge(edge: gtirb.Edge) -> bool:
-    return edge.label and edge.label.type == gtirb.Edge.Type.Call
+    return edge.label is not None and edge.label.type == gtirb.Edge.Type.Call
 
 
 def _block_fallthrough_targets(block: gtirb.CodeBlock) -> Set[gtirb.CodeBlock]:

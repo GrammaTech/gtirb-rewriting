@@ -126,7 +126,9 @@ class Patch:
         raise NotImplementedError
 
     @classmethod
-    def from_function(cls, func: Callable, constraints: Constraints = None):
+    def from_function(
+        cls, func: Callable, constraints: Optional[Constraints] = None
+    ):
         """
         Creates a Patch from a callable that has been decorated with the
         @patch_constraints decorator.

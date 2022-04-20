@@ -23,8 +23,8 @@ import contextlib
 from typing import Iterator
 
 import gtirb
+import gtirb_rewriting._auxdata as _auxdata
 
-from . import _auxdata
 from .intervalutils import join_byte_intervals, split_byte_interval
 
 

@@ -41,7 +41,7 @@ import gtirb
 from typing_extensions import Literal
 
 try:
-    from typing_extensions import get_origin
+    from typing_extensions import get_origin  # type: ignore
 except ImportError:
     # typing_extensions does not define this on Python 3.6, but we can sort
     # of make it work in the limited situations we care about.

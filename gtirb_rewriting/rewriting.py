@@ -29,10 +29,10 @@ from typing import Dict, List, NamedTuple, Sequence, Tuple, Union
 
 import gtirb
 import gtirb_functions
+import gtirb_rewriting._auxdata as _auxdata
 import mcasm
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
-from . import _auxdata
 from .abi import ABI
 from .assembler import Assembler
 from .modify import _make_return_cache, _modify_block_insert, _ModifyCache
@@ -132,14 +132,11 @@ class RewritingContext:
         Logs an assembly syntax error to our logger.
         """
         lines = asm.splitlines()
-        self._logger.error("error in %s (#%i): %s", patch, self._patch_id, err)
+        self._logger.error("error in %s (#%i): %s", patch, patch_id, err)
         for line in lines[: err.lineno]:
             self._logger.error("%s", line)
-        # LLVM only stores the start column in its diagnostic object, so we'll
-        # highlight the whole rest of the line as the error.
-        self._logger.error(
-            " " * err.column + "^" + "~" * (len(line) - err.column - 1)
-        )
+        # LLVM only stores the start column in its diagnostic object.
+        self._logger.error(" " * err.column + "^")
         for line in lines[err.lineno :]:
             self._logger.error("%s", line)
 
@@ -246,7 +243,7 @@ class RewritingContext:
         name: str,
         libname: str,
         preload: bool = False,
-        libpath: Union[str, pathlib.Path] = None,
+        libpath: Union[str, pathlib.Path, None] = None,
     ) -> gtirb.Symbol:
         """
         Gets a symbol by name, creating it as an extern symbol if it isn't
@@ -381,6 +378,7 @@ class RewritingContext:
         """
         assert sym.referent == block
         assert block.size == 0
+        assert self._module.ir
 
         func_uuid = uuid.uuid4()
 
@@ -561,6 +559,8 @@ class RewritingContext:
         """
         Applies all of the patches to the module.
         """
+
+        assert self._module.ir
 
         with prepare_for_rewriting(
             self._module, self._abi.nop()

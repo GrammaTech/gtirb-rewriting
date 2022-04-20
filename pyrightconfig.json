@@ -1,0 +1,12 @@
+{
+  "include": ["gtirb_rewriting"],
+  "pythonVersion": "3.6",
+  "stringListInference": true,
+  "strictDictionaryInference": true,
+  "strictSetInference": true,
+  "reportConstantRedefinition": "error",
+  "reportDuplicateImport": "error",
+  "reportPropertyTypeMismatch": "error",
+  "reportUninitializedInstanceVariable": "error",
+  "reportUnnecessaryComparison": "error"
+}

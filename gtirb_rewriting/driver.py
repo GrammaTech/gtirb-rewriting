@@ -95,8 +95,13 @@ class _EntryPointCompatible(Protocol):
     A protocol compatible with a subset of entrypoint's Entrypoint class.
     """
 
-    name: str
-    distro: Optional[entrypoints_module.Distribution]
+    @property
+    def name(self) -> str:
+        ...
+
+    @property
+    def distro(self) -> Optional[entrypoints_module.Distribution]:
+        ...
 
     def load(self) -> Any:
         ...
@@ -140,7 +145,7 @@ def _make_version_string(entrypoints: Iterable[_EntryPointCompatible]) -> str:
     entrypoints.
     """
 
-    versions = []
+    versions: List[str] = []
     versions.append(f"gtirb {gtirb.__version__}")
     versions.append(f"gtirb_capstone {gtirb_capstone.__version__}")
     versions.append(f"gtirb_functions {gtirb_functions.__version__}")
@@ -218,6 +223,7 @@ def _driver_core(
 
     logging.basicConfig(format="%(message)s")
 
+    description: Optional[str] = None
     if is_generic_driver:
         description = "gtirb-rewriting driver"
         prog = "gtirb-rewriting"
