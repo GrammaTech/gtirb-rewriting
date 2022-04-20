@@ -215,8 +215,8 @@ class Assembler:
         result = self._sections.get(name)
         if not result:
             flags: Set[gtirb.Section.Flag] = set()
-            elf_flags: Optional[int] = None
-            elf_type: Optional[int] = None
+            image_flags = 0
+            image_type = 0
 
             if section["class"] == "MCSectionELF":
                 SHF_WRITE = 0x1
@@ -224,20 +224,20 @@ class Assembler:
                 SHF_EXECINSTR = 0x4
                 SHT_NOBITS = 8
 
-                elf_flags = section["flags"]
-                elf_type = section["type"]
-                assert elf_flags and elf_type
+                image_flags = section["flags"]
+                image_type = section["type"]
+                assert image_flags and image_type
 
-                if elf_flags & SHF_WRITE:
+                if image_flags & SHF_WRITE:
                     flags.add(gtirb.Section.Flag.Writable)
 
-                if elf_flags & SHF_ALLOC:
+                if image_flags & SHF_ALLOC:
                     flags.add(gtirb.Section.Flag.Loaded)
                     flags.add(gtirb.Section.Flag.Readable)
-                    if elf_type != SHT_NOBITS:
+                    if image_type != SHT_NOBITS:
                         flags.add(gtirb.Section.Flag.Initialized)
 
-                if elf_flags & SHF_EXECINSTR:
+                if image_flags & SHF_EXECINSTR:
                     flags.add(gtirb.Section.Flag.Executable)
 
             elif section["class"] == "MCSectionCOFF":
@@ -246,19 +246,19 @@ class Assembler:
                 IMAGE_SCN_MEM_READ = 0x40000000
                 IMAGE_SCN_MEM_WRITE = 0x80000000
 
-                characteristics = section["characteristics"]
+                image_flags = section["characteristics"]
 
-                if characteristics & IMAGE_SCN_MEM_READ:
+                if image_flags & IMAGE_SCN_MEM_READ:
                     flags.add(gtirb.Section.Flag.Loaded)
                     flags.add(gtirb.Section.Flag.Readable)
 
-                if characteristics & IMAGE_SCN_MEM_WRITE:
+                if image_flags & IMAGE_SCN_MEM_WRITE:
                     flags.add(gtirb.Section.Flag.Writable)
 
-                if characteristics & IMAGE_SCN_MEM_EXECUTE:
+                if image_flags & IMAGE_SCN_MEM_EXECUTE:
                     flags.add(gtirb.Section.Flag.Executable)
 
-                if not characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA:
+                if not image_flags & IMAGE_SCN_CNT_UNINITIALIZED_DATA:
                     flags.add(gtirb.Section.Flag.Initialized)
 
             else:
@@ -274,8 +274,8 @@ class Assembler:
                 symbolic_expressions={},
                 symbolic_expression_sizes={},
                 alignment={},
-                elf_flags=elf_flags,
-                elf_type=elf_type,
+                image_flags=image_flags,
+                image_type=image_type,
             )
             self._sections[name] = result
 
@@ -756,14 +756,16 @@ class Assembler:
             this alignment.
             """
 
-            elf_type: Optional[int]
+            image_type: int
             """
-            The ELF section type (SHT_*) for the section. ELF-only.
+            The ELF type for the section. For ELF this is SHT_* values. For PE
+            this is ignored.
             """
 
-            elf_flags: Optional[int]
+            image_flags: int
             """
-            The ELF section flags (SHF_*) for the section. ELF-only.
+            The ELF/PE flags for the section. For ELF this is SHF_* flags, for
+            PE this is IMAGE_SCN_* flags.
             """
 
         sections: Dict[str, Section]

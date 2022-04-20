@@ -258,9 +258,17 @@ elf_symbol_info = define_table(
     Dict[gtirb.Symbol, Tuple[int, str, str, str, int]],
 )
 
+# Legacy table that's been renamed to sectionProperties
 elf_section_properties = define_table(
     gtirb.Module,
     "elfSectionProperties",
+    "mapping<UUID,tuple<uint64_t,uint64_t>>",
+    Dict[gtirb.Section, Tuple[int, int]],
+)
+
+section_properties = define_table(
+    gtirb.Module,
+    "sectionProperties",
     "mapping<UUID,tuple<uint64_t,uint64_t>>",
     Dict[gtirb.Section, Tuple[int, int]],
 )
@@ -315,3 +323,24 @@ leaf_functions = define_table(
     "mapping<UUID,uint8_t>",
     Dict[uuid.UUID, int],
 )
+
+
+def compat_section_properties(
+    module: gtirb.Module,
+) -> Dict[gtirb.Section, Tuple[int, int]]:
+    """
+    Gets the sectionProperties (modern) or elfSectionProperties (older) aux
+    data table, depending on which one is present. This is for backwards
+    compatibility.
+    """
+
+    result = section_properties.get(module)
+    if result is not None:
+        return result
+
+    if module.file_format == gtirb.Module.FileFormat.ELF:
+        result = elf_section_properties.get(module)
+        if result is not None:
+            return result
+
+    return section_properties.get_or_insert(module)
