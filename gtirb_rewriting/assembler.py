@@ -62,8 +62,8 @@ class Assembler:
         self,
         module: gtirb.Module,
         *,
-        temp_symbol_suffix: str = None,
-        module_symbols: Dict[str, gtirb.Symbol] = None,
+        temp_symbol_suffix: Optional[str] = None,
+        module_symbols: Optional[Dict[str, gtirb.Symbol]] = None,
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
     ) -> None:
@@ -94,8 +94,8 @@ class Assembler:
             self._module_symbols = {sym.name: sym for sym in module.symbols}
         self._trivially_unreachable = trivially_unreachable
         self._allow_undef_symbols = allow_undef_symbols
-        self._proxies = set()
-        self._blocks_with_code = set()
+        self._proxies: Set[gtirb.ProxyBlock] = set()
+        self._blocks_with_code: Set[gtirb.CodeBlock] = set()
         # This isn't set until the assembler runs, but will exist after that
         # point. Code should use _current_section instead of this, which takes
         # care of removing the optional-ness.
@@ -192,7 +192,7 @@ class Assembler:
     def _assemble_label(self, symbol: dict) -> None:
         label_sym = self._local_symbols[symbol["name"]]
         label_block = label_sym.referent
-        assert label_block
+        assert isinstance(label_block, gtirb.CodeBlock)
 
         label_block.offset = (
             self._current_block.offset + self._current_block.size
@@ -604,12 +604,14 @@ class Assembler:
     def _remove_empty_blocks(
         self, section: "Assembler.Result.Section"
     ) -> None:
-        final_blocks = []
+        final_blocks: List[gtirb.ByteBlock] = []
         for _, group in itertools.groupby(
             section.blocks, key=lambda b: b.offset
         ):
             *extra_blocks, main_block = group
             assert main_block.size or main_block == section.blocks[-1]
+            assert isinstance(main_block, gtirb.CodeBlock)
+
             max_alignment = section.alignment.get(main_block, 0)
 
             for extra_block in extra_blocks:

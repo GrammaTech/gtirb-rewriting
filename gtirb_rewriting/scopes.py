@@ -213,7 +213,7 @@ class AllFunctionsScope(Scope):
         self,
         position: FunctionPosition,
         block_position: BlockPosition,
-        functions: Set[Union[str, Pattern]] = None,
+        functions: Optional[Set[Union[str, Pattern]]] = None,
     ):
         self.position = position
         self.block_position = block_position

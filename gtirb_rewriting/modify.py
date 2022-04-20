@@ -23,6 +23,7 @@
 import collections
 import contextlib
 import functools
+import itertools
 import logging
 import operator
 import uuid
@@ -43,9 +44,9 @@ from typing import (
 
 import gtirb
 import gtirb_functions
+import gtirb_rewriting._auxdata as _auxdata
 from more_itertools import triplewise
 
-from . import _auxdata
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .assembler import Assembler
 from .utils import (
@@ -78,8 +79,12 @@ class _ReturnEdgeCache(gtirb.CFG):
     """
 
     def __init__(self, edges=None) -> None:
-        self._return_edges = collections.defaultdict(set)
-        self._proxy_return_edges = collections.defaultdict(set)
+        self._return_edges: Dict[
+            gtirb.CfgNode, Set[gtirb.Edge]
+        ] = collections.defaultdict(set)
+        self._proxy_return_edges: Dict[
+            gtirb.CfgNode, Set[gtirb.Edge]
+        ] = collections.defaultdict(set)
         super().__init__(edges)
 
     def add(self, edge: gtirb.Edge) -> None:
@@ -138,7 +143,7 @@ class _ReturnEdgeCache(gtirb.CFG):
 
 @contextlib.contextmanager
 def _make_return_cache(ir: gtirb.IR) -> Iterator[_ReturnEdgeCache]:
-    def _weak_cfg_hash(cfg):
+    def _weak_cfg_hash(cfg: gtirb.CFG):
         # This is meant to be a quick and dirty hash of the CFG to detect
         # modifications.
         return functools.reduce(operator.xor, (hash(edge) for edge in cfg), 0)
@@ -502,13 +507,15 @@ def _add_return_edges_to_one_function(
     cache: _ModifyCache,
     module: gtirb.Module,
     func_uuid: uuid.UUID,
-    return_target: gtirb.CodeBlock,
+    return_target: gtirb.CfgNode,
     new_cfg: gtirb.CFG,
 ) -> None:
     """
     Adds a new return edge to all returns in the function.
     """
     for block in _get_function_blocks(module, func_uuid):
+        assert block.ir
+
         if not cache.return_cache.any_return_edges(block):
             continue
 
@@ -544,6 +551,9 @@ def _add_return_edges_for_patch_calls(
         if _is_fallthrough_edge(edge)
     }
     for call_edge in call_edges:
+        if not isinstance(call_edge.target, gtirb.CodeBlock):
+            continue
+
         func_uuid = cache.functions_by_block.get(call_edge.target, None)
         if not func_uuid:
             continue
@@ -567,6 +577,8 @@ def _update_patch_return_edges_to_match(
     Finds all return edges in a patch and updates them to match the function
     being inserted into.
     """
+    assert block.module
+
     patch_return_edges = {
         edge
         for edge in new_cfg
@@ -579,7 +591,7 @@ def _update_patch_return_edges_to_match(
     if not func_uuid:
         return
 
-    return_targets = set()
+    return_targets: Set[gtirb.CfgNode] = set()
     for func_block in _get_function_blocks(block.module, func_uuid):
         return_targets.update(
             edge.target
@@ -631,12 +643,12 @@ def _update_return_edges_from_removing_call(
         if not return_edges:
             continue
 
-        remaining_edges = set()
+        remaining_edges = False
         for edge in return_edges:
             if edge.target in fallthrough_targets:
                 block.ir.cfg.discard(edge)
             else:
-                remaining_edges.add(edge)
+                remaining_edges = True
 
         if not remaining_edges:
             proxy = gtirb.ProxyBlock()
@@ -917,12 +929,17 @@ def _cleanup_modified_blocks(
     modification.
     """
 
-    blocks = [start_block, *patch_blocks, end_block, next_block]
+    blocks = [start_block, *patch_blocks, end_block]
 
     # Clean up blocks until we reach a fixed point where there's no further
     # changes to be made.
     while True:
-        for (_, pred), (i, block), (_, succ) in triplewise(enumerate(blocks)):
+        for (_, pred), (i, block), (_, succ) in triplewise(
+            enumerate(itertools.chain(blocks, (next_block,)))
+        ):
+            assert isinstance(pred, gtirb.ByteBlock)
+            assert isinstance(block, gtirb.ByteBlock)
+
             try:
                 _join_blocks(cache, pred, block)
                 del blocks[i]
@@ -938,7 +955,7 @@ def _cleanup_modified_blocks(
             # No changes were made this iteration, we can be done.
             break
 
-    return blocks[-2]
+    return blocks[-1]
 
 
 def _check_compatible_sections(

@@ -100,7 +100,7 @@ class _CallPatchImpl:
 
     def _actual_value(
         self,
-        arg: "CallPatch.ArgumentValue",
+        arg: "_CallPatchImpl._PassedArg",
         insertion_context: InsertionContext,
     ) -> "CallPatch.ActualArgumentValue":
         return (
@@ -190,8 +190,12 @@ class _CallPatchX86(_CallPatchImpl):
                     arg_str = f"{arg_value.name}[rip]"
                 elif file_format == gtirb.Module.FileFormat.PE:
                     arg_str = arg_value.name
+                else:
+                    raise NotImplementedError("unknown file format")
             elif isinstance(arg_value, int):
                 arg_str = str(arg_value)
+            else:
+                assert False
 
             if arg.reg:
                 lines.append(f"mov {arg.reg}, {arg_str}")
@@ -303,6 +307,8 @@ class _CallPatchARM64(_CallPatchImpl):
             lines.append(f"str {temp_reg}, [sp, #{slot}]")
 
         for arg in reg_args:
+            assert arg.reg
+
             arg_value = self._actual_value(arg, insertion_context)
             if isinstance(arg_value, gtirb.Symbol):
                 lines.extend(self._load_symbol(arg.reg, arg_value))

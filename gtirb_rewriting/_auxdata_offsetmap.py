@@ -23,13 +23,13 @@
 from typing import Any, Dict, Tuple, cast
 
 import gtirb
+import gtirb_rewriting._auxdata as _auxdata
 
-from . import _auxdata
 from ._auxdata import ContainerT, DataT, TableDefinition
 from .utils import OffsetMapping
 
 try:
-    from typing_extensions import get_args
+    from typing_extensions import get_args  # type: ignore
 except ImportError:
     # typing_extensions does not define this on Python 3.6, but we can sort
     # of make it work in the limited situations we care about.

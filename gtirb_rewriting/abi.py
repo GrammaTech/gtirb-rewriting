@@ -21,7 +21,7 @@
 # endorsement should be inferred.
 import dataclasses
 import logging
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import gtirb
 import more_itertools
@@ -90,13 +90,13 @@ class ABI:
     """
 
     def __init__(self) -> None:
-        self._register_map = {}
+        self._register_map: Dict[str, Register] = {}
         for reg in self.all_registers():
             for name in reg.sizes.values():
                 self._register_map[name.lower()] = reg
 
     @classmethod
-    def get(self, module: gtirb.Module) -> "ABI":
+    def get(cls, module: gtirb.Module) -> "ABI":
         if module.isa == gtirb.Module.ISA.X64:
             if module.file_format == gtirb.Module.FileFormat.ELF:
                 return _X86_64_ELF()
@@ -120,7 +120,7 @@ class ABI:
         Allocates registers to satisfy a patch's constraints.
         """
         available_scratch_registers = list(self._scratch_registers())
-        clobbered_registers = set()
+        clobbered_registers: Set[Register] = set()
 
         for clobber in constraints.clobbers_registers:
             reg = self.get_register(clobber)
@@ -241,6 +241,7 @@ class _IA32(ABI):
         prologue: List[_AsmSnippet] = []
         epilogue: List[_AsmSnippet] = []
         stack_adjustment = 0
+        knows_stack_adjustment = True
 
         if constraints.clobbers_flags:
             # TODO: Replace this with something more efficient.
@@ -277,9 +278,13 @@ class _IA32(ABI):
             )
             # TODO: We don't know how much the stack may be adjusted by the
             #       snippet.
-            stack_adjustment = None
+            knows_stack_adjustment = False
 
-        return prologue, reversed(epilogue), stack_adjustment
+        return (
+            prologue,
+            reversed(epilogue),
+            stack_adjustment if knows_stack_adjustment else None,
+        )
 
     def all_registers(self) -> List[Register]:
         return [
@@ -342,6 +347,7 @@ class _X86_64(ABI):
         prologue: List[_AsmSnippet] = []
         epilogue: List[_AsmSnippet] = []
         stack_adjustment = 0
+        knows_stack_adjustment = True
 
         # TODO: If align_stack was set too, we're going to end up doing
         #       some redundant work.
@@ -387,9 +393,13 @@ class _X86_64(ABI):
             )
             # TODO: We don't know how much the stack may be adjusted by the
             #       snippet.
-            stack_adjustment = None
+            knows_stack_adjustment = False
 
-        return prologue, reversed(epilogue), stack_adjustment
+        return (
+            prologue,
+            reversed(epilogue),
+            stack_adjustment if knows_stack_adjustment else None,
+        )
 
     def all_registers(self) -> List[Register]:
         return [
@@ -520,6 +530,7 @@ class _ARM64_ELF(ABI):
                 "align_stack is unneccessary for ARM64"
             )
 
+        flags_reg = None
         if constraints.clobbers_flags:
             # ARM64 can't move the flags directly onto the stack, so we need
             # to have a register for this.
@@ -549,6 +560,8 @@ class _ARM64_ELF(ABI):
             stack_adjustment += 16
 
         if constraints.clobbers_flags:
+            assert flags_reg is not None
+
             prologue.append(
                 _AsmSnippet(
                     f"""
