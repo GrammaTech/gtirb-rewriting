@@ -7,6 +7,7 @@
 - Added support for the .align directive
 - The sectionProperties aux data table is now populated when patches add new
   sections.
+- gtirb-rewriting now requires gtirb 1.10.6.
 
 0.0.24:
 - symbolicExpressionSizes is now populated for expressions in code
