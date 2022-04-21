@@ -32,7 +32,6 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
-    Union,
     cast,
     overload,
 )
@@ -182,7 +181,7 @@ alignment = define_table(
     gtirb.Module,
     "alignment",
     "mapping<UUID,uint64_t>",
-    Dict[Union[gtirb.ByteBlock, gtirb.Section], int],
+    Dict[gtirb.Node, int],
 )
 
 comments = define_table(
