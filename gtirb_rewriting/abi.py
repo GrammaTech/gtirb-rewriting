@@ -97,21 +97,16 @@ class ABI:
 
     @classmethod
     def get(cls, module: gtirb.Module) -> "ABI":
-        if module.isa == gtirb.Module.ISA.X64:
-            if module.file_format == gtirb.Module.FileFormat.ELF:
-                return _X86_64_ELF()
-            elif module.file_format == gtirb.Module.FileFormat.PE:
-                return _X86_64_PE()
-        elif module.isa == gtirb.Module.ISA.IA32:
-            if module.file_format == gtirb.Module.FileFormat.PE:
-                return _IA32_PE()
-        elif module.isa == gtirb.Module.ISA.ARM64:
-            if module.file_format == gtirb.Module.FileFormat.ELF:
-                return _ARM64_ELF()
+        """
+        Gets the appropriate ABI object for a module.
+        """
+        result = _ABIS.get((module.isa, module.file_format))
+        if result is None:
+            raise NotImplementedError(
+                f"Unsupported ISA/format: {module.isa}/{module.file_format}"
+            )
 
-        raise ValueError(
-            f"Unsupported ISA/format: {module.isa}/{module.file_format}"
-        )
+        return result
 
     def _allocate_patch_registers(
         self, constraints: Constraints
@@ -631,3 +626,11 @@ class _ARM64_ELF(ABI):
 
     def temporary_label_prefix(self) -> str:
         return ".L"
+
+
+_ABIS: Dict[Tuple[gtirb.Module.ISA, gtirb.Module.FileFormat], ABI] = {
+    (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.PE): _X86_64_PE(),
+    (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF): _X86_64_ELF(),
+    (gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE): _IA32_PE(),
+    (gtirb.Module.ISA.ARM64, gtirb.Module.FileFormat.ELF): _ARM64_ELF(),
+}
