@@ -19,6 +19,8 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+import logging
+
 import gtirb
 import gtirb_functions
 import gtirb_rewriting
@@ -1237,3 +1239,22 @@ def test_align():
     assert blocks[1].size == 2
 
     assert m.aux_data["alignment"].data[blocks[1]] == 4
+
+
+def test_logging(caplog):
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b = add_code_block(bi, b"\x90")
+    func = add_function_object(m, "func", b)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(func, b, 0, literal_patch("ud2; blah:"))
+
+    with caplog.at_level(logging.DEBUG):
+        ctx.apply()
+
+        assert "nop" in caplog.text
+        assert "ud2" in caplog.text
