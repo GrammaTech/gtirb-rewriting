@@ -19,13 +19,14 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+import contextlib
 import dataclasses
 import itertools
 import logging
 import operator
 import pathlib
 import uuid
-from typing import Dict, List, NamedTuple, Sequence, Tuple, Union
+from typing import Dict, Iterator, List, NamedTuple, Sequence, Tuple, Union
 
 import gtirb
 import gtirb_functions
@@ -140,6 +141,40 @@ class RewritingContext:
         for line in lines[err.lineno :]:
             self._logger.error("%s", line)
 
+    @contextlib.contextmanager
+    def _log_patch_changes(
+        self, patch: Patch, block: gtirb.CodeBlock, offset: int
+    ) -> Iterator[None]:
+        """
+        Log before/after state when applying a patch.
+        """
+
+        if self._logger.isEnabledFor(logging.DEBUG):
+            self._logger.debug("Applying %s at %s+%s", patch, block, offset)
+            self._logger.debug("  Before:")
+            show_block_asm(block, decoder=self._decoder, logger=self._logger)
+
+            bi = block.byte_interval
+            assert bi
+
+            before_blocks = set(bi.blocks)
+
+            yield
+
+            new_blocks = set(bi.blocks) - before_blocks
+            log_blocks = sorted(
+                itertools.chain((block,), new_blocks), key=lambda b: b.offset
+            )
+
+            self._logger.debug("  After:")
+            for log_block in log_blocks:
+                show_block_asm(
+                    log_block, decoder=self._decoder, logger=self._logger
+                )
+
+        else:
+            yield
+
     def _invoke_patch(
         self,
         modify_cache: _ModifyCache,
@@ -207,35 +242,22 @@ class RewritingContext:
             assembler.assemble(snippet.code, snippet.x86_syntax)
         assembler_result = assembler.finalize()
 
-        if self._logger.isEnabledFor(logging.DEBUG):
-            self._logger.debug("Applying %s at %s+%s", patch, block, offset)
-            self._logger.debug("  Before:")
-            show_block_asm(block, decoder=self._decoder, logger=self._logger)
-
-        new_end = _modify_block_insert(
-            modify_cache,
-            block,
-            offset,
-            replacement_length,
-            assembler_result,
-        )
+        with self._log_patch_changes(patch, block, offset):
+            new_end = _modify_block_insert(
+                modify_cache,
+                block,
+                offset,
+                replacement_length,
+                assembler_result,
+            )
 
         self._symbols_by_name.update(
             {sym.name: sym for sym in assembler_result.symbols}
         )
 
-        text_section = assembler_result.text_section
-        if self._logger.isEnabledFor(logging.DEBUG):
-            self._logger.debug("  After:")
-            show_block_asm(block, decoder=self._decoder, logger=self._logger)
-            for patch_block in text_section.blocks:
-                show_block_asm(
-                    patch_block, decoder=self._decoder, logger=self._logger
-                )
-
         return (
             new_end,
-            len(text_section.data),
+            len(assembler_result.text_section.data),
         )
 
     def get_or_insert_extern_symbol(
