@@ -223,20 +223,14 @@ number of bytes to replace must fall on instruction boundaries.
 
 ## Deletions
 
-gtirb-rewriting does not currently support doing deletions, though it is
-planned for the future. A workaround for now is to perform a replacement with
-a `nop` instruction as the patch.
+Instructions can be deleted using the `delete_at` function, which takes
+the location to delete (function / code block / offset) and the number of
+bytes to delete. Both the location and number of bytes to delete must fall
+on instruction boundaries.
 
-Here is a function that performs the workaround:
-```python
-def delete_at(rewriting_context, func, block, offset, length):
-    @patch_constraints()
-    def nop_patch(insertion_context):
-        return "nop"
-
-    rewriting_context.replace_at(
-        func, block, offset, length, Patch.from_function(nop_patch))
-```
+Deleting whole functions can be done using the `delete_function` function.
+Any references to the deleted blocks, e.g. symbols or control flow, will
+be retargetted to reference a proxy block.
 
 ## Inserting data with patches
 

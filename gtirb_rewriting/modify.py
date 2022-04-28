@@ -46,6 +46,7 @@ import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
 from more_itertools import triplewise
+from sortedcontainers import SortedDict
 
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .assembler import Assembler
@@ -198,6 +199,53 @@ class _ModifyCache:
             for func in functions
             for block in func.get_all_blocks()
         }
+
+        blocks = SortedDict()
+        for b in module.byte_blocks:
+            if b.address is None:
+                continue
+
+            block_set = blocks.setdefault(b.address, set())
+            block_set.add(b)
+
+        self.original_successors: Dict[
+            gtirb.CodeBlock, Tuple[gtirb.CodeBlock, ...]
+        ] = {}
+        for b in module.code_blocks:
+            successors = self._next_block(b, blocks)
+            if successors:
+                self.original_successors[b] = successors
+
+    def _next_block(
+        self, block: gtirb.CodeBlock, blocks_by_address: SortedDict
+    ) -> Tuple[gtirb.CodeBlock, ...]:
+        """
+        Determines the next block for a given block.
+        """
+
+        assert block.byte_interval
+        assert block.ir
+
+        fallthrough_targets = _block_fallthrough_targets(block)
+        if fallthrough_targets:
+            return tuple(fallthrough_targets)
+
+        if block.address:
+            next_index = blocks_by_address.bisect_left(
+                block.address + block.size
+            )
+            if next_index < len(blocks_by_address):
+                block_set = blocks_by_address.values()[next_index]
+                # The block set is byte blocks, so there might be data blocks
+                # there. We currently can't handle retargetting to a data
+                # block during deletion, so only consider code blocks.
+                return tuple(
+                    next_block
+                    for next_block in block_set
+                    if isinstance(next_block, gtirb.CodeBlock)
+                )
+
+        return ()
 
     def in_same_function(
         self, block1: gtirb.CodeBlock, block2: gtirb.CodeBlock
@@ -740,9 +788,7 @@ def _remove_block(
     assert block.module and block.ir
 
     if next_block is None and (
-        any(block.references)
-        or any(block.incoming_edges)
-        or any(block.outgoing_edges)
+        any(block.references) or any(block.incoming_edges)
     ):
         raise AmbiguousCFGError(
             "removing a block without knowing how to update control flow"
@@ -790,6 +836,43 @@ def _remove_block(
         aux_alignment.pop(block, None)
 
     block.byte_interval = None
+
+
+def _delete_code(
+    cache: _ModifyCache,
+    block: gtirb.CodeBlock,
+    offset: int,
+    length: int,
+    next_block: Union[gtirb.CodeBlock, gtirb.ProxyBlock, None],
+) -> Union[gtirb.CodeBlock, gtirb.ProxyBlock, None]:
+    """
+    Deletes code from a block, potentially deleting the whole block.
+    """
+
+    assert cache.module is block.module
+    assert block.size
+    assert 0 <= offset <= block.size
+    assert 0 <= offset + length <= block.size
+    assert length >= 0
+
+    bi = block.byte_interval
+    assert bi
+
+    if not length:
+        return block
+
+    if length != block.size:
+        start, end, _ = _split_block(cache, block, offset)
+        mid, end, _ = _split_block(cache, end, length)
+
+        _remove_block(cache, mid, end)
+        _edit_byte_interval(bi, start.offset + offset, length, b"", {start})
+        return _cleanup_modified_blocks(cache, start, [], end, next_block)
+
+    else:
+        _remove_block(cache, block, next_block)
+        _edit_byte_interval(bi, block.offset + offset, length, b"")
+        return next_block
 
 
 def _modify_block_insert(
@@ -930,6 +1013,7 @@ def _cleanup_modified_blocks(
     """
 
     blocks = [start_block, *patch_blocks, end_block]
+    assert any(b.size for b in blocks), "need at least one block with content"
 
     # Clean up blocks until we reach a fixed point where there's no further
     # changes to be made.
@@ -954,6 +1038,10 @@ def _cleanup_modified_blocks(
         else:
             # No changes were made this iteration, we can be done.
             break
+
+    # It should be impossible that we leave behind a zero-sized block, but
+    # it's a very important property of this function -- assert it.
+    assert all(b.size for b in blocks)
 
     return blocks[-1]
 

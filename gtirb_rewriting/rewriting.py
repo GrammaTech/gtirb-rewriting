@@ -36,7 +36,12 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .abi import ABI
 from .assembler import Assembler
-from .modify import _make_return_cache, _modify_block_insert, _ModifyCache
+from .modify import (
+    _delete_code,
+    _make_return_cache,
+    _modify_block_insert,
+    _ModifyCache,
+)
 from .patch import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
@@ -49,9 +54,19 @@ from .utils import (
 )
 
 
-class _Insertion(NamedTuple):
+@dataclasses.dataclass
+class _Modification:
     scope: Scope
+
+
+@dataclasses.dataclass
+class _InsertionOrReplacement(_Modification):
     patch: Patch
+
+
+@dataclasses.dataclass
+class _Deletion(_Modification):
+    retarget_to_proxy: bool
 
 
 class _FunctionInsertion(NamedTuple):
@@ -85,7 +100,7 @@ class RewritingContext:
         self._functions = functions
         self._decoder = GtirbInstructionDecoder(self._module.isa)
         self._abi = ABI.get(module)
-        self._insertions: List[_Insertion] = []
+        self._modifications: List[_Modification] = []
         self._function_insertions: List[_FunctionInsertion] = []
         self._logger = logger
         self._patch_id = 0
@@ -333,10 +348,10 @@ class RewritingContext:
 
         return sym
 
-    def _apply_insertions(
+    def _apply_modifications(
         self,
         modify_cache: _ModifyCache,
-        insertions: Sequence[_Insertion],
+        modifications: Sequence[_Modification],
         func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
     ) -> None:
@@ -346,47 +361,75 @@ class RewritingContext:
 
         instructions = None
         if any(
-            insertion.scope._needs_disassembly() for insertion in insertions
+            modification.scope._needs_disassembly()
+            for modification in modifications
         ):
             instructions = tuple(self._decoder.get_instructions(block))
 
         # Determine the insertion location for each patch.
         # TODO: This is where bubbling will get hooked in, but for now
         #       always insert at the first potential offset.
-        insertions_and_offsets = []
-        for insertion in insertions:
+        modifications_and_offsets = []
+        for modification in modifications:
             offset = next(
-                insertion.scope._potential_offsets(func, block, instructions)
+                modification.scope._potential_offsets(
+                    func, block, instructions
+                )
             )
-            insertions_and_offsets.append((insertion, offset))
+            modifications_and_offsets.append((modification, offset))
 
         # Now sort all of the insertions by their offsets. Python uses a
         # stable sort so that this will still be deterministic for ties.
-        insertions_and_offsets.sort(key=operator.itemgetter(1))
+        modifications_and_offsets.sort(key=operator.itemgetter(1))
 
-        # Assert that we don't have any replacements and insertions that
-        # overlap.
+        # Assert that we don't have any modifications that conflict.
         last_end = 0
-        for insertion, offset in insertions_and_offsets:
-            assert offset >= last_end, "Insertions and replacements overlap"
-            last_end = offset + insertion.scope._replacement_length()
+        for modification, offset in modifications_and_offsets:
+            assert offset >= last_end, "modifications overlap"
+            last_end = offset + modification.scope._replacement_length()
 
         actual_block = block
         total_insert_len = 0
-        for insertion, offset in insertions_and_offsets:
+        for modification, offset in modifications_and_offsets:
+            assert isinstance(actual_block, gtirb.CodeBlock)
+
             block_delta = actual_block.offset - block.offset
-            actual_block, insert_len = self._invoke_patch(
-                modify_cache,
-                func,
-                actual_block,
-                offset + total_insert_len - block_delta,
-                insertion.scope._replacement_length(),
-                insertion.patch,
-                InsertionContext(self._module, func, block, offset),
-            )
-            total_insert_len += (
-                insert_len - insertion.scope._replacement_length()
-            )
+            if isinstance(modification, _InsertionOrReplacement):
+                actual_block, insert_len = self._invoke_patch(
+                    modify_cache,
+                    func,
+                    actual_block,
+                    offset + total_insert_len - block_delta,
+                    modification.scope._replacement_length(),
+                    modification.patch,
+                    InsertionContext(self._module, func, block, offset),
+                )
+                total_insert_len += (
+                    insert_len - modification.scope._replacement_length()
+                )
+            elif isinstance(modification, _Deletion):
+                if not modification.retarget_to_proxy:
+                    successors = modify_cache.original_successors.get(block)
+                    if successors:
+                        if len(successors) > 1:
+                            self._logger.warning(
+                                "successor to %s is ambiguous", block
+                            )
+                        next_block = successors[0]
+                    else:
+                        next_block = None
+                else:
+                    next_block = gtirb.ProxyBlock()
+                    self._module.proxies.add(next_block)
+
+                actual_block = _delete_code(
+                    modify_cache,
+                    actual_block,
+                    offset + total_insert_len - block_delta,
+                    modification.scope._replacement_length(),
+                    next_block,
+                )
+                total_insert_len -= modification.scope._replacement_length()
 
     def _insert_function_stub(
         self,
@@ -522,7 +565,7 @@ class RewritingContext:
         :param scope: Where should the patch be placed?
         :param patch: The patch to be inserted.
         """
-        self._insertions.append(_Insertion(scope, patch))
+        self._modifications.append(_InsertionOrReplacement(scope, patch))
 
     def register_insert_function(
         self, name: str, patch: Patch
@@ -577,6 +620,59 @@ class RewritingContext:
             _SpecificLocationScope(function, block, offset, length), patch
         )
 
+    def delete_function(
+        self,
+        function: gtirb_functions.Function,
+    ):
+        """
+        Deletes an entire function, replacing references to its blocks with
+        references to proxy blocks.
+        """
+
+        for block in function.get_all_blocks():
+            self.delete_at(
+                function, block, 0, block.size, retarget_to_proxy=True
+            )
+
+    def delete_at(
+        self,
+        function: gtirb_functions.Function,
+        block: gtirb.CodeBlock,
+        offset: int,
+        length: int,
+        *,
+        retarget_to_proxy: bool = False,
+    ):
+        """
+        Deletes part or all of a block. If deleting a whole block, labels and
+        control flow referring to the deleted block will be changed to refer
+        to the 'next' block.
+
+        The next block is calculated from a combination of the CFG and block
+        addresses. If the block has an outgoing fallthrough edge, the edge's
+        target is used. Otherwise the code block with the next address after
+        the end of this block is used. If no block can be found, an exception
+        is raised.
+
+        Alternatively, specifying retarget_to_proxy when deleting a whole
+        block will make the 'next' block just be a proxy block. Specifying
+        retarget_to_proxy in other situations will raise a ValueError.
+        """
+
+        self._validate_offset_and_length(block, offset, length)
+        if retarget_to_proxy and (offset != 0 or length != block.size):
+            raise ValueError(
+                "retarget_to_proxy can only be specified when deleting a "
+                "whole block"
+            )
+
+        self._modifications.append(
+            _Deletion(
+                _SpecificLocationScope(function, block, offset, length),
+                retarget_to_proxy=retarget_to_proxy,
+            )
+        )
+
     def apply(self) -> None:
         """
         Applies all of the patches to the module.
@@ -603,27 +699,29 @@ class RewritingContext:
                 )
 
             for f in sorted(self._functions, key=lambda f: f.uuid):
-                func_insertions = [
-                    insertion
-                    for insertion in self._insertions
-                    if insertion.scope._function_matches(self._module, f)
+                func_modifications = [
+                    modification
+                    for modification in self._modifications
+                    if modification.scope._function_matches(self._module, f)
                 ]
-                if not func_insertions:
+                if not func_modifications:
                     continue
 
                 # Iterate over initial function blocks; ignore added blocks
                 # from patches.
                 for b in sorted(f.get_all_blocks(), key=lambda b: b.address):
-                    block_insertions = [
-                        insertion
-                        for insertion in func_insertions
-                        if insertion.scope._block_matches(self._module, f, b)
+                    block_modifications = [
+                        modification
+                        for modification in func_modifications
+                        if modification.scope._block_matches(
+                            self._module, f, b
+                        )
                     ]
-                    if not block_insertions:
+                    if not block_modifications:
                         continue
 
-                    self._apply_insertions(
-                        modify_cache, block_insertions, f, b
+                    self._apply_modifications(
+                        modify_cache, block_modifications, f, b
                     )
 
         # Remove CFI directives, since we will most likely be invalidating
