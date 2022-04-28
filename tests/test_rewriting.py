@@ -150,7 +150,7 @@ def test_expensive_assertions():
     )
     ctx.insert_at(func, b, 0, gtirb_rewriting.Patch.from_function(dummy_patch))
     ctx.insert_at(func, b, 5, gtirb_rewriting.Patch.from_function(dummy_patch))
-    # Offset is not on an instruction boundary
+    # Inserting: offset is not on an instruction boundary
     with pytest.raises(AssertionError):
         ctx.insert_at(
             func,
@@ -158,7 +158,7 @@ def test_expensive_assertions():
             1,
             gtirb_rewriting.Patch.from_function(dummy_patch),
         )
-    # Offset is not on an instruction boundary
+    # Replacing: offset is not on an instruction boundary
     with pytest.raises(AssertionError):
         ctx.replace_at(
             func,
@@ -167,7 +167,8 @@ def test_expensive_assertions():
             0,
             gtirb_rewriting.Patch.from_function(dummy_patch),
         )
-    # Offset is valid, but end position isn't on an instruction boundary
+    # Replacing: offset is valid, but end position isn't on an instruction
+    # boundary
     with pytest.raises(AssertionError):
         ctx.replace_at(
             func,
@@ -176,7 +177,7 @@ def test_expensive_assertions():
             6,
             gtirb_rewriting.Patch.from_function(dummy_patch),
         )
-    # Range extends out of the block's bounds
+    # Replacing: range extends out of the block's bounds
     with pytest.raises(AssertionError):
         ctx.replace_at(
             func,
@@ -185,6 +186,16 @@ def test_expensive_assertions():
             60,
             gtirb_rewriting.Patch.from_function(dummy_patch),
         )
+    # Deleting: offset is not on an instruction boundary
+    with pytest.raises(AssertionError):
+        ctx.delete_at(func, b, 1, 0)
+    # Deleting: offset is valid, but end position isn't on an instruction
+    # boundary
+    with pytest.raises(AssertionError):
+        ctx.delete_at(func, b, 0, 6)
+    # Deleting: range extends out of the block's bounds
+    with pytest.raises(AssertionError):
+        ctx.delete_at(func, b, 0, 60)
     ctx.apply()
 
 
