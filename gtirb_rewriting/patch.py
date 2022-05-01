@@ -40,7 +40,7 @@ class InsertionContext:
 
     module: gtirb.Module
     function: Optional[gtirb_functions.Function]
-    block: gtirb.CodeBlock
+    block: gtirb.ByteBlock
     offset: int
     """
     The byte offset of the insertion, relative to the start of the block.

@@ -46,7 +46,6 @@ import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
 from more_itertools import triplewise
-from sortedcontainers import SortedDict
 
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .assembler import Assembler
@@ -199,53 +198,6 @@ class _ModifyCache:
             for func in functions
             for block in func.get_all_blocks()
         }
-
-        blocks = SortedDict()
-        for b in module.byte_blocks:
-            if b.address is None:
-                continue
-
-            block_set = blocks.setdefault(b.address, set())
-            block_set.add(b)
-
-        self.original_successors: Dict[
-            gtirb.CodeBlock, Tuple[gtirb.CodeBlock, ...]
-        ] = {}
-        for b in module.code_blocks:
-            successors = self._next_block(b, blocks)
-            if successors:
-                self.original_successors[b] = successors
-
-    def _next_block(
-        self, block: gtirb.CodeBlock, blocks_by_address: SortedDict
-    ) -> Tuple[gtirb.CodeBlock, ...]:
-        """
-        Determines the next block for a given block.
-        """
-
-        assert block.byte_interval
-        assert block.ir
-
-        fallthrough_targets = _block_fallthrough_targets(block)
-        if fallthrough_targets:
-            return tuple(fallthrough_targets)
-
-        if block.address:
-            next_index = blocks_by_address.bisect_left(
-                block.address + block.size
-            )
-            if next_index < len(blocks_by_address):
-                block_set = blocks_by_address.values()[next_index]
-                # The block set is byte blocks, so there might be data blocks
-                # there. We currently can't handle retargetting to a data
-                # block during deletion, so only consider code blocks.
-                return tuple(
-                    next_block
-                    for next_block in block_set
-                    if isinstance(next_block, gtirb.CodeBlock)
-                )
-
-        return ()
 
     def in_same_function(
         self, block1: gtirb.CodeBlock, block2: gtirb.CodeBlock
@@ -537,7 +489,10 @@ def _join_blocks(
 
 
 def _update_edge(
-    edge: gtirb.Edge, old_cfg: gtirb.CFG, new_cfg: gtirb.CFG, **kwargs
+    edge: gtirb.Edge,
+    old_cfg: gtirb.CFG,
+    new_cfg: gtirb.CFG,
+    **kwargs: gtirb.CfgNode,
 ) -> None:
     """
     Updates properties about an edge.
@@ -776,8 +731,8 @@ def _update_fallthrough_target(
 
 def _remove_block(
     cache: _ModifyCache,
-    block: gtirb.CodeBlock,
-    next_block: Union[gtirb.CodeBlock, gtirb.ProxyBlock, None],
+    block: gtirb.ByteBlock,
+    next_block: Union[gtirb.ByteBlock, gtirb.ProxyBlock, None],
 ) -> None:
     """
     Deletes a block and retargets any symbols or edges pointing at it to be
@@ -788,43 +743,55 @@ def _remove_block(
     assert block.module and block.ir
 
     if next_block is None and (
-        any(block.references) or any(block.incoming_edges)
+        any(block.references)
+        or (isinstance(block, gtirb.CodeBlock) and any(block.incoming_edges))
     ):
         raise AmbiguousCFGError(
             "removing a block without knowing how to update control flow"
+        )
+
+    if (
+        isinstance(block, gtirb.CodeBlock)
+        and any(block.incoming_edges)
+        and not isinstance(next_block, gtirb.CfgNode)
+    ):
+        raise AmbiguousCFGError(
+            "removing a block would cause control to flow into data"
         )
 
     for sym in set(block.references):
         sym.referent = next_block
         sym.at_end = False
 
-    for edge in set(block.incoming_edges):
-        _update_edge(edge, block.ir.cfg, block.ir.cfg, target=next_block)
+    if isinstance(block, gtirb.CodeBlock):
+        for edge in set(block.incoming_edges):
+            assert isinstance(next_block, gtirb.CfgNode)
+            _update_edge(edge, block.ir.cfg, block.ir.cfg, target=next_block)
 
-    fallthrough_targets = _block_fallthrough_targets(block)
-    for edge in set(block.outgoing_edges):
-        if _is_call_edge(edge):
-            _update_return_edges_from_removing_call(
-                cache, edge, fallthrough_targets, block.ir.cfg
-            )
-        block.ir.cfg.discard(edge)
+        fallthrough_targets = _block_fallthrough_targets(block)
+        for edge in set(block.outgoing_edges):
+            if _is_call_edge(edge):
+                _update_return_edges_from_removing_call(
+                    cache, edge, fallthrough_targets, block.ir.cfg
+                )
+            block.ir.cfg.discard(edge)
 
-    function_uuid = cache.functions_by_block.get(block, None)
-    if function_uuid:
-        # If it was previously a function entry block, the next block gets
-        # promoted into that role.
-        aux_function_entries = _auxdata.function_entries.get(block.module)
-        if (
-            aux_function_entries
-            and block in aux_function_entries[function_uuid]
-        ):
-            if isinstance(next_block, gtirb.CodeBlock):
-                aux_function_entries[function_uuid].add(next_block)
-            aux_function_entries[function_uuid].discard(block)
+        function_uuid = cache.functions_by_block.get(block, None)
+        if function_uuid:
+            # If it was previously a function entry block, the next block gets
+            # promoted into that role.
+            aux_function_entries = _auxdata.function_entries.get(block.module)
+            if (
+                aux_function_entries
+                and block in aux_function_entries[function_uuid]
+            ):
+                if isinstance(next_block, gtirb.CodeBlock):
+                    aux_function_entries[function_uuid].add(next_block)
+                aux_function_entries[function_uuid].discard(block)
 
-        aux_function_blocks = _auxdata.function_blocks.get(block.module)
-        if aux_function_blocks:
-            aux_function_blocks[function_uuid].discard(block)
+            aux_function_blocks = _auxdata.function_blocks.get(block.module)
+            if aux_function_blocks:
+                aux_function_blocks[function_uuid].discard(block)
 
     for table_def in OFFSETMAP_AUX_DATA_TABLES:
         table = table_def.get(block.module)
@@ -840,11 +807,11 @@ def _remove_block(
 
 def _delete_code(
     cache: _ModifyCache,
-    block: gtirb.CodeBlock,
+    block: gtirb.ByteBlock,
     offset: int,
     length: int,
-    next_block: Union[gtirb.CodeBlock, gtirb.ProxyBlock, None],
-) -> Union[gtirb.CodeBlock, gtirb.ProxyBlock, None]:
+    next_block: Union[gtirb.ByteBlock, gtirb.ProxyBlock, None],
+) -> Union[gtirb.ByteBlock, gtirb.ProxyBlock, None]:
     """
     Deletes code from a block, potentially deleting the whole block.
     """
@@ -877,11 +844,12 @@ def _delete_code(
 
 def _modify_block_insert(
     cache: _ModifyCache,
-    block: gtirb.CodeBlock,
+    block: gtirb.ByteBlock,
     offset: int,
     replacement_length: int,
     code: Assembler.Result,
-) -> gtirb.CodeBlock:
+    next_block: Optional[gtirb.ByteBlock],
+) -> gtirb.ByteBlock:
     """
     Insert bytes into a block and adjusts the IR as needed.
     :param cache: The modify cache, which should be reused across multiple
@@ -926,7 +894,10 @@ def _modify_block_insert(
         code.cfg,
     )
 
-    _update_patch_return_edges_to_match(cache, block, code.cfg, code.proxies)
+    if isinstance(block, gtirb.CodeBlock):
+        _update_patch_return_edges_to_match(
+            cache, block, code.cfg, code.proxies
+        )
 
     _, end_block, added_fallthrough = _split_block(cache, block, offset)
 
@@ -939,9 +910,12 @@ def _modify_block_insert(
     # Stitch in the new blocks to the CFG
     if added_fallthrough:
         assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
+        assert isinstance(block, gtirb.CodeBlock)
         _update_fallthrough_target(cache, cfg, block, text_section.blocks[0])
 
-    if isinstance(text_section.blocks[-1], gtirb.CodeBlock):
+    if isinstance(end_block, gtirb.CodeBlock) and isinstance(
+        text_section.blocks[-1], gtirb.CodeBlock
+    ):
         _update_fallthrough_target(
             cache, cfg, text_section.blocks[-1], end_block
         )
@@ -972,11 +946,12 @@ def _modify_block_insert(
     alignment_table = _auxdata.alignment.get_or_insert(module)
     alignment_table.update(text_section.alignment.items())
 
-    func_uuid = cache.functions_by_block.get(block)
-    if func_uuid:
-        for b in text_section.blocks:
-            if isinstance(b, gtirb.CodeBlock):
-                _add_function_block_aux(cache, b, func_uuid)
+    if isinstance(block, gtirb.CodeBlock):
+        func_uuid = cache.functions_by_block.get(block)
+        if func_uuid:
+            for b in text_section.blocks:
+                if isinstance(b, gtirb.CodeBlock):
+                    _add_function_block_aux(cache, b, func_uuid)
 
     sym_expr_data = _auxdata.symbolic_expression_sizes.get_or_insert(module)
     for rel_offset, size in text_section.symbolic_expression_sizes.items():
@@ -990,23 +965,22 @@ def _modify_block_insert(
 
     # The block splitting from earlier might have left zero-sized blocks that
     # need to be dealt with.
-    next_blocks = _block_fallthrough_targets(end_block)
     return _cleanup_modified_blocks(
         cache,
         block,
         text_section.blocks,
         end_block,
-        next(iter(next_blocks)) if next_blocks else None,
+        next_block,
     )
 
 
 def _cleanup_modified_blocks(
     cache: _ModifyCache,
-    start_block: gtirb.CodeBlock,
+    start_block: gtirb.ByteBlock,
     patch_blocks: List[gtirb.ByteBlock],
-    end_block: gtirb.CodeBlock,
-    next_block: Union[gtirb.CodeBlock, gtirb.ProxyBlock, None],
-) -> gtirb.CodeBlock:
+    end_block: gtirb.ByteBlock,
+    next_block: Union[gtirb.ByteBlock, gtirb.ProxyBlock, None],
+) -> gtirb.ByteBlock:
     """
     Cleans up any zero-sized blocks that might have been generated during
     modification.
@@ -1015,11 +989,16 @@ def _cleanup_modified_blocks(
     blocks = [start_block, *patch_blocks, end_block]
     assert any(b.size for b in blocks), "need at least one block with content"
 
+    def iter_blocks() -> Iterator[
+        Union[gtirb.ByteBlock, gtirb.ProxyBlock, None]
+    ]:
+        return itertools.chain(blocks, (next_block,))
+
     # Clean up blocks until we reach a fixed point where there's no further
     # changes to be made.
     while True:
         for (_, pred), (i, block), (_, succ) in triplewise(
-            enumerate(itertools.chain(blocks, (next_block,)))
+            enumerate(iter_blocks())
         ):
             assert isinstance(pred, gtirb.ByteBlock)
             assert isinstance(block, gtirb.ByteBlock)
@@ -1038,6 +1017,13 @@ def _cleanup_modified_blocks(
         else:
             # No changes were made this iteration, we can be done.
             break
+
+    # This allows inserting a code block at offset 0 of a data block.
+    if blocks[0].size == 0:
+        to_remove = blocks[0]
+        del blocks[0]
+
+        _remove_block(cache, to_remove, next(iter_blocks()))
 
     # It should be impossible that we leave behind a zero-sized block, but
     # it's a very important property of this function -- assert it.
@@ -1155,7 +1141,7 @@ def _edit_byte_interval(
     offset: int,
     length: int,
     content: bytes,
-    static_blocks: Set[gtirb.CodeBlock] = set(),
+    static_blocks: Set[gtirb.ByteBlock] = set(),
 ) -> None:
     """
     Edits a byte interval's contents, moving blocks, symbolic expressions, and
