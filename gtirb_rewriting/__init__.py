@@ -30,7 +30,7 @@ from .intervalutils import (
 from .modify import AmbiguousCFGError, CFGModifiedError
 from .passes import Pass, PassManager
 from .patch import InsertionContext, Patch, patch_constraints
-from .rewriting import RewritingContext
+from .rewriting import RewritingContext, UnresolvableScopeError
 from .scopes import (
     ENTRYPOINT_NAME,
     MAIN_NAME,
@@ -82,6 +82,7 @@ __all__ = [
     "show_block_asm",
     "split_byte_interval",
     "UndefSymbolError",
+    "UnresolvableScopeError",
     "UnsupportedAssemblyError",
     "X86Syntax",
 ]

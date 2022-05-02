@@ -217,16 +217,16 @@ in the Pass's begin_module callback and refer to that later on.
 ## Replacements
 
 Instructions can be replaced using the `replace_at` function, which takes
-the location to modify (function / code block / offset), the number of bytes
-to replace, and the patch to replace them with. Both the location and the
-number of bytes to replace must fall on instruction boundaries.
+the block to modify, the offset in that block, the number of bytes to replace,
+and the patch to replace them with. Both the offset and the number of bytes to
+replace must fall on instruction boundaries.
 
 ## Deletions
 
 Instructions can be deleted using the `delete_at` function, which takes
-the location to delete (function / code block / offset) and the number of
-bytes to delete. Both the location and number of bytes to delete must fall
-on instruction boundaries.
+the block to modify, the offset in that block, and the number of bytes to
+delete. Both the location and number of bytes to delete must fall on
+instruction boundaries.
 
 Deleting whole functions can be done using the `delete_function` function.
 Any references to the deleted blocks, e.g. symbols or control flow, will

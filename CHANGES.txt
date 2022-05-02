@@ -7,6 +7,12 @@
 - Added support for the .align directive
 - The sectionProperties aux data table is now populated when patches add new
   sections.
+- Added support for deletions using delete_at
+- Functions are no longer needed for insert_at and replace_at. New overloads
+  have been added that drop the function parameter and, in the future, the
+  old overload will be removed.
+- AllBlocksScope now targets all blocks in the .text section, even if they are
+  not part of functions.
 
 0.0.24:
 - symbolicExpressionSizes is now populated for expressions in code
@@ -17,7 +23,6 @@
 - get_or_insert_extern_sym now puts proxies in the module's proxies set
 - get_or_insert_extern_sym now populates elfSymbolInfo
 - Added a command-line gtirb-rewriting driver
-- Added support for deletions using delete_at
 
 0.0.23:
 - Dramatically sped up the time spent applying patches with calls

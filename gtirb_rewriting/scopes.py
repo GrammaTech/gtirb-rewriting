@@ -26,7 +26,11 @@ import capstone_gt
 import gtirb
 import gtirb_functions
 
-from .utils import _is_partial_disassembly, _nonterminator_instructions
+from .utils import (
+    _is_partial_disassembly,
+    _nonterminator_instructions,
+    _text_section_name,
+)
 
 ENTRYPOINT_NAME = "\0"
 """
@@ -66,19 +70,17 @@ class Scope:
     should be applied.
     """
 
-    def _function_matches(
-        self, module: gtirb.Module, func: gtirb_functions.Function
-    ) -> bool:
+    def _known_targets(self) -> Optional[Set[gtirb.ByteBlock]]:
         """
-        Determines if a function matches the scope. If this returns False, no
-        patches in this scope will be appled to this function.
+        The set of blocks that this scope can modify, if it can be determined
+        from just the scope's state.
         """
-        raise NotImplementedError
+        return None
 
     def _block_matches(
         self,
         module: gtirb.Module,
-        func: gtirb_functions.Function,
+        func: Optional[gtirb_functions.Function],
         block: gtirb.CodeBlock,
     ) -> bool:
         """
@@ -86,6 +88,12 @@ class Scope:
         patches in this scope will be applied to this block.
         """
         raise NotImplementedError
+
+    def _needs_functions(self) -> bool:
+        """
+        Does this scope need function information to work?
+        """
+        return False
 
     def _needs_disassembly(self) -> bool:
         """
@@ -99,7 +107,6 @@ class Scope:
 
     def _potential_offsets(
         self,
-        func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
@@ -115,9 +122,9 @@ class Scope:
 
 class AllBlocksScope(Scope):
     """
-    Specifies that an insertion should happen in all blocks of a program. The
-    functions that this inserts into can be controlled with a list of names
-    (or regular expressions) to check the name against.
+    Specifies that an insertion should happen in all code blocks in the text
+    section. The functions that this inserts into can be controlled with a
+    list of names (or regular expressions) to check the name against.
     """
 
     def __init__(
@@ -128,27 +135,27 @@ class AllBlocksScope(Scope):
         self.position = position
         self.exclude_functions = exclude_functions
 
-    def _function_matches(
-        self, module: gtirb.Module, func: gtirb_functions.Function
-    ) -> bool:
-        return self.exclude_functions is None or not pattern_match(
-            module, func, self.exclude_functions
-        )
-
     def _block_matches(
         self,
         module: gtirb.Module,
-        func: gtirb_functions.Function,
+        func: Optional[gtirb_functions.Function],
         block: gtirb.CodeBlock,
     ) -> bool:
-        return True
+        # Despite the name being AllBlocksScope, it isn't very useful to edit
+        # .plt or .init.
+        if block.section and block.section.name != _text_section_name(module):
+            return False
+
+        if func is None or self.exclude_functions is None:
+            return True
+
+        return not pattern_match(module, func, self.exclude_functions)
 
     def _needs_disassembly(self) -> bool:
         return self.position in [BlockPosition.ANYWHERE, BlockPosition.EXIT]
 
     def _potential_offsets(
         self,
-        func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
@@ -164,15 +171,13 @@ class SingleBlockScope(Scope):
         self.block = block
         self.position = position
 
-    def _function_matches(
-        self, module: gtirb.Module, func: gtirb_functions.Function
-    ) -> bool:
-        return self.block in func.get_all_blocks()
+    def _known_targets(self) -> Optional[Set[gtirb.ByteBlock]]:
+        return {self.block}
 
     def _block_matches(
         self,
         module: gtirb.Module,
-        func: gtirb_functions.Function,
+        func: Optional[gtirb_functions.Function],
         block: gtirb.CodeBlock,
     ) -> bool:
         return self.block == block
@@ -182,7 +187,6 @@ class SingleBlockScope(Scope):
 
     def _potential_offsets(
         self,
-        func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
@@ -219,24 +223,29 @@ class AllFunctionsScope(Scope):
         self.block_position = block_position
         self.functions = functions
 
-    def _function_matches(
-        self, module: gtirb.Module, func: gtirb_functions.Function
-    ) -> bool:
-        return self.functions is None or pattern_match(
-            module, func, self.functions
-        )
-
     def _block_matches(
         self,
         module: gtirb.Module,
-        func: gtirb_functions.Function,
+        func: Optional[gtirb_functions.Function],
         block: gtirb.CodeBlock,
     ) -> bool:
+        if func is None:
+            return False
+
+        function_matches = self.functions is None or pattern_match(
+            module, func, self.functions
+        )
+        if not function_matches:
+            return False
+
         if self.position == FunctionPosition.ENTRY:
             return block in func.get_entry_blocks()
         if self.position == FunctionPosition.EXIT:
             return block in func.get_exit_blocks()
         assert False, f"Invalid position: {self.position}"
+
+    def _needs_functions(self) -> bool:
+        return True
 
     def _needs_disassembly(self) -> bool:
         return self.block_position in [
@@ -246,7 +255,6 @@ class AllFunctionsScope(Scope):
 
     def _potential_offsets(
         self,
-        func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
@@ -258,25 +266,21 @@ class AllFunctionsScope(Scope):
 class _SpecificLocationScope(Scope):
     def __init__(
         self,
-        function: gtirb_functions.Function,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         offset: int,
         replacement_length: int = 0,
     ):
-        self.function = function
         self.block = block
         self.offset = offset
         self.replacement_length = replacement_length
 
-    def _function_matches(
-        self, module: gtirb.Module, func: gtirb_functions.Function
-    ) -> bool:
-        return self.function == func
+    def _known_targets(self) -> Optional[Set[gtirb.ByteBlock]]:
+        return {self.block}
 
     def _block_matches(
         self,
         module: gtirb.Module,
-        func: gtirb_functions.Function,
+        func: Optional[gtirb_functions.Function],
         block: gtirb.CodeBlock,
     ) -> bool:
         return self.block == block
@@ -289,7 +293,6 @@ class _SpecificLocationScope(Scope):
 
     def _potential_offsets(
         self,
-        func: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
