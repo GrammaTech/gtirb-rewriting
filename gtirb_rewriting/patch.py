@@ -39,7 +39,7 @@ class InsertionContext:
     """
 
     module: gtirb.Module
-    function: gtirb_functions.Function
+    function: Optional[gtirb_functions.Function]
     block: gtirb.CodeBlock
     offset: int
     """

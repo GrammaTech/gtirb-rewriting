@@ -1,4 +1,5 @@
 0.0.25: (UNRELEASED)
+- gtirb-rewriting now requires gtirb 1.10.6.
 - Refactored the code that applies modifications to support future changes and
   ease maintenance
 - OffsetMapping.__setitem__'s behavior changed when indexing by an element. It
@@ -7,7 +8,12 @@
 - Added support for the .align directive
 - The sectionProperties aux data table is now populated when patches add new
   sections.
-- gtirb-rewriting now requires gtirb 1.10.6.
+- Added support for deletions using delete_at
+- Functions are no longer needed for insert_at and replace_at. New overloads
+  have been added that drop the function parameter and, in the future, the
+  old overload will be removed.
+- AllBlocksScope now targets all blocks in the .text section, even if they are
+  not part of functions.
 
 0.0.24:
 - symbolicExpressionSizes is now populated for expressions in code
