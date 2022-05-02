@@ -26,60 +26,72 @@ import capstone_gt
 import gtirb
 import gtirb_functions
 import gtirb_rewriting
+from gtirb_test_helpers import (
+    add_code_block,
+    add_data_section,
+    add_text_section,
+    create_test_module,
+)
+from helpers import add_function_object
 
 
 def test_all_block_scope_entry():
-    mod = unittest.mock.MagicMock(spec=gtirb.Module)
-    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
-    func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
-
+    ir, mod = create_test_module(
+        file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+    )
+    _, bi = add_text_section(mod, address=0x1000)
     # xor %eax, %eax; xor %ecx, %ecx
-    code_bytes = b"\x31\xC0\x31\xC9"
-    block.size = len(code_bytes)
+    block = add_code_block(bi, b"\x31\xC0\x31\xC9")
+    func = add_function_object(mod, "func", block)
 
     scope = gtirb_rewriting.AllBlocksScope(
         position=gtirb_rewriting.BlockPosition.ENTRY
     )
+    assert scope._known_targets() is None
     assert not scope._needs_disassembly()
-    assert scope._function_matches(mod, func)
     assert scope._block_matches(mod, func, block)
-    offsets = list(scope._potential_offsets(func, block, None))
+    offsets = list(scope._potential_offsets(block, None))
     assert offsets == [0]
 
 
 def test_all_block_scope_anywhere():
-    mod = unittest.mock.MagicMock(spec=gtirb.Module)
-    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
-
+    ir, mod = create_test_module(
+        file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+    )
+    _, bi = add_text_section(mod, address=0x1000)
     # xor %eax, %eax; xor %ecx, %ecx
-    code_bytes = b"\x31\xC0\x31\xC9"
-    block.size = len(code_bytes)
+    block = add_code_block(bi, b"\x31\xC0\x31\xC9")
+    func = add_function_object(mod, "func", block)
 
     cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
-    disasm = tuple(cs.disasm(code_bytes, 0))
+    disasm = tuple(cs.disasm(block.contents, 0))
 
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
 
     scope = gtirb_rewriting.AllBlocksScope(
         position=gtirb_rewriting.BlockPosition.ANYWHERE
     )
+    assert scope._known_targets() is None
     assert scope._needs_disassembly()
-    assert scope._function_matches(mod, func)
     assert scope._block_matches(mod, func, block)
-    offsets = list(scope._potential_offsets(func, block, disasm))
+    offsets = list(scope._potential_offsets(block, disasm))
     assert offsets == [0, 2, 4]
 
 
 def test_all_block_scope_exit():
-    mod = unittest.mock.MagicMock(spec=gtirb.Module)
-    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
-
+    ir, mod = create_test_module(
+        file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+    )
+    _, bi = add_text_section(mod, address=0x1000)
     # xor %eax, %eax; xor %ecx, %ecx
-    code_bytes = b"\x31\xC0\x31\xC9"
-    block.size = len(code_bytes)
+    block = add_code_block(bi, b"\x31\xC0\x31\xC9")
+    func = add_function_object(mod, "func", block)
 
     cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
-    disasm = tuple(cs.disasm(code_bytes, 0))
+    disasm = tuple(cs.disasm(block.contents, 0))
 
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
     func.get_name.return_value = "foo"
@@ -87,43 +99,61 @@ def test_all_block_scope_exit():
     scope = gtirb_rewriting.AllBlocksScope(
         position=gtirb_rewriting.BlockPosition.EXIT
     )
+    assert scope._known_targets() is None
     assert scope._needs_disassembly()
-    assert scope._function_matches(mod, func)
     assert scope._block_matches(mod, func, block)
-    offsets = list(scope._potential_offsets(func, block, disasm))
+    offsets = list(scope._potential_offsets(block, disasm))
     assert offsets == [4]
 
 
+def test_all_block_scope_sections():
+    ir, mod = create_test_module(
+        file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+    )
+    _, bi = add_data_section(mod, address=0x1000)
+    # xor %eax, %eax; xor %ecx, %ecx
+    block = add_code_block(bi, b"\x31\xC0\x31\xC9")
+    func = add_function_object(mod, "func", block)
+
+    scope = gtirb_rewriting.AllBlocksScope(
+        position=gtirb_rewriting.BlockPosition.ENTRY
+    )
+    # This shouldn't match because it's not in the text section
+    assert not scope._block_matches(mod, func, block)
+
+
 def test_single_block_scope():
-    mod = unittest.mock.MagicMock(spec=gtirb.Module)
-    block = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
-    block.size = 3
-    block2 = unittest.mock.MagicMock(spec=gtirb.CodeBlock)
-
-    func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
-    func.get_all_blocks.return_value = (block, block2)
-
-    func2 = unittest.mock.MagicMock(spec=gtirb_functions.Function)
-    func2.get_all_blocks.return_value = (block2,)
+    ir, mod = create_test_module(
+        file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+    )
+    _, bi = add_data_section(mod, address=0x1000)
+    block = add_code_block(bi, b"\x90")
+    block2 = add_code_block(bi, b"\x90")
+    func = add_function_object(mod, "func", block, {block2})
 
     scope = gtirb_rewriting.SingleBlockScope(
         block, gtirb_rewriting.BlockPosition.ENTRY
     )
+    assert scope._known_targets() == {block}
     assert not scope._needs_disassembly()
-    assert scope._function_matches(mod, func)
-    assert not scope._function_matches(mod, func2)
     assert scope._block_matches(mod, func, block)
     assert not scope._block_matches(mod, func, block2)
-    offsets = list(scope._potential_offsets(func, block, None))
+    offsets = list(scope._potential_offsets(block, None))
     assert offsets == [0]
 
 
 def test_pattern_match():
-    mod = unittest.mock.MagicMock(spec=gtirb.Module)
-    func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
-    func.get_name.return_value = "foo"
+    ir, mod = create_test_module(
+        file_format=gtirb.Module.FileFormat.ELF,
+        isa=gtirb.Module.ISA.X64,
+    )
+    _, bi = add_data_section(mod, address=0x1000)
+    block = add_code_block(bi, b"\x90")
+    func = add_function_object(mod, "foo", block)
 
-    assert not gtirb_rewriting.pattern_match(mod, func, {})
+    assert not gtirb_rewriting.pattern_match(mod, func, set())
     assert gtirb_rewriting.pattern_match(mod, func, {"foo"})
     assert gtirb_rewriting.pattern_match(mod, func, {re.compile("f..")})
     # Verify that only complete regex matches are considered

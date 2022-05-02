@@ -71,10 +71,10 @@ def test_multiple_deletions():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.delete_at(func, b1, 0, 2)
-    ctx.delete_at(func, b1, 2, 2)
+    ctx.delete_at(b1, 0, 2)
+    ctx.delete_at(b1, 2, 2)
     # This has a zero length and should not have any impact.
-    ctx.delete_at(func, b2, 2, 0)
+    ctx.delete_at(b2, 2, 0)
     ctx.apply()
 
     assert set(bi.blocks) == {b2, b3}
@@ -101,8 +101,8 @@ def test_insert_and_delete():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [b_func])
-    ctx.replace_at(b_func, b, 0, 1, literal_patch("call puts"))
-    ctx.delete_at(b_func, b, 1, 1)
+    ctx.replace_at(b, 0, 1, literal_patch("call puts"))
+    ctx.delete_at(b, 1, 1)
     ctx.apply()
 
     assert bi.contents == b"\xE8\x00\x00\x00\x00\x52"
@@ -157,7 +157,7 @@ def test_delete_last_instruction_call():
 
     # Delete the call instruction
     ctx = gtirb_rewriting.RewritingContext(module, [bar_func, foo_func])
-    ctx.delete_at(foo_func, foo_block1, 1, 5)
+    ctx.delete_at(foo_block1, 1, 5)
     ctx.apply()
 
     assert bi.contents == b"\xC3\x50\x90"
@@ -221,7 +221,7 @@ def test_delete_whole_block_no_fallthrough():
 
     # Delete the whole first block of foo
     ctx = gtirb_rewriting.RewritingContext(module, [bar_func, foo_func])
-    ctx.delete_at(foo_func, foo_block1, 0, foo_block1.size)
+    ctx.delete_at(foo_block1, 0, foo_block1.size)
     ctx.apply()
 
     assert bi.contents == b"\x90\xEB\x00"
@@ -279,9 +279,7 @@ def test_delete_whole_block_followed_by_data(retarget):
 
     # Delete the whole first block of foo
     ctx = gtirb_rewriting.RewritingContext(module, [bar_func, foo_func])
-    ctx.delete_at(
-        foo_func, foo_block1, 0, foo_block1.size, retarget_to_proxy=retarget
-    )
+    ctx.delete_at(foo_block1, 0, foo_block1.size, retarget_to_proxy=retarget)
 
     if not retarget:
         with pytest.raises(gtirb_rewriting.AmbiguousCFGError):
@@ -396,7 +394,6 @@ def test_deletion_with_ambiguous_address():
     # Force there to be new blocks introduced that has the same address as
     # b3 when processing b2's deletions.
     ctx.replace_at(
-        func,
         b1,
         0,
         b1.size,
@@ -412,7 +409,7 @@ def test_deletion_with_ambiguous_address():
         ),
     )
     # Now delete all of b2 so that we need to determine the next block.
-    ctx.delete_at(func, b2, 0, b2.size)
+    ctx.delete_at(b2, 0, b2.size)
     ctx.apply()
 
     (new_sym,) = m.symbols_named("new_label")
@@ -457,7 +454,7 @@ def test_empty_delete():
 
     # Test a zero-sized deletion
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.delete_at(func, b1, b1.size, 0)
+    ctx.delete_at(b1, b1.size, 0)
     ctx.apply()
 
     assert set(ir.cfg) == orig_cfg

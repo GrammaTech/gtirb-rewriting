@@ -24,6 +24,7 @@ from typing import Sequence
 
 import gtirb
 import gtirb_functions
+import gtirb_rewriting._auxdata as _auxdata
 
 from .modify import _make_return_cache
 from .rewriting import RewritingContext
@@ -93,7 +94,15 @@ class PassManager:
 
         with _make_return_cache(ir):
             for mod in ir.modules:
-                functions = gtirb_functions.Function.build_functions(mod)
+                has_functions = _auxdata.function_entries.exists(
+                    mod
+                ) and _auxdata.function_blocks.exists(mod)
+
+                if has_functions:
+                    functions = gtirb_functions.Function.build_functions(mod)
+                else:
+                    functions = []
+
                 context = RewritingContext(
                     mod,
                     functions,

@@ -58,8 +58,8 @@ def test_multiple_insertions():
     func = add_function_object(m, "hi", b)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b, 0, gtirb_rewriting.Patch.from_function(dummy_patch))
-    ctx.insert_at(func, b, 7, gtirb_rewriting.Patch.from_function(dummy_patch))
+    ctx.insert_at(b, 0, gtirb_rewriting.Patch.from_function(dummy_patch))
+    ctx.insert_at(b, 7, gtirb_rewriting.Patch.from_function(dummy_patch))
     ctx.apply()
 
     blocks = sorted(bi.blocks, key=lambda b: b.offset)
@@ -98,13 +98,9 @@ def test_multiple_replacements():
     func = add_function_object(m, "hi", b)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.replace_at(
-        func, b, 0, 2, gtirb_rewriting.Patch.from_function(nop_patch)
-    )
-    ctx.replace_at(
-        func, b, 3, 4, gtirb_rewriting.Patch.from_function(nop_patch)
-    )
-    ctx.insert_at(func, b, 8, gtirb_rewriting.Patch.from_function(nop_patch))
+    ctx.replace_at(b, 0, 2, gtirb_rewriting.Patch.from_function(nop_patch))
+    ctx.replace_at(b, 3, 4, gtirb_rewriting.Patch.from_function(nop_patch))
+    ctx.insert_at(b, 8, gtirb_rewriting.Patch.from_function(nop_patch))
     ctx.apply()
 
     assert bi.contents == b"\x90\x52\x90\x57\x90"
@@ -124,9 +120,7 @@ def test_added_function_blocks():
     assert len(functions[0].get_all_blocks()) == 1
 
     ctx = gtirb_rewriting.RewritingContext(m, functions)
-    ctx.insert_at(
-        functions[0], b, 7, gtirb_rewriting.Patch.from_function(dummy_patch)
-    )
+    ctx.insert_at(b, 7, gtirb_rewriting.Patch.from_function(dummy_patch))
     ctx.apply()
 
     assert len(m.aux_data["functionBlocks"].data[func.uuid]) == 2
@@ -148,12 +142,11 @@ def test_expensive_assertions():
     ctx = gtirb_rewriting.RewritingContext(
         m, [func], expensive_assertions=True
     )
-    ctx.insert_at(func, b, 0, gtirb_rewriting.Patch.from_function(dummy_patch))
-    ctx.insert_at(func, b, 5, gtirb_rewriting.Patch.from_function(dummy_patch))
+    ctx.insert_at(b, 0, gtirb_rewriting.Patch.from_function(dummy_patch))
+    ctx.insert_at(b, 5, gtirb_rewriting.Patch.from_function(dummy_patch))
     # Inserting: offset is not on an instruction boundary
     with pytest.raises(AssertionError):
         ctx.insert_at(
-            func,
             b,
             1,
             gtirb_rewriting.Patch.from_function(dummy_patch),
@@ -161,7 +154,6 @@ def test_expensive_assertions():
     # Replacing: offset is not on an instruction boundary
     with pytest.raises(AssertionError):
         ctx.replace_at(
-            func,
             b,
             1,
             0,
@@ -171,7 +163,6 @@ def test_expensive_assertions():
     # boundary
     with pytest.raises(AssertionError):
         ctx.replace_at(
-            func,
             b,
             0,
             6,
@@ -180,7 +171,6 @@ def test_expensive_assertions():
     # Replacing: range extends out of the block's bounds
     with pytest.raises(AssertionError):
         ctx.replace_at(
-            func,
             b,
             0,
             60,
@@ -188,14 +178,14 @@ def test_expensive_assertions():
         )
     # Deleting: offset is not on an instruction boundary
     with pytest.raises(AssertionError):
-        ctx.delete_at(func, b, 1, 0)
+        ctx.delete_at(b, 1, 0)
     # Deleting: offset is valid, but end position isn't on an instruction
     # boundary
     with pytest.raises(AssertionError):
-        ctx.delete_at(func, b, 0, 6)
+        ctx.delete_at(b, 0, 6)
     # Deleting: range extends out of the block's bounds
     with pytest.raises(AssertionError):
-        ctx.delete_at(func, b, 0, 60)
+        ctx.delete_at(b, 0, 60)
     ctx.apply()
 
 
@@ -208,9 +198,8 @@ def test_conflicting_insertion_replacement():
     func = add_function_object(m, "hi", b)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b, 7, gtirb_rewriting.Patch.from_function(dummy_patch))
+    ctx.insert_at(b, 7, gtirb_rewriting.Patch.from_function(dummy_patch))
     ctx.replace_at(
-        func,
         b,
         0,
         bi.size,
@@ -241,7 +230,6 @@ def test_inserting_function_and_call():
         "target", gtirb_rewriting.Patch.from_function(function_patch)
     )
     ctx.insert_at(
-        func,
         main_block,
         0,
         gtirb_rewriting.Patch.from_function(call_patch),
@@ -322,7 +310,7 @@ def test_insert_bytes_offset0():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b, 0, literal_patch("hi: nop"))
+    ctx.insert_at(b, 0, literal_patch("hi: nop"))
     ctx.apply()
 
     assert bi.address == 0x1000
@@ -364,7 +352,7 @@ def test_insert_bytes_last():
 
     # Test inserting after the jump instruction
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b1, 2, literal_patch("nop"))
+    ctx.insert_at(b1, 2, literal_patch("nop"))
     ctx.apply()
 
     assert bi.address == 0x1000
@@ -412,7 +400,7 @@ def test_insert_bytes_last_no_fallthrough():
 
     # Test inserting after a ret
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b, b.size, literal_patch("nop"))
+    ctx.insert_at(b, b.size, literal_patch("nop"))
     ctx.apply()
 
     assert bi.address == 0x1000
@@ -462,7 +450,7 @@ def test_replace_bytes_offset0():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.replace_at(func, b, 0, 7, literal_patch("hi: nop"))
+    ctx.replace_at(b, 0, 7, literal_patch("hi: nop"))
     ctx.apply()
 
     assert bi.address == 0x1000
@@ -505,7 +493,7 @@ def test_replace_bytes_last():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.replace_at(func, b, 1, 5, literal_patch("nop"))
+    ctx.replace_at(b, 1, 5, literal_patch("nop"))
     ctx.apply()
 
     assert bi.address == 0x1000
@@ -558,7 +546,7 @@ def test_replace_bytes_all():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.replace_at(func, b, 0, b.size, literal_patch("nop"))
+    ctx.replace_at(b, 0, b.size, literal_patch("nop"))
     ctx.apply()
 
     assert bi.address == 0x1000
@@ -604,7 +592,7 @@ def test_replace_bytes_with_trailing_zerosized_block():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.replace_at(func, b, 1, 5, literal_patch("jmp foo; foo:"))
+    ctx.replace_at(b, 1, 5, literal_patch("jmp foo; foo:"))
     ctx.apply()
 
     assert bi.contents == b"\x57\xEB\x00\x0f\x0b"
@@ -641,7 +629,6 @@ def test_replace_bytes_in_place_no_symbol():
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.replace_at(
-        func,
         b,
         1,
         1,
@@ -671,7 +658,6 @@ def test_replace_bytes_in_place_with_symbol():
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.replace_at(
-        func,
         b,
         1,
         1,
@@ -720,7 +706,7 @@ def test_insert_call_edges():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func1, func2])
-    ctx.insert_at(func2, b, 0, literal_patch("call func1; nop"))
+    ctx.insert_at(b, 0, literal_patch("call func1; nop"))
     ctx.apply()
 
     assert bi.contents == b"\xC3\xE8\x00\x00\x00\x00\x90\x90"
@@ -772,7 +758,7 @@ def test_remove_call_edges():
     # Now replace the call with a nop to verify that we delete the call edge
     # and replace the return edge with one to a proxy block.
     ctx = gtirb_rewriting.RewritingContext(m, [func1, func2])
-    ctx.replace_at(func2, b, 0, 5, literal_patch("nop"))
+    ctx.replace_at(b, 0, 5, literal_patch("nop"))
     ctx.apply()
 
     assert bi.contents == b"\xc3\x90\x90"
@@ -823,7 +809,7 @@ def test_insert_after_call_edges():
     # Now insert a nop after the call to verify the call's fallthrough edge
     # was updated correctly.
     ctx = gtirb_rewriting.RewritingContext(m, [func1, func2])
-    ctx.insert_at(func2, b, 5, literal_patch("first: nop; second: nop"))
+    ctx.insert_at(b, 5, literal_patch("first: nop; second: nop"))
     ctx.apply()
 
     assert bi.contents == b"\xC3\xEB\x00\x00\x00\x00\x90\x90\x90"
@@ -870,7 +856,7 @@ def test_new_return_edges():
 
     # Now insert a ret to verify that it gets the correct return edges
     ctx = gtirb_rewriting.RewritingContext(m, [func1, func2])
-    ctx.insert_at(func1, func1_block, 0, literal_patch("ret"))
+    ctx.insert_at(func1_block, 0, literal_patch("ret"))
     ctx.apply()
 
     assert bi.contents == b"\xC3\xC3\xEB\x00\x00\x00\x00\x90"
@@ -899,7 +885,7 @@ def test_insert_byte_directive_as_code():
 
     # Insert some bytes to verify we get a code block
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b, 0, literal_patch(".byte 0x66; .byte 0x90"))
+    ctx.insert_at(b, 0, literal_patch(".byte 0x66; .byte 0x90"))
     ctx.apply()
 
     assert bi.contents == b"\x66\x90\x90"
@@ -922,7 +908,7 @@ def test_insert_byte_directive_as_data_due_to_unreachable_entrypoint():
 
     # Insert some bytes that are trivially unreachable
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b, b.size, literal_patch(".byte 0x66; .byte 0x90"))
+    ctx.insert_at(b, b.size, literal_patch(".byte 0x66; .byte 0x90"))
     ctx.apply()
 
     (new_block,) = set(bi.blocks) - {b}
@@ -935,7 +921,7 @@ def test_insert_sym_expr_in_data():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #   func:
@@ -947,7 +933,6 @@ def test_insert_sym_expr_in_data():
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.insert_at(
-        func,
         b,
         0,
         literal_patch(
@@ -1002,7 +987,7 @@ def test_multiple_rewrites_with_red_zone():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
+    ctx.insert_at(b1, 0, gtirb_rewriting.Patch.from_function(patch))
     ctx.apply()
     set_all_blocks_alignment(m, 1)
 
@@ -1027,7 +1012,7 @@ def test_multiple_rewrites_with_red_zone():
     # Now try inserting calls again, which should still be going out of its
     # way to protect the red zone.
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
+    ctx.insert_at(b1, 0, gtirb_rewriting.Patch.from_function(patch))
     ctx.apply()
 
     assert "leafFunctions" in m.aux_data
@@ -1082,7 +1067,7 @@ def test_multiple_rewrites_without_red_zone():
     set_all_blocks_alignment(m, 1)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.replace_at(func, b1, 0, 5, literal_patch("nop"))
+    ctx.replace_at(b1, 0, 5, literal_patch("nop"))
     ctx.apply()
     set_all_blocks_alignment(m, 1)
 
@@ -1099,7 +1084,7 @@ def test_multiple_rewrites_without_red_zone():
     # Now try inserting new code and verify that we don't insert code to
     # protect the red zone.
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b1, 0, gtirb_rewriting.Patch.from_function(patch))
+    ctx.insert_at(b1, 0, gtirb_rewriting.Patch.from_function(patch))
     ctx.apply()
 
     assert "leafFunctions" in m.aux_data
@@ -1167,7 +1152,6 @@ def test_insert_code_other_sections(props_table_name: str):
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.insert_at(
-        func,
         b,
         b.size,
         literal_patch(
@@ -1226,7 +1210,6 @@ def test_align():
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
     ctx.insert_at(
-        func,
         b,
         1,
         literal_patch(
@@ -1262,10 +1245,66 @@ def test_logging(caplog):
     func = add_function_object(m, "func", b)
 
     ctx = gtirb_rewriting.RewritingContext(m, [func])
-    ctx.insert_at(func, b, 0, literal_patch("ud2; blah:"))
+    ctx.insert_at(b, 0, literal_patch("ud2; blah:"))
 
     with caplog.at_level(logging.DEBUG):
         ctx.apply()
 
         assert "nop" in caplog.text
         assert "ud2" in caplog.text
+
+
+def test_functionless():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b = add_code_block(bi, b"\x90")
+
+    ctx = gtirb_rewriting.RewritingContext(m, [])
+    ctx.insert_at(b, 0, literal_patch("int3"))
+    ctx.apply()
+
+    assert bi.contents == b"\xCC\x90"
+
+
+def test_function_scope_without_functions():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    _ = add_code_block(bi, b"\x90")
+
+    ctx = gtirb_rewriting.RewritingContext(m, [])
+    with pytest.raises(gtirb_rewriting.UnresolvableScopeError):
+        ctx.register_insert(
+            gtirb_rewriting.AllFunctionsScope(
+                gtirb_rewriting.FunctionPosition.ENTRY,
+                gtirb_rewriting.BlockPosition.ANYWHERE,
+            ),
+            literal_patch("int3"),
+        )
+    ctx.apply()
+
+    assert bi.contents == b"\x90"
+
+
+def test_function_back_compat():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b = add_code_block(bi, b"\x90")
+    func = add_function_object(m, "func", b)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    with pytest.deprecated_call():
+        ctx.insert_at(func, b, 0, literal_patch("ud2"))
+    with pytest.deprecated_call():
+        ctx.replace_at(func, b, 0, 1, literal_patch("int3"))
+    ctx.apply()
+
+    assert bi.contents == b"\x0F\x0B\xCC"

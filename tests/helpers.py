@@ -40,8 +40,9 @@ def add_function_object(
     """
 
     func_uuid = add_function(module, sym_or_name, entry_block, other_blocks)
+    name_sym = module.aux_data["functionNames"].data[func_uuid]
     return gtirb_functions.Function(
-        func_uuid, {entry_block}, {entry_block} | other_blocks
+        func_uuid, {entry_block}, {entry_block} | other_blocks, [name_sym]
     )
 
 

@@ -23,10 +23,22 @@ import contextlib
 import dataclasses
 import itertools
 import logging
-import operator
 import pathlib
 import uuid
-from typing import Dict, Iterator, List, NamedTuple, Sequence, Tuple, Union
+import warnings
+from collections import defaultdict
+from typing import (
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    overload,
+)
 
 import gtirb
 import gtirb_functions
@@ -54,8 +66,17 @@ from .utils import (
 )
 
 
+class UnresolvableScopeError(ValueError):
+    """
+    The scope passed to register_insert cannot be resolved or is invalid.
+    """
+
+    pass
+
+
 @dataclasses.dataclass
 class _Modification:
+    id: int
     scope: Scope
 
 
@@ -73,6 +94,96 @@ class _FunctionInsertion(NamedTuple):
     symbol: gtirb.Symbol
     block: gtirb.CodeBlock
     patch: Patch
+
+
+class _ModificationStore:
+    """
+    Maintains the list of modifications and resolves them to concrete offsets
+    when applying them.
+    """
+
+    def __init__(self):
+        self._scope_changes: List[_Modification] = []
+        self._block_changes: Dict[
+            gtirb.ByteBlock, List[_Modification]
+        ] = defaultdict(list)
+
+    def add(self, modification: _Modification) -> None:
+        """
+        Registers a modification.
+        """
+
+        known_targets = modification.scope._known_targets()
+        if known_targets is not None:
+            for target in known_targets:
+                self._block_changes[target].append(modification)
+        else:
+            self._scope_changes.append(modification)
+
+    def modifications_for_block(
+        self,
+        module: gtirb.Module,
+        block: gtirb.CodeBlock,
+        func: Optional[gtirb_functions.Function],
+    ) -> List[_Modification]:
+        """
+        Finds all modifications that apply to a given block.
+        """
+
+        results = []
+
+        if block in self._block_changes:
+            results.extend(self._block_changes[block])
+
+        for scope_change in self._scope_changes:
+            if scope_change.scope._block_matches(module, func, block):
+                results.append(scope_change)
+
+        return results
+
+    def resolve_offsets(
+        self,
+        block: gtirb.CodeBlock,
+        decoder: GtirbInstructionDecoder,
+        modifications: Iterable[_Modification],
+    ) -> List[Tuple[_Modification, int]]:
+        """
+        Determines the concrete offsets into the block that each modification
+        should be applied. The returned list will be in the order that the
+        patches should be applied.
+        """
+
+        instructions = None
+        if any(
+            modification.scope._needs_disassembly()
+            for modification in modifications
+        ):
+            instructions = tuple(decoder.get_instructions(block))
+
+        # Determine the insertion location for each patch.
+        # TODO: This is where bubbling will get hooked in, but for now
+        #       always insert at the first potential offset.
+        modifications_and_offsets: List[Tuple[_Modification, int]] = []
+        for modification in modifications:
+            offset = next(
+                modification.scope._potential_offsets(block, instructions)
+            )
+            modifications_and_offsets.append((modification, offset))
+
+        # Now sort all of the insertions by their offsets and then IDs. This
+        # ensures modifications at the same offset are performed in the order
+        # they were registered.
+        modifications_and_offsets.sort(
+            key=lambda mod_and_off: (mod_and_off[1], mod_and_off[0].id)
+        )
+
+        # Assert that we don't have any modifications that conflict.
+        last_end = 0
+        for modification, offset in modifications_and_offsets:
+            assert offset >= last_end, "modifications overlap"
+            last_end = offset + modification.scope._replacement_length()
+
+        return modifications_and_offsets
 
 
 class RewritingContext:
@@ -100,7 +211,8 @@ class RewritingContext:
         self._functions = functions
         self._decoder = GtirbInstructionDecoder(self._module.isa)
         self._abi = ABI.get(module)
-        self._modifications: List[_Modification] = []
+        self._modifications = _ModificationStore()
+        self._modification_id = itertools.count()
         self._function_insertions: List[_FunctionInsertion] = []
         self._logger = logger
         self._patch_id = 0
@@ -193,7 +305,7 @@ class RewritingContext:
     def _invoke_patch(
         self,
         modify_cache: _ModifyCache,
-        func: gtirb_functions.Function,
+        func: Optional[gtirb_functions.Function],
         block: gtirb.CodeBlock,
         offset: int,
         replacement_length: int,
@@ -214,6 +326,9 @@ class RewritingContext:
                   of bytes inserted.
         """
 
+        # Assume that any block not in a function could be a leaf function
+        is_leaf = not func or bool(self._leaf_functions.get(func.uuid, 1))
+
         registers = self._abi._allocate_patch_registers(patch.constraints)
         (
             prologue,
@@ -222,7 +337,7 @@ class RewritingContext:
         ) = self._abi._create_prologue_and_epilogue(
             patch.constraints,
             registers,
-            bool(self._leaf_functions.get(func.uuid, 1)),
+            is_leaf,
         )
 
         asm = patch.get_asm(
@@ -352,45 +467,18 @@ class RewritingContext:
         self,
         modify_cache: _ModifyCache,
         modifications: Sequence[_Modification],
-        func: gtirb_functions.Function,
+        func: Optional[gtirb_functions.Function],
         block: gtirb.CodeBlock,
     ) -> None:
         """
         Applies all of the patches that apply to a single block.
         """
 
-        instructions = None
-        if any(
-            modification.scope._needs_disassembly()
-            for modification in modifications
-        ):
-            instructions = tuple(self._decoder.get_instructions(block))
-
-        # Determine the insertion location for each patch.
-        # TODO: This is where bubbling will get hooked in, but for now
-        #       always insert at the first potential offset.
-        modifications_and_offsets = []
-        for modification in modifications:
-            offset = next(
-                modification.scope._potential_offsets(
-                    func, block, instructions
-                )
-            )
-            modifications_and_offsets.append((modification, offset))
-
-        # Now sort all of the insertions by their offsets. Python uses a
-        # stable sort so that this will still be deterministic for ties.
-        modifications_and_offsets.sort(key=operator.itemgetter(1))
-
-        # Assert that we don't have any modifications that conflict.
-        last_end = 0
-        for modification, offset in modifications_and_offsets:
-            assert offset >= last_end, "modifications overlap"
-            last_end = offset + modification.scope._replacement_length()
-
         actual_block = block
         total_insert_len = 0
-        for modification, offset in modifications_and_offsets:
+        for modification, offset in self._modifications.resolve_offsets(
+            block, self._decoder, modifications
+        ):
             assert isinstance(actual_block, gtirb.CodeBlock)
 
             block_delta = actual_block.offset - block.offset
@@ -565,7 +653,16 @@ class RewritingContext:
         :param scope: Where should the patch be placed?
         :param patch: The patch to be inserted.
         """
-        self._modifications.append(_InsertionOrReplacement(scope, patch))
+
+        if not self._functions and scope._needs_functions():
+            raise UnresolvableScopeError(
+                "this scope requires function information, which the target "
+                "module lacks"
+            )
+
+        self._modifications.add(
+            _InsertionOrReplacement(next(self._modification_id), scope, patch)
+        )
 
     def register_insert_function(
         self, name: str, patch: Patch
@@ -587,9 +684,9 @@ class RewritingContext:
         self._function_insertions.append(_FunctionInsertion(sym, block, patch))
         return sym
 
+    @overload
     def insert_at(
         self,
-        function: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         offset: int,
         patch: Patch,
@@ -598,11 +695,63 @@ class RewritingContext:
         Inserts a patch at a specific location in the binary. This is not
         subject to bubbling.
         """
-        self._validate_offset_and_length(block, offset, 0)
-        self.register_insert(
-            _SpecificLocationScope(function, block, offset), patch
-        )
+        ...
 
+    @overload
+    def insert_at(
+        self,
+        function: gtirb_functions.Function,
+        block: gtirb.CodeBlock,
+        offset: int,
+        patch: Patch,
+    ) -> None:
+        "Deprecated variant of insert_at that takes a function."
+        ...
+
+    def insert_at(self, *args, **kwargs) -> None:
+        def unpack_new(
+            block: gtirb.CodeBlock,
+            offset: int,
+            patch: Patch,
+        ):
+            return block, offset, patch
+
+        def unpack_old(
+            function: gtirb_functions.Function,
+            block: gtirb.CodeBlock,
+            offset: int,
+            patch: Patch,
+        ):
+            warnings.warn(
+                "passing a function to insert_at is deprecated",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            return block, offset, patch
+
+        try:
+            block, offset, patch = unpack_new(*args, **kwargs)
+        except TypeError:
+            block, offset, patch = unpack_old(*args, **kwargs)
+
+        self._validate_offset_and_length(block, offset, 0)
+        self.register_insert(_SpecificLocationScope(block, offset), patch)
+
+    @overload
+    def replace_at(
+        self,
+        block: gtirb.CodeBlock,
+        offset: int,
+        length: int,
+        patch: Patch,
+    ) -> None:
+        """
+        Inserts a patch at a specific code block in the binary, replacing the
+        instructions as specified. This is not subject to bubbling.
+        """
+        ...
+
+    @overload
     def replace_at(
         self,
         function: gtirb_functions.Function,
@@ -612,12 +761,49 @@ class RewritingContext:
         patch: Patch,
     ) -> None:
         """
-        Inserts a patch at a specific location in the binary, replacing the
-        instructions as specified. This is not subject to bubbling.
+        Deprecated variant of replace_at that takes a function.
         """
+        ...
+
+    def replace_at(
+        self,
+        *args,
+        **kwargs,
+    ) -> None:
+        def unpack_new(
+            block: gtirb.CodeBlock,
+            offset: int,
+            length: int,
+            patch: Patch,
+        ):
+            return block, offset, length, patch
+
+        def unpack_old(
+            function: gtirb_functions.Function,
+            block: gtirb.CodeBlock,
+            offset: int,
+            length: int,
+            patch: Patch,
+        ):
+            warnings.warn(
+                "passing a function to replace_at is deprecated",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            return block, offset, length, patch
+
+        try:
+            block, offset, length, patch = unpack_new(*args, **kwargs)
+        except TypeError:
+            block, offset, length, patch = unpack_old(*args, **kwargs)
+
         self._validate_offset_and_length(block, offset, length)
-        self.register_insert(
-            _SpecificLocationScope(function, block, offset, length), patch
+        self._modifications.add(
+            _InsertionOrReplacement(
+                next(self._modification_id),
+                _SpecificLocationScope(block, offset, length),
+                patch,
+            )
         )
 
     def delete_function(
@@ -630,13 +816,10 @@ class RewritingContext:
         """
 
         for block in function.get_all_blocks():
-            self.delete_at(
-                function, block, 0, block.size, retarget_to_proxy=True
-            )
+            self.delete_at(block, 0, block.size, retarget_to_proxy=True)
 
     def delete_at(
         self,
-        function: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         offset: int,
         length: int,
@@ -666,9 +849,10 @@ class RewritingContext:
                 "whole block"
             )
 
-        self._modifications.append(
+        self._modifications.add(
             _Deletion(
-                _SpecificLocationScope(function, block, offset, length),
+                next(self._modification_id),
+                _SpecificLocationScope(block, offset, length),
                 retarget_to_proxy=retarget_to_proxy,
             )
         )
@@ -688,6 +872,11 @@ class RewritingContext:
                 self._module, self._functions, return_cache
             )
 
+            functions_by_uuid = {func.uuid: func for func in self._functions}
+            sorted_blocks = sorted(
+                self._module.code_blocks, key=lambda b: b.address or 0
+            )
+
             for func in self._function_insertions:
                 self._insert_function_stub(
                     modify_cache, func.symbol, func.block
@@ -698,31 +887,21 @@ class RewritingContext:
                     modify_cache, func.symbol, func.block, func.patch
                 )
 
-            for f in sorted(self._functions, key=lambda f: f.uuid):
-                func_modifications = [
-                    modification
-                    for modification in self._modifications
-                    if modification.scope._function_matches(self._module, f)
-                ]
-                if not func_modifications:
+            for block in sorted_blocks:
+                func = None
+                func_uuid = modify_cache.functions_by_block.get(block)
+                if func_uuid:
+                    func = functions_by_uuid.get(func_uuid)
+
+                modifications = self._modifications.modifications_for_block(
+                    self._module, block, func
+                )
+                if not modifications:
                     continue
 
-                # Iterate over initial function blocks; ignore added blocks
-                # from patches.
-                for b in sorted(f.get_all_blocks(), key=lambda b: b.address):
-                    block_modifications = [
-                        modification
-                        for modification in func_modifications
-                        if modification.scope._block_matches(
-                            self._module, f, b
-                        )
-                    ]
-                    if not block_modifications:
-                        continue
-
-                    self._apply_modifications(
-                        modify_cache, block_modifications, f, b
-                    )
+                self._apply_modifications(
+                    modify_cache, modifications, func, block
+                )
 
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.
