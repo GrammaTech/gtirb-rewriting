@@ -805,7 +805,7 @@ def _remove_block(
     block.byte_interval = None
 
 
-def _delete_code(
+def _delete(
     cache: _ModifyCache,
     block: gtirb.ByteBlock,
     offset: int,

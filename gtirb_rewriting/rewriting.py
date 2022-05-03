@@ -49,7 +49,7 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 from .abi import ABI
 from .assembler import Assembler
 from .modify import (
-    _delete_code,
+    _delete,
     _make_return_cache,
     _modify_block_insert,
     _ModifyCache,
@@ -614,7 +614,7 @@ class RewritingContext:
                     insert_len - modification.scope._replacement_length()
                 )
             elif isinstance(modification, _Deletion):
-                actual_block = _delete_code(
+                actual_block = _delete(
                     modify_cache,
                     actual_block,
                     actual_offset,

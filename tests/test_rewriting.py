@@ -1312,7 +1312,7 @@ def test_function_back_compat():
 
 
 def test_data_rewriting():
-    ir, m = create_test_module(
+    _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
     _, bi = add_data_section(m, address=0x1000)
@@ -1333,7 +1333,7 @@ def test_data_rewriting():
 
 
 def test_data_with_code_patch():
-    ir, m = create_test_module(
+    _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
     _, bi = add_data_section(m, address=0x1000)
@@ -1352,7 +1352,7 @@ def test_data_with_code_patch():
 
 
 def test_data_with_symbolic_expressions():
-    ir, m = create_test_module(
+    _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
     _, bi = add_data_section(m, address=0x1000)
