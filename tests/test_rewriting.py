@@ -27,6 +27,7 @@ import gtirb_rewriting
 import pytest
 from gtirb_test_helpers import (
     add_code_block,
+    add_data_block,
     add_data_section,
     add_edge,
     add_proxy_block,
@@ -1308,3 +1309,62 @@ def test_function_back_compat():
     ctx.apply()
 
     assert bi.contents == b"\x0F\x0B\xCC"
+
+
+def test_data_rewriting():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_data_section(m, address=0x1000)
+
+    b = add_data_block(bi, b"boring\x00")
+
+    ctx = gtirb_rewriting.RewritingContext(m, [])
+    ctx.insert_at(b, 0, b"Hello")
+    ctx.replace_at(b, 0, 3, literal_patch(".byte 32"))
+    ctx.replace_at(b, 3, 3, b"World")
+    ctx.delete_at(b, 6, 1)
+    ctx.apply()
+
+    assert bi.contents == b"Hello World"
+    assert bi.blocks == {b}
+    assert b.offset == 0
+    assert b.size == 11
+
+
+def test_data_with_code_patch():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_data_section(m, address=0x1000)
+
+    b = add_data_block(bi, b"\x00")
+
+    ctx = gtirb_rewriting.RewritingContext(m, [])
+    ctx.insert_at(b, 0, literal_patch("nop"))
+    ctx.apply()
+
+    assert bi.contents == b"\x90\x00"
+    assert len(bi.blocks) == 2
+    # This probably isn't an API contract, but it's a logical consequence of
+    # needing to avoid 0-sized blocks.
+    assert b.byte_interval is None
+
+
+def test_data_with_symbolic_expressions():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_data_section(m, address=0x1000)
+
+    b = add_data_block(bi, b"\xFF")
+    test_sym = add_symbol(m, "test", b)
+
+    ctx = gtirb_rewriting.RewritingContext(m, [])
+    ctx.replace_at(b, 0, 1, literal_patch(".quad test"))
+    ctx.apply()
+
+    assert bi.blocks == {b}
+    assert bi.contents == b"\x00" * 8
+    assert bi.symbolic_expressions[0] == gtirb.SymAddrConst(0, test_sym)
+    assert m.aux_data["symbolicExpressionSizes"].data[gtirb.Offset(bi, 0)] == 8

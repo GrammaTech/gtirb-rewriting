@@ -49,7 +49,7 @@ from gtirb_capstone.instructions import GtirbInstructionDecoder
 from .abi import ABI
 from .assembler import Assembler
 from .modify import (
-    _delete_code,
+    _delete,
     _make_return_cache,
     _modify_block_insert,
     _ModifyCache,
@@ -82,7 +82,7 @@ class _Modification:
 
 @dataclasses.dataclass
 class _InsertionOrReplacement(_Modification):
-    patch: Patch
+    patch: Union[Patch, bytes]
 
 
 @dataclasses.dataclass
@@ -123,7 +123,7 @@ class _ModificationStore:
     def modifications_for_block(
         self,
         module: gtirb.Module,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         func: Optional[gtirb_functions.Function],
     ) -> List[_Modification]:
         """
@@ -143,7 +143,7 @@ class _ModificationStore:
 
     def resolve_offsets(
         self,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         decoder: GtirbInstructionDecoder,
         modifications: Iterable[_Modification],
     ) -> List[Tuple[_Modification, int]]:
@@ -154,7 +154,7 @@ class _ModificationStore:
         """
 
         instructions = None
-        if any(
+        if isinstance(block, gtirb.CodeBlock) and any(
             modification.scope._needs_disassembly()
             for modification in modifications
         ):
@@ -270,13 +270,18 @@ class RewritingContext:
 
     @contextlib.contextmanager
     def _log_patch_changes(
-        self, patch: Patch, block: gtirb.CodeBlock, offset: int
+        self, patch: Union[Patch, bytes], block: gtirb.ByteBlock, offset: int
     ) -> Iterator[None]:
         """
         Log before/after state when applying a patch.
         """
 
         if self._logger.isEnabledFor(logging.DEBUG):
+            patch_name = str(patch) if isinstance(patch, Patch) else "bytes"
+            self._logger.debug(
+                "Applying %s at %s+%s", patch_name, block, offset
+            )
+
             self._logger.debug("Applying %s at %s+%s", patch, block, offset)
             self._logger.debug("  Before:")
             show_block_asm(block, decoder=self._decoder, logger=self._logger)
@@ -302,32 +307,58 @@ class RewritingContext:
         else:
             yield
 
+    def _successor_for_block(
+        self, sorted_blocks: Sequence[gtirb.ByteBlock], idx: int
+    ) -> Iterator[gtirb.ByteBlock]:
+        """
+        Gets the successor(s) for a block.
+        :param sorted_blocks: A sequence of blocks that has been sorted by
+                              address.
+        :param idx: The index of the block in question.
+        :yields: The successor, or multiple if it is ambiguous.
+        """
+
+        block = sorted_blocks[idx]
+        idx += 1
+
+        if isinstance(block, gtirb.CodeBlock):
+            fallthrough_targets = _block_fallthrough_targets(block)
+            if fallthrough_targets:
+                yield from fallthrough_targets
+                return
+
+        has_last_address = False
+        last_address = None
+        while idx < len(sorted_blocks) and (
+            not has_last_address or sorted_blocks[idx].address == last_address
+        ):
+            yield sorted_blocks[idx]
+            last_address = sorted_blocks[idx].address
+            has_last_address = True
+            idx += 1
+
     def _invoke_patch(
         self,
-        modify_cache: _ModifyCache,
-        func: Optional[gtirb_functions.Function],
-        block: gtirb.CodeBlock,
-        offset: int,
-        replacement_length: int,
         patch: Patch,
+        actual_block: gtirb.ByteBlock,
+        actual_offset: int,
         context: InsertionContext,
-    ) -> Tuple[gtirb.CodeBlock, int]:
+    ) -> Optional[Assembler.Result]:
         """
-        Invokes a patch at a concrete location and applies its results to the
-        target module.
-        :param modify_cache: The modify cache, which should be reused across
-                             multiple modifications.
-        :param func: The function to insert at.
-        :param block: The block to insert at.
-        :param offset: The offset within the block to insert at.
+        Invokes a patch at a concrete location and assembles it.
         :param patch: The patch to invoke.
+        :param actual_block: The actual block to insert at. May be different
+                             what the context says.
+        :param actual_offset: The actual offset within the block to insert at.
+                              May be different than what the context says.
         :param context: The InsertionContext to pass to the patch.
-        :returns: A tuple with: the block that ends the patch and the number
-                  of bytes inserted.
+        :returns: The result of assembling the patch.
         """
 
         # Assume that any block not in a function could be a leaf function
-        is_leaf = not func or bool(self._leaf_functions.get(func.uuid, 1))
+        is_leaf = not context.function or bool(
+            self._leaf_functions.get(context.function.uuid, 1)
+        )
 
         registers = self._abi._allocate_patch_registers(patch.constraints)
         (
@@ -345,15 +376,20 @@ class RewritingContext:
             *registers.scratch_registers,
         )
         if not asm:
-            return block, 0
+            return None
 
         self._patch_id += 1
 
         is_trivially_unreachable = False
-        if offset == block.size:
+        if (
+            isinstance(actual_block, gtirb.CodeBlock)
+            and actual_offset == actual_block.size
+        ):
             is_trivially_unreachable = not any(
-                _block_fallthrough_targets(block)
+                _block_fallthrough_targets(actual_block)
             )
+        elif isinstance(actual_block, gtirb.DataBlock):
+            is_trivially_unreachable = True
 
         assembler = Assembler(
             self._module,
@@ -370,7 +406,68 @@ class RewritingContext:
             raise
         for snippet in epilogue:
             assembler.assemble(snippet.code, snippet.x86_syntax)
-        assembler_result = assembler.finalize()
+
+        return assembler.finalize()
+
+    def _synthesize_result(
+        self, target: gtirb.ByteBlock, data: bytes
+    ) -> Assembler.Result:
+        """
+        Creates an assembler result for a chunk of bytes. This is equivalent
+        to assembling a patch that uses that many .byte directives and avoids
+        the performance cost.
+        """
+
+        assert target.section and target.module
+
+        section_properties = _auxdata.compat_section_properties(target.module)
+        image_type, image_flags = section_properties.get(
+            target.section, (0, 0)
+        )
+
+        new_block = gtirb.DataBlock(offset=0, size=len(data))
+        sect = Assembler.Result.Section(
+            name=target.section.name,
+            flags=target.section.flags,
+            data=data,
+            blocks=[new_block],
+            symbolic_expressions={},
+            symbolic_expression_sizes={},
+            alignment={},
+            image_type=image_type,
+            image_flags=image_flags,
+        )
+        return Assembler.Result(
+            sections={sect.name: sect},
+            cfg=gtirb.CFG(),
+            symbols=[],
+            proxies=set(),
+        )
+
+    def _insert_assembler_result(
+        self,
+        modify_cache: _ModifyCache,
+        block: gtirb.ByteBlock,
+        offset: int,
+        replacement_length: int,
+        patch: Union[Patch, bytes],
+        context: InsertionContext,
+        assembler_result: Assembler.Result,
+        next_block: Optional[gtirb.ByteBlock],
+    ) -> Tuple[gtirb.ByteBlock, int]:
+        """
+        Invokes a patch at a concrete location and applies its results to the
+        target module.
+        :param modify_cache: The modify cache, which should be reused across
+                             multiple modifications.
+        :param func: The function to insert at.
+        :param block: The block to insert at.
+        :param offset: The offset within the block to insert at.
+        :param patch: The patch to invoke.
+        :param context: The InsertionContext to pass to the patch.
+        :returns: A tuple with: the block that ends the patch and the number
+                  of bytes inserted.
+        """
 
         with self._log_patch_changes(patch, block, offset):
             new_end = _modify_block_insert(
@@ -379,6 +476,7 @@ class RewritingContext:
                 offset,
                 replacement_length,
                 assembler_result,
+                next_block,
             )
 
         self._symbols_by_name.update(
@@ -468,7 +566,8 @@ class RewritingContext:
         modify_cache: _ModifyCache,
         modifications: Sequence[_Modification],
         func: Optional[gtirb_functions.Function],
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
+        next_block: Optional[gtirb.ByteBlock],
     ) -> None:
         """
         Applies all of the patches that apply to a single block.
@@ -479,43 +578,50 @@ class RewritingContext:
         for modification, offset in self._modifications.resolve_offsets(
             block, self._decoder, modifications
         ):
-            assert isinstance(actual_block, gtirb.CodeBlock)
+            assert isinstance(actual_block, gtirb.ByteBlock)
 
             block_delta = actual_block.offset - block.offset
+            actual_offset = offset + total_insert_len - block_delta
+
             if isinstance(modification, _InsertionOrReplacement):
-                actual_block, insert_len = self._invoke_patch(
+                context = InsertionContext(self._module, func, block, offset)
+                if isinstance(modification.patch, Patch):
+                    assembler_result = self._invoke_patch(
+                        modification.patch,
+                        actual_block,
+                        actual_offset,
+                        context,
+                    )
+                else:
+                    assembler_result = self._synthesize_result(
+                        actual_block, modification.patch
+                    )
+
+                if not assembler_result:
+                    continue
+
+                actual_block, insert_len = self._insert_assembler_result(
                     modify_cache,
-                    func,
                     actual_block,
-                    offset + total_insert_len - block_delta,
+                    actual_offset,
                     modification.scope._replacement_length(),
                     modification.patch,
-                    InsertionContext(self._module, func, block, offset),
+                    context,
+                    assembler_result,
+                    next_block,
                 )
                 total_insert_len += (
                     insert_len - modification.scope._replacement_length()
                 )
             elif isinstance(modification, _Deletion):
-                if not modification.retarget_to_proxy:
-                    successors = modify_cache.original_successors.get(block)
-                    if successors:
-                        if len(successors) > 1:
-                            self._logger.warning(
-                                "successor to %s is ambiguous", block
-                            )
-                        next_block = successors[0]
-                    else:
-                        next_block = None
-                else:
-                    next_block = gtirb.ProxyBlock()
-                    self._module.proxies.add(next_block)
-
-                actual_block = _delete_code(
+                actual_block = _delete(
                     modify_cache,
                     actual_block,
-                    offset + total_insert_len - block_delta,
+                    actual_offset,
                     modification.scope._replacement_length(),
-                    next_block,
+                    next_block
+                    if not modification.retarget_to_proxy
+                    else gtirb.ProxyBlock(module=self._module),
                 )
                 total_insert_len -= modification.scope._replacement_length()
 
@@ -617,12 +723,28 @@ class RewritingContext:
         )
         context = InsertionContext(self._module, func, block, 0)
 
-        self._invoke_patch(
-            modify_cache, func, block, 0, block.size, patch, context
+        assembler_result = self._invoke_patch(
+            patch,
+            block,
+            0,
+            context,
+        )
+        if assembler_result is None:
+            return
+
+        self._insert_assembler_result(
+            modify_cache,
+            block,
+            0,
+            block.size,
+            patch,
+            context,
+            assembler_result,
+            None,
         )
 
     def _validate_offset_and_length(
-        self, block: gtirb.CodeBlock, offset: int, length: int
+        self, block: gtirb.ByteBlock, offset: int, length: int
     ) -> None:
         """
         Validate that an offset and length fall within a code block and, if
@@ -633,7 +755,7 @@ class RewritingContext:
         assert length >= 0
         assert offset + length <= block.size
 
-        if self._expensive_assertions:
+        if self._expensive_assertions and isinstance(block, gtirb.CodeBlock):
             disassembly = tuple(self._decoder.get_instructions(block))
             if not _is_partial_disassembly(block, disassembly):
                 legal_offsets = {
@@ -700,6 +822,18 @@ class RewritingContext:
     @overload
     def insert_at(
         self,
+        block: gtirb.DataBlock,
+        offset: int,
+        patch: Union[Patch, bytes],
+    ) -> None:
+        """
+        Inserts a patch at a specific location in the binary.
+        """
+        ...
+
+    @overload
+    def insert_at(
+        self,
         function: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         offset: int,
@@ -710,7 +844,7 @@ class RewritingContext:
 
     def insert_at(self, *args, **kwargs) -> None:
         def unpack_new(
-            block: gtirb.CodeBlock,
+            block: gtirb.ByteBlock,
             offset: int,
             patch: Patch,
         ):
@@ -754,6 +888,20 @@ class RewritingContext:
     @overload
     def replace_at(
         self,
+        block: gtirb.DataBlock,
+        offset: int,
+        length: int,
+        patch: Union[Patch, bytes],
+    ) -> None:
+        """
+        Inserts a patch or bytes at a specific data block in the binary,
+        replacing the instructions as specified.
+        """
+        ...
+
+    @overload
+    def replace_at(
+        self,
         function: gtirb_functions.Function,
         block: gtirb.CodeBlock,
         offset: int,
@@ -771,7 +919,7 @@ class RewritingContext:
         **kwargs,
     ) -> None:
         def unpack_new(
-            block: gtirb.CodeBlock,
+            block: gtirb.ByteBlock,
             offset: int,
             length: int,
             patch: Patch,
@@ -780,10 +928,10 @@ class RewritingContext:
 
         def unpack_old(
             function: gtirb_functions.Function,
-            block: gtirb.CodeBlock,
+            block: gtirb.ByteBlock,
             offset: int,
             length: int,
-            patch: Patch,
+            patch: Union[Patch, bytes],
         ):
             warnings.warn(
                 "passing a function to replace_at is deprecated",
@@ -820,7 +968,7 @@ class RewritingContext:
 
     def delete_at(
         self,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         offset: int,
         length: int,
         *,
@@ -874,7 +1022,7 @@ class RewritingContext:
 
             functions_by_uuid = {func.uuid: func for func in self._functions}
             sorted_blocks = sorted(
-                self._module.code_blocks, key=lambda b: b.address or 0
+                self._module.byte_blocks, key=lambda b: b.address or 0
             )
 
             for func in self._function_insertions:
@@ -887,11 +1035,12 @@ class RewritingContext:
                     modify_cache, func.symbol, func.block, func.patch
                 )
 
-            for block in sorted_blocks:
+            for idx, block in enumerate(sorted_blocks):
                 func = None
-                func_uuid = modify_cache.functions_by_block.get(block)
-                if func_uuid:
-                    func = functions_by_uuid.get(func_uuid)
+                if isinstance(block, gtirb.CodeBlock):
+                    func_uuid = modify_cache.functions_by_block.get(block)
+                    if func_uuid:
+                        func = functions_by_uuid.get(func_uuid)
 
                 modifications = self._modifications.modifications_for_block(
                     self._module, block, func
@@ -899,8 +1048,18 @@ class RewritingContext:
                 if not modifications:
                     continue
 
+                next_blocks = tuple(
+                    self._successor_for_block(sorted_blocks, idx)
+                )
+                if len(next_blocks) > 1:
+                    self._logger.warning("successor to %s is ambiguous", block)
+
                 self._apply_modifications(
-                    modify_cache, modifications, func, block
+                    modify_cache,
+                    modifications,
+                    func,
+                    block,
+                    next(iter(next_blocks), None),
                 )
 
         # Remove CFI directives, since we will most likely be invalidating

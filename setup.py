@@ -44,7 +44,6 @@ setuptools.setup(
         "dataclasses ; python_version<'3.7.0'",
         "packaging",
         "entrypoints",
-        "sortedcontainers ~= 2.3",
         "typing-extensions",
     ],
     entry_points={

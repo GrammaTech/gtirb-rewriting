@@ -81,7 +81,7 @@ class Scope:
         self,
         module: gtirb.Module,
         func: Optional[gtirb_functions.Function],
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
     ) -> bool:
         """
         Determines if a block matches the scope. If this returns False, no
@@ -107,7 +107,7 @@ class Scope:
 
     def _potential_offsets(
         self,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
         """
@@ -139,8 +139,11 @@ class AllBlocksScope(Scope):
         self,
         module: gtirb.Module,
         func: Optional[gtirb_functions.Function],
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
     ) -> bool:
+        if not isinstance(block, gtirb.CodeBlock):
+            return False
+
         # Despite the name being AllBlocksScope, it isn't very useful to edit
         # .plt or .init.
         if block.section and block.section.name != _text_section_name(module):
@@ -156,9 +159,10 @@ class AllBlocksScope(Scope):
 
     def _potential_offsets(
         self,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
+        assert isinstance(block, gtirb.CodeBlock)
         return _potential_offsets_in_block(self.position, block, disassembly)
 
 
@@ -178,7 +182,7 @@ class SingleBlockScope(Scope):
         self,
         module: gtirb.Module,
         func: Optional[gtirb_functions.Function],
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
     ) -> bool:
         return self.block == block
 
@@ -187,9 +191,10 @@ class SingleBlockScope(Scope):
 
     def _potential_offsets(
         self,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
+        assert isinstance(block, gtirb.CodeBlock)
         return _potential_offsets_in_block(self.position, block, disassembly)
 
 
@@ -227,7 +232,7 @@ class AllFunctionsScope(Scope):
         self,
         module: gtirb.Module,
         func: Optional[gtirb_functions.Function],
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
     ) -> bool:
         if func is None:
             return False
@@ -255,9 +260,10 @@ class AllFunctionsScope(Scope):
 
     def _potential_offsets(
         self,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
+        assert isinstance(block, gtirb.CodeBlock)
         return _potential_offsets_in_block(
             self.block_position, block, disassembly
         )
@@ -281,7 +287,7 @@ class _SpecificLocationScope(Scope):
         self,
         module: gtirb.Module,
         func: Optional[gtirb_functions.Function],
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
     ) -> bool:
         return self.block == block
 
@@ -293,7 +299,7 @@ class _SpecificLocationScope(Scope):
 
     def _potential_offsets(
         self,
-        block: gtirb.CodeBlock,
+        block: gtirb.ByteBlock,
         disassembly: Optional[Sequence[capstone_gt.CsInsn]],
     ) -> Iterator[int]:
         yield self.offset
