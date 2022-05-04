@@ -42,7 +42,6 @@ setuptools.setup(
         "mcasm ~= 0.1.5",
         "more-itertools",
         "dataclasses ; python_version<'3.7.0'",
-        "packaging",
         "entrypoints",
         "sortedcontainers ~= 2.3",
         "typing-extensions",
