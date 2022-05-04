@@ -396,6 +396,32 @@ def test_temp_symbol_suffix():
     assert bar_sym.referent.size == 2
 
 
+@pytest.mark.parametrize(
+    ("variant", "attrs"),
+    gtirb_rewriting.Assembler._ELF_VARIANT_KINDS.items(),
+    ids=gtirb_rewriting.Assembler._ELF_VARIANT_KINDS.keys(),
+)
+def test_elf_sym_attrs(variant, attrs):
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+        binary_type=["DYN"],
+    )
+    sym = add_symbol(m, "foo", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        f"mov rax, {sym.name}@{variant}",
+        x86_syntax=gtirb_rewriting.X86Syntax.INTEL,
+    )
+    result = assembler.finalize()
+
+    assert len(result.text_section.symbolic_expressions) == 1
+    (expr,) = result.text_section.symbolic_expressions.values()
+    assert isinstance(expr, gtirb.SymAddrConst)
+    assert expr.attributes == attrs
+
+
 def test_arm64_sym_attribute_lo12():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF,

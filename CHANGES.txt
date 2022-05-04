@@ -17,6 +17,8 @@
 - Data blocks can now be targetted with insert_at, replace_at, and delete_at.
 - Scratch registers are now passed in the insertion context instead of as
   parameters. This is a breaking change.
+- Added support for more ELF symbol variants: GOT, GOTNTPOFF, GOTOFF, GOTTPOFF,
+  TPOFF, NTPOFF, DTPOFF, TLSGD, and TLSLD.
 
 0.0.24:
 - symbolicExpressionSizes is now populated for expressions in code
