@@ -22,7 +22,7 @@
 
 import dataclasses
 from functools import partial
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 import gtirb
 import gtirb_functions
@@ -51,6 +51,11 @@ class InsertionContext:
     The amount that the stack has been adjusted to allow for the insertion.
     A value of None means that it is unknown how much it has been affected
     (which can happen with the align_stack constraint).
+    """
+
+    scratch_registers: List[Register] = dataclasses.field(default_factory=list)
+    """
+    Scratch registers, as requested by the patch's constraints.
     """
 
     def decorate_extern_symbol(self, name: str) -> str:
@@ -107,9 +112,7 @@ class Patch:
     def __init__(self, constraints: Constraints):
         self.constraints = constraints
 
-    def get_asm(
-        self, insertion_context: InsertionContext, *args: Register
-    ) -> Optional[str]:
+    def get_asm(self, insertion_context: InsertionContext) -> Optional[str]:
         """
         Returns the assembly string for the patch.
 
@@ -121,7 +124,6 @@ class Patch:
 
         :param insertion_context: The concrete location where the code will be
                                   inserted.
-        :param args: Any scratch registers requested by the patch.
         """
         raise NotImplementedError
 
@@ -138,8 +140,8 @@ class Patch:
             def __str__(self) -> str:
                 return str(func)
 
-            def get_asm(self, insertion_context, *args):
-                return func(insertion_context, *args)
+            def get_asm(self, insertion_context):
+                return func(insertion_context)
 
         if not constraints:
             constraints = _find_constraints(func)

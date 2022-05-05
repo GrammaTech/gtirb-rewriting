@@ -128,8 +128,7 @@ for function in functions:
 
 Patches can specify how many scratch general-purpose registers they require
 by setting `scratch_registers` in their constraints object. gtirb-rewriting
-will then pass that many register objects as parameters (after the insertion
-context).
+will then provide those registers in the insertion context.
 
 Register objects can be formatted into a string to get the register name,
 optionally using the format specifier to get the name of a subregister.
@@ -140,10 +139,12 @@ the scratch registers as needed around the patch.
 For example, a patch that takes two scratch registers:
 ```python
 @patch_constraints(scratch_registers=2)
-def sample_patch(self, context, reg1, reg2):
+def sample_patch(self, context):
+    reg1, reg2 = context.scratch_registers
+
     return f"""
-    mov $0, %{reg1}
-    mov $1, %{reg2:32}
+        mov $0, %{reg1}
+        mov $1, %{reg2:32}
     """
 ```
 

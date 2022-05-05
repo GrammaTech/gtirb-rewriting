@@ -372,8 +372,11 @@ class RewritingContext:
         )
 
         asm = patch.get_asm(
-            dataclasses.replace(context, stack_adjustment=stack_adjustment),
-            *registers.scratch_registers,
+            dataclasses.replace(
+                context,
+                stack_adjustment=stack_adjustment,
+                scratch_registers=registers.scratch_registers,
+            )
         )
         if not asm:
             return None
