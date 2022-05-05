@@ -27,12 +27,7 @@ import gtirb
 import mcasm
 
 from .assembly import X86Syntax
-from .utils import (
-    _is_elf_pie,
-    _is_fallthrough_edge,
-    _target_triple,
-    is_gtirb_at_least_version,
-)
+from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 
 
 class UndefSymbolError(ValueError):
@@ -63,7 +58,6 @@ class Assembler:
         module: gtirb.Module,
         *,
         temp_symbol_suffix: Optional[str] = None,
-        module_symbols: Optional[Dict[str, gtirb.Symbol]] = None,
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
     ) -> None:
@@ -74,9 +68,6 @@ class Assembler:
                assembler that targets the same module means that the assembly
                itself does not have to be concerned with having unique
                temporary symbol names.
-        :param module_symbols: A map from symbol name to symbol, to speed up
-                               name lookups. This must be in sync with the
-                               module's symbols.
         :param trivially_unreachable: Is the entry block of the patch
                                       obviously unreachable? For example,
                                       inserting after a ret instruction.
@@ -88,10 +79,6 @@ class Assembler:
         self._temp_symbol_suffix = temp_symbol_suffix
         self._cfg = gtirb.CFG()
         self._local_symbols: Dict[str, gtirb.Symbol] = {}
-        if module_symbols is not None:
-            self._module_symbols = module_symbols
-        else:
-            self._module_symbols = {sym.name: sym for sym in module.symbols}
         self._trivially_unreachable = trivially_unreachable
         self._allow_undef_symbols = allow_undef_symbols
         self._proxies: Set[gtirb.ProxyBlock] = set()
@@ -181,9 +168,8 @@ class Assembler:
         if symbol["isTemporary"] and self._temp_symbol_suffix is not None:
             symbol_name += self._temp_symbol_suffix
 
-        assert (
-            label_name not in self._local_symbols
-            and symbol_name not in self._module_symbols
+        assert label_name not in self._local_symbols and not any(
+            self._module.symbols_named(label_name)
         ), f"{symbol_name} defined multiple times"
 
         label_sym = gtirb.Symbol(name=symbol_name, payload=gtirb.CodeBlock())
@@ -517,16 +503,10 @@ class Assembler:
             elif elfName == ":got:":
                 attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
             elif elfName == ":lo12:":
-                if is_gtirb_at_least_version("1.10.5-dev"):
-                    attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
-                else:
-                    attributes.add(gtirb.SymbolicExpression.Attribute.Part0)
+                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
             elif elfName == ":got_lo12:":
-                if is_gtirb_at_least_version("1.10.5-dev"):
-                    attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
-                    attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
-                else:
-                    attributes.add(gtirb.SymbolicExpression.Attribute.Part1)
+                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
             else:
                 raise NotImplementedError(
                     f"unknown aarch64-specific fixup: {elfName}"
@@ -585,7 +565,7 @@ class Assembler:
         if sym:
             return sym
 
-        sym = self._module_symbols.get(name, None)
+        sym = next(self._module.symbols_named(name), None)
         if sym and sym.module == self._module:
             return sym
 
@@ -704,7 +684,6 @@ class Assembler:
         self.__init__(
             self._module,
             temp_symbol_suffix=self._temp_symbol_suffix,
-            module_symbols=self._module_symbols,
             trivially_unreachable=self._trivially_unreachable,
             allow_undef_symbols=self._allow_undef_symbols,
         )

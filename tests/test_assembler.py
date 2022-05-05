@@ -424,14 +424,9 @@ def test_arm64_sym_attribute_lo12():
     assert isinstance(text_section.symbolic_expressions[4], gtirb.SymAddrConst)
     assert text_section.symbolic_expressions[4].symbol is sym
     assert text_section.symbolic_expressions[4].offset == 0
-    if gtirb_rewriting.is_gtirb_at_least_version("1.10.5-dev"):
-        assert text_section.symbolic_expressions[4].attributes == {
-            gtirb.SymbolicExpression.Attribute.Lo12
-        }
-    else:
-        assert text_section.symbolic_expressions[4].attributes == {
-            gtirb.SymbolicExpression.Attribute.Part0
-        }
+    assert text_section.symbolic_expressions[4].attributes == {
+        gtirb.SymbolicExpression.Attribute.Lo12
+    }
 
 
 def test_arm64_sym_attribute_got():
@@ -464,15 +459,10 @@ def test_arm64_sym_attribute_got():
     assert isinstance(text_section.symbolic_expressions[4], gtirb.SymAddrConst)
     assert text_section.symbolic_expressions[4].symbol is sym
     assert text_section.symbolic_expressions[4].offset == 0
-    if gtirb_rewriting.is_gtirb_at_least_version("1.10.5-dev"):
-        assert text_section.symbolic_expressions[4].attributes == {
-            gtirb.SymbolicExpression.Attribute.Lo12,
-            gtirb.SymbolicExpression.Attribute.GotRef,
-        }
-    else:
-        assert text_section.symbolic_expressions[4].attributes == {
-            gtirb.SymbolicExpression.Attribute.Part1,
-        }
+    assert text_section.symbolic_expressions[4].attributes == {
+        gtirb.SymbolicExpression.Attribute.Lo12,
+        gtirb.SymbolicExpression.Attribute.GotRef,
+    }
 
 
 def test_undef_symbols():

@@ -394,7 +394,6 @@ class RewritingContext:
         assembler = Assembler(
             self._module,
             temp_symbol_suffix=f"_{self._patch_id}",
-            module_symbols=self._symbols_by_name,
             trivially_unreachable=is_trivially_unreachable,
         )
         for snippet in prologue:
@@ -478,10 +477,6 @@ class RewritingContext:
                 assembler_result,
                 next_block,
             )
-
-        self._symbols_by_name.update(
-            {sym.name: sym for sym in assembler_result.symbols}
-        )
 
         return (
             new_end,
@@ -1015,7 +1010,6 @@ class RewritingContext:
         with prepare_for_rewriting(
             self._module, self._abi.nop()
         ), _make_return_cache(self._module.ir) as return_cache:
-            self._symbols_by_name = {s.name: s for s in self._module.symbols}
             modify_cache = _ModifyCache(
                 self._module, self._functions, return_cache
             )
