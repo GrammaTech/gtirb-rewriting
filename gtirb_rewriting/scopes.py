@@ -26,11 +26,7 @@ import capstone_gt
 import gtirb
 import gtirb_functions
 
-from .utils import (
-    _is_partial_disassembly,
-    _nonterminator_instructions,
-    _text_section_name,
-)
+from .utils import _is_partial_disassembly, _nonterminator_instructions
 
 ENTRYPOINT_NAME = "\0"
 """
@@ -122,9 +118,9 @@ class Scope:
 
 class AllBlocksScope(Scope):
     """
-    Specifies that an insertion should happen in all code blocks in the text
-    section. The functions that this inserts into can be controlled with a
-    list of names (or regular expressions) to check the name against.
+    Specifies that an insertion should happen in all code blocks. The
+    functions that this inserts into can be controlled with a list of names
+    (or regular expressions) to check the name against.
     """
 
     def __init__(
@@ -142,11 +138,6 @@ class AllBlocksScope(Scope):
         block: gtirb.ByteBlock,
     ) -> bool:
         if not isinstance(block, gtirb.CodeBlock):
-            return False
-
-        # Despite the name being AllBlocksScope, it isn't very useful to edit
-        # .plt or .init.
-        if block.section and block.section.name != _text_section_name(module):
             return False
 
         if func is None or self.exclude_functions is None:
