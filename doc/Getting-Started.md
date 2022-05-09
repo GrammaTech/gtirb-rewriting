@@ -316,6 +316,6 @@ RewritingContext's) constructor, it will log to the "gtirb_rewriting" logger.
 
 This can be made visible by:
 ```python
-logging.basicConig(format="%(message)s")
+logging.basicConfig(format="%(message)s")
 logging.getLogger("gtirb_rewriting").setLevel(logging.DEBUG)
 ```
