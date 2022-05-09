@@ -12,8 +12,6 @@
 - Functions are no longer needed for insert_at and replace_at. New overloads
   have been added that drop the function parameter and, in the future, the
   old overload will be removed.
-- AllBlocksScope now targets all blocks in the .text section, even if they are
-  not part of functions.
 - Data blocks can now be targetted with insert_at, replace_at, and delete_at.
 - Scratch registers are now passed in the insertion context instead of as
   parameters. This is a breaking change.
