@@ -114,13 +114,13 @@ def test_all_block_scope_sections():
     _, bi = add_data_section(mod, address=0x1000)
     # xor %eax, %eax; xor %ecx, %ecx
     block = add_code_block(bi, b"\x31\xC0\x31\xC9")
-    func = add_function_object(mod, "func", block)
 
+    # The block isn't in the .text section or in a function, but should still
+    # match because it's a code block.
     scope = gtirb_rewriting.AllBlocksScope(
         position=gtirb_rewriting.BlockPosition.ENTRY
     )
-    # This shouldn't match because it's not in the text section
-    assert not scope._block_matches(mod, func, block)
+    assert scope._block_matches(mod, None, block)
 
 
 def test_single_block_scope():
