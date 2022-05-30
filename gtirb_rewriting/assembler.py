@@ -53,6 +53,29 @@ class Assembler:
     GTIRB structures as it goes.
     """
 
+    _ELF_VARIANT_KINDS = {
+        "PLT": {gtirb.SymbolicExpression.Attribute.PltRef},
+        "GOTNTPOFF": {
+            gtirb.SymbolicExpression.Attribute.GotOff,
+            gtirb.SymbolicExpression.Attribute.NtpOff,
+        },
+        "GOT": {
+            gtirb.SymbolicExpression.Attribute.GotOff,
+            gtirb.SymbolicExpression.Attribute.GotRef,
+        },
+        "GOTOFF": {gtirb.SymbolicExpression.Attribute.GotOff},
+        "GOTTPOFF": {
+            gtirb.SymbolicExpression.Attribute.GotRelPC,
+            gtirb.SymbolicExpression.Attribute.TpOff,
+        },
+        "GOTPCREL": {gtirb.SymbolicExpression.Attribute.GotRelPC},
+        "TPOFF": {gtirb.SymbolicExpression.Attribute.TpOff},
+        "NTPOFF": {gtirb.SymbolicExpression.Attribute.NtpOff},
+        "DTPOFF": {gtirb.SymbolicExpression.Attribute.DtpOff},
+        "TLSGD": {gtirb.SymbolicExpression.Attribute.TlsGd},
+        "TLSLD": {gtirb.SymbolicExpression.Attribute.TlsLd},
+    }
+
     def __init__(
         self,
         module: gtirb.Module,
@@ -466,12 +489,12 @@ class Assembler:
 
         attributes = set()
         if "variantKind" in expr:
-            if expr["variantKind"] == "PLT":
-                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
-            elif expr["variantKind"] == "GOTPCREL":
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
-            else:
-                assert False, f"Unsupported variantKind: {expr['variantKind']}"
+            variant_attrs = self._ELF_VARIANT_KINDS.get(expr["variantKind"])
+            if variant_attrs is None:
+                raise UnsupportedAssemblyError(
+                    f"unsupported symbol variant kind '{expr['variantKind']}'"
+                )
+            attributes.update(variant_attrs)
         elif (
             self._module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
             and _is_elf_pie(self._module)
