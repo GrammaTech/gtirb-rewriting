@@ -397,11 +397,13 @@ def test_temp_symbol_suffix():
 
 
 @pytest.mark.parametrize(
-    ("variant", "attrs"),
+    "variant_entry",
     gtirb_rewriting.Assembler._ELF_VARIANT_KINDS.items(),
-    ids=gtirb_rewriting.Assembler._ELF_VARIANT_KINDS.keys(),
+    ids=lambda item: item[0].name,
 )
-def test_elf_sym_attrs(variant, attrs):
+def test_elf_sym_attrs(variant_entry):
+    variant, attrs = variant_entry
+
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
         gtirb.Module.ISA.X64,
@@ -411,7 +413,7 @@ def test_elf_sym_attrs(variant, attrs):
 
     assembler = gtirb_rewriting.Assembler(m)
     assembler.assemble(
-        f"mov rax, {sym.name}@{variant}",
+        f"mov rax, {sym.name}@{variant.name}",
         x86_syntax=gtirb_rewriting.X86Syntax.INTEL,
     )
     result = assembler.finalize()
