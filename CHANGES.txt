@@ -1,4 +1,6 @@
-0.1.0: (UNRELEASED)
+0.1.1: (UNRELEASED)
+
+0.1.0:
 - gtirb-rewriting now requires gtirb 1.10.6.
 - Refactored the code that applies modifications to support future changes and
   ease maintenance
