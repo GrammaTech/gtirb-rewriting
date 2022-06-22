@@ -48,21 +48,6 @@ check-format:
       junit: report.xml
       cobertura: coverage.xml
 
-test-stable-18:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu18
-  variables:
-    APT_REPO: https://download.grammatech.com/gtirb/files/apt-repo
-    APT_COMPONENT: stable
-  <<: *test
-
-test-unstable-18:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu18
-  variables:
-    APT_REPO: $INTERNAL_APT_REPO
-    APT_COMPONENT: unstable
-    EXTRA_PIP_ARGS: --pre --extra-index-url $EXTRA_INDEX_URL
-  <<: *test
-
 test-stable-20:
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
   variables:
