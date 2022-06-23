@@ -229,11 +229,23 @@ def join_byte_intervals(
             BlockType = gtirb.DataBlock
             pad_bytes = b"\x00"
 
-        # The pretty-printer won't print the padding bytes unless they
-        # are contained in blocks.
-        padding = BlockType(offset=len(destination.contents), size=size)
-        padding.byte_interval = destination
         destination.contents += pad_bytes * size
+        # The pretty-printer won't print the padding bytes unless they
+        # are contained in blocks, add a block covering anything not
+        # yet covered by the last block.
+        if last_block is not None:
+            padding_block_offset = last_block.offset + last_block.size
+            padding_block_size = (
+                len(destination.contents) - padding_block_offset
+            )
+        else:
+            padding_block_offset = 0
+            padding_block_size = len(destination.contents)
+        if padding_block_size > 0:
+            padding = BlockType(
+                offset=padding_block_offset, size=padding_block_size
+            )
+            padding.byte_interval = destination
 
     symexprs = OffsetMapping()
     deltas = {}

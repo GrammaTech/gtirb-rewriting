@@ -446,3 +446,86 @@ def test_join_byte_intervals_no_input_side_effects():
     bi = gtirb_rewriting.join_byte_intervals(intervals)
     assert len(intervals) == 1
     assert bi == intervals[0]
+
+
+def test_join_byte_intervals_uninitialized():
+    """
+    Test joining uninitialized byte intervals
+    that contain data blocks covering the uninitialized
+    data (seen in PE data sections).
+    """
+    b1 = gtirb.DataBlock(offset=0, size=4)
+    b2 = gtirb.DataBlock(offset=0, size=4)
+    b3 = gtirb.DataBlock(offset=0, size=4)
+    bi1 = gtirb.ByteInterval(
+        address=0x100,
+        blocks=[b1],
+        contents=b"\x00\x01\x02\x03",
+    )
+    # the uninitialized data is already
+    # covered by blocks
+    bi2 = gtirb.ByteInterval(
+        address=0x104,
+        blocks=[b2],
+        contents=b"",
+        size=4,
+    )
+    bi3 = gtirb.ByteInterval(
+        address=0x108,
+        blocks=[b3],
+        contents=b"",
+        size=4,
+    )
+
+    bi = gtirb_rewriting.join_byte_intervals(
+        [bi1, bi2, bi3],
+    )
+    assert bi.address == 0x100
+    assert len(bi.blocks) == 3
+    assert b1 in bi.blocks
+    assert b2 in bi.blocks
+    assert b3 in bi.blocks
+    assert b2.offset == 4
+    assert b3.offset == 8
+    # The bytes of the last ByteInterval do not
+    # need to be initialized.
+    assert bi.contents == b"\x00\x01\x02\x03\x00\x00\x00\x00"
+    assert bi.size == 12
+    assert bi.initialized_size == 8
+
+    assert b1.address == 0x100
+    assert b2.address == 0x104
+    assert b3.address == 0x108
+
+
+def test_join_byte_intervals_uninitialized_no_last_block():
+    """
+    Test joining uninitialized byte intervals
+    with no last block.
+    """
+    bi1 = gtirb.ByteInterval(
+        address=0x100,
+        blocks=[],
+        contents=b"",
+        size=4,
+    )
+    b2 = gtirb.DataBlock(offset=0, size=4)
+    bi2 = gtirb.ByteInterval(
+        address=0x104,
+        blocks=[b2],
+        contents=b"",
+        size=4,
+    )
+    bi = gtirb_rewriting.join_byte_intervals(
+        [bi1, bi2],
+    )
+    assert bi.address == 0x100
+    assert len(bi.blocks) == 2
+    assert b2 in bi.blocks
+    assert b2.offset == 4
+    # The bytes of the last ByteInterval do not
+    # need to be initialized.
+    assert bi.contents == b"\x00\x00\x00\x00"
+    assert bi.size == 8
+    assert bi.initialized_size == 4
+    assert b2.address == 0x104
