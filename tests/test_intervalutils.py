@@ -424,3 +424,25 @@ def test_split_byte_interval_no_blocks():
     intervals = gtirb_rewriting.split_byte_interval(bi)
     assert len(intervals) == 1
     assert intervals[0].contents == contents
+
+
+def test_join_byte_intervals_no_input_side_effects():
+    """
+    join_byte_intervals does not change the input list
+    of intervals
+    """
+    b1 = gtirb.DataBlock(offset=0, size=1)
+    b2 = gtirb.DataBlock(offset=0, size=1)
+    bi1 = gtirb.ByteInterval(contents=b"\x00", blocks=[b1])
+    bi2 = gtirb.ByteInterval(contents=b"\xff", blocks=[b2])
+
+    intervals = [bi1, bi2]
+    bi = gtirb_rewriting.join_byte_intervals(intervals)
+    assert len(intervals) == 2
+    assert bi == intervals[0]
+    assert bi2 == intervals[1]
+
+    intervals = [bi1]
+    bi = gtirb_rewriting.join_byte_intervals(intervals)
+    assert len(intervals) == 1
+    assert bi == intervals[0]

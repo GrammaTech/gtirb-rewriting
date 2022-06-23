@@ -201,7 +201,8 @@ def join_byte_intervals(
             if len(table) > 0:
                 tables.append(table)
 
-    destination = intervals.pop(0)
+    destination = intervals[0]
+    intervals = intervals[1:]
 
     address = 0
     if destination.address is not None:
