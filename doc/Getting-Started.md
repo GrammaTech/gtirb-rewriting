@@ -155,6 +155,16 @@ mov $0, %rax
 mov $1, %ebx
 ```
 
+Patches can also specify if there are registers from preceding instructions that
+it would like to read. This indicates to gtirb-rewriting that while we are not
+clobbering this register, we also do not want it to be considered as a scratch
+register, as we want to preserve the contents of it. For example, if one is
+inserting code to a program that assumes preceding instructions write to `rax`,
+and would like to read the contents of `rax`, then setting
+`reads_registers={'rax'}` would allow the patch read from `rax` and use
+`scratch_registers` without worrying about allocated scratch registers
+clobbering the value of `rax`.
+
 ## Constraints
 
 A patch's constraints should describe what the patch's assembly will be doing
@@ -171,6 +181,8 @@ Here is a summary of the current constraints:
 * `scratch_registers`: see the above section on scratch registers
 * `x86_syntax`: choose between using Intel and AT&T assembly syntax for the
   patch
+* `reads_registers`: registers which are read from incoming assembly
+  instructions so not be included as scratch registers or clobbered registers.
 
 ## Labels
 

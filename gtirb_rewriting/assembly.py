@@ -62,6 +62,13 @@ class Constraints:
     get_asm method.
     """
 
+    reads_registers: Set[str] = dataclasses.field(default_factory=set)
+    """
+    Set of registers that are read from incoming instructions. These will not
+    be counted as clobbered registers, and will not be allocated as scratch
+    registers.
+    """
+
     align_stack: bool = False
     """
     Generate code to align the stack to the ABI-defined alignment before

@@ -379,3 +379,23 @@ def test_arm64_scratch_regs():
         reg.name not in ("x16", "x17", "x18", "x29", "x30")
         for reg in registers.scratch_registers
     )
+
+
+@pytest.mark.parametrize(
+    "abi_class,skip_for_scratch",
+    [
+        (gtirb_rewriting.abi._IA32_PE, ("eax", "ebx")),
+        (gtirb_rewriting.abi._X86_64_ELF, ("rax", "rbx")),
+        (gtirb_rewriting.abi._ARM64_ELF, ("x0", "x1")),
+    ],
+)
+def test_read_registers(abi_class, skip_for_scratch):
+    abi = abi_class()
+    constraints = gtirb_rewriting.Constraints(
+        scratch_registers=1, reads_registers=skip_for_scratch
+    )
+
+    registers = abi._allocate_patch_registers(constraints)
+    scratch = registers.scratch_registers
+
+    assert all(reg.name not in skip_for_scratch for reg in scratch)
