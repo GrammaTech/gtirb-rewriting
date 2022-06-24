@@ -123,6 +123,10 @@ class ABI:
                 available_scratch_registers.remove(reg)
             clobbered_registers.add(reg)
 
+        for read in constraints.reads_registers:
+            reg = self.get_register(read)
+            available_scratch_registers.remove(reg)
+
         if constraints.scratch_registers > len(available_scratch_registers):
             raise ValueError("unable to allocate enough scratch registers")
 
