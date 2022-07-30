@@ -398,7 +398,7 @@ def test_temp_symbol_suffix():
 
 @pytest.mark.parametrize(
     "variant_entry",
-    gtirb_rewriting.Assembler._ELF_VARIANT_KINDS.items(),
+    gtirb_rewriting.assembler._Streamer._ELF_VARIANT_KINDS.items(),
     ids=lambda item: item[0].name,
 )
 def test_elf_sym_attrs(variant_entry):
