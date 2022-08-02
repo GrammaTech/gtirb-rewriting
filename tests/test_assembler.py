@@ -772,3 +772,24 @@ def test_elf_symbol_attributes():
     ] == gtirb_rewriting.Assembler.Result.ElfSymbolAttributes(
         "FUNC", "GLOBAL", "HIDDEN"
     )
+
+
+def test_assignments():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        .set .L_0, 0
+        """,
+        gtirb_rewriting.X86Syntax.ATT,
+    )
+
+    result = assembler.finalize()
+
+    assert len(result.symbols) == 1
+    assert result.symbols[0].name == ".L_0"
+    assert result.symbols[0].value == 0
