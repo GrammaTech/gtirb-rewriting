@@ -443,6 +443,7 @@ class RewritingContext:
             cfg=gtirb.CFG(),
             symbols=[],
             proxies=set(),
+            elf_symbol_attributes={},
         )
 
     def _insert_assembler_result(
