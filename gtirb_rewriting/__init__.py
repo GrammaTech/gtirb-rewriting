@@ -20,7 +20,13 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 from .abi import ABI, CallingConventionDesc
-from .assembler import Assembler, UndefSymbolError, UnsupportedAssemblyError
+from .assembler import (
+    Assembler,
+    AssemblerError,
+    MultipleDefinitionsError,
+    UndefSymbolError,
+    UnsupportedAssemblyError,
+)
 from .assembly import Constraints, Register, X86Syntax
 from .intervalutils import (
     PaddingError,
@@ -52,6 +58,7 @@ __all__ = [
     "AllBlocksScope",
     "AllFunctionsScope",
     "Assembler",
+    "AssemblerError",
     "BlockPosition",
     "CallingConventionDesc",
     "Constraints",
@@ -62,6 +69,7 @@ __all__ = [
     "InsertionContext",
     "join_byte_intervals",
     "MAIN_NAME",
+    "MultipleDefinitionsError",
     "OffsetMapping",
     "PaddingError",
     "Pass",

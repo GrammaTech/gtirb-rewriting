@@ -263,7 +263,7 @@ class RewritingContext:
         for line in lines[: err.lineno]:
             self._logger.error("%s", line)
         # LLVM only stores the start column in its diagnostic object.
-        self._logger.error(" " * err.column + "^")
+        self._logger.error(" " * (err.offset or 0) + "^")
         for line in lines[err.lineno :]:
             self._logger.error("%s", line)
 
