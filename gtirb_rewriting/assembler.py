@@ -21,6 +21,7 @@
 # endorsement should be inferred.
 import dataclasses
 import itertools
+from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Type, TypeVar
 
 import gtirb
@@ -268,6 +269,7 @@ class Assembler:
             cfg=self._state.cfg,
             symbols=list(self._state.local_symbols.values()),
             proxies=self._state.proxies,
+            elf_symbol_attributes=self._state.elf_symbol_attributes,
         )
 
         # Reinitialize the assembler just in case someone tries to use the
@@ -338,6 +340,12 @@ class Assembler:
             PE this is IMAGE_SCN_* flags.
             """
 
+        @dataclasses.dataclass
+        class ElfSymbolAttributes:
+            type: str = "NOTYPE"
+            binding: str = "LOCAL"
+            visibility: str = "DEFAULT"
+
         sections: Dict[str, Section]
         """
         Sections in the patch. The first section will be the text section.
@@ -356,6 +364,11 @@ class Assembler:
         proxies: Set[gtirb.ProxyBlock]
         """
         Proxy blocks that represent unknown targets.
+        """
+
+        elf_symbol_attributes: Dict[gtirb.Symbol, ElfSymbolAttributes]
+        """
+        ELF symbol type and binding information.
         """
 
         @property
@@ -385,6 +398,13 @@ class _State:
     )
     blocks_with_code: Set[gtirb.ByteBlock] = dataclasses.field(
         default_factory=set
+    )
+    elf_symbol_attributes: Dict[
+        gtirb.Symbol, "Assembler.Result.ElfSymbolAttributes"
+    ] = dataclasses.field(
+        default_factory=lambda: defaultdict(
+            Assembler.Result.ElfSymbolAttributes
+        )
     )
 
     @property
@@ -473,6 +493,24 @@ class _Streamer(mcasm.Streamer):
         mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
             gtirb.SymbolicExpression.Attribute.TlsGd
         },
+    }
+    _ELF_BINDINGS = {
+        mcasm.mc.SymbolAttr.Global: "GLOBAL",
+        mcasm.mc.SymbolAttr.Weak: "WEAK",
+        mcasm.mc.SymbolAttr.Local: "LOCAL",
+        mcasm.mc.SymbolAttr.ELF_TypeGnuUniqueObject: "GNU_UNIQUE",
+    }
+    _ELF_VISIBILITIES = {
+        mcasm.mc.SymbolAttr.Hidden: "HIDDEN",
+        mcasm.mc.SymbolAttr.Protected: "PROTECTED",
+        mcasm.mc.SymbolAttr.Internal: "INTERNAL",
+    }
+    _ELF_TYPES = {
+        mcasm.mc.SymbolAttr.ELF_TypeFunction: "FUNC",
+        mcasm.mc.SymbolAttr.ELF_TypeIndFunction: "GNU_IFUNC",
+        mcasm.mc.SymbolAttr.ELF_TypeNoType: "NOTYPE",
+        mcasm.mc.SymbolAttr.ELF_TypeObject: "OBJECT",
+        mcasm.mc.SymbolAttr.ELF_TypeTLS: "TLS",
     }
 
     def __init__(self, state: "_State"):
@@ -713,6 +751,47 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.alignment[
             self._state.current_block
         ] = alignment
+
+    def emit_symbol_attribute(
+        self,
+        parser_state: mcasm.ParserState,
+        symbol: mcasm.mc.Symbol,
+        attribute: mcasm.mc.SymbolAttr,
+    ) -> bool:
+        if self._state.module.file_format == gtirb.Module.FileFormat.ELF:
+            return self._emit_elf_symbol_attribute(
+                self._resolve_symbol(symbol, parser_state.loc), attribute
+            )
+
+        # Returning False here will result in LLVM issuing a diagnostic about
+        # the unsupported symbol attribute, so we don't need to raise an error.
+        return False
+
+    def _emit_elf_symbol_attribute(
+        self, symbol: gtirb.Symbol, attribute: mcasm.mc.SymbolAttr
+    ) -> bool:
+        if attribute in self._ELF_BINDINGS:
+            self._state.elf_symbol_attributes[
+                symbol
+            ].binding = self._ELF_BINDINGS[attribute]
+            return True
+
+        if attribute in self._ELF_VISIBILITIES:
+            self._state.elf_symbol_attributes[
+                symbol
+            ].visibility = self._ELF_VISIBILITIES[attribute]
+            return True
+
+        if attribute in self._ELF_TYPES:
+            self._state.elf_symbol_attributes[symbol].type = self._ELF_TYPES[
+                attribute
+            ]
+            return True
+
+        if attribute == mcasm.mc.SymbolAttr.NoDeadStrip:
+            return True
+
+        return False
 
     def diagnostic(self, state, diag):
         if diag.kind == mcasm.mc.Diagnostic.Kind.Error:

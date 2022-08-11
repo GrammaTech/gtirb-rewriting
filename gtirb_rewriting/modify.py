@@ -48,7 +48,7 @@ import gtirb_rewriting._auxdata as _auxdata
 from more_itertools import triplewise
 
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
-from .assembler import Assembler
+from .assembler import Assembler, UnsupportedAssemblyError
 from .utils import (
     _block_fallthrough_targets,
     _get_function_blocks,
@@ -945,6 +945,22 @@ def _modify_block_insert(
 
     alignment_table = _auxdata.alignment.get_or_insert(module)
     alignment_table.update(text_section.alignment.items())
+
+    # Introducing new functions would introduce ambiguity and is more hassle
+    # than it is worth.
+    for attrs in code.elf_symbol_attributes.values():
+        if attrs.type == "FUNC":
+            raise UnsupportedAssemblyError(
+                "cannot introduce new functions in patches"
+            )
+
+    elf_symbol_info = _auxdata.elf_symbol_info.get_or_insert(module)
+    elf_symbol_info.update(
+        {
+            sym: (0, attrs.type, attrs.binding, attrs.visibility, 0)
+            for sym, attrs in code.elf_symbol_attributes.items()
+        }
+    )
 
     if isinstance(block, gtirb.CodeBlock):
         func_uuid = cache.functions_by_block.get(block)

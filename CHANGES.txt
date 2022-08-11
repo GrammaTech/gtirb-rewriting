@@ -1,4 +1,5 @@
 0.1.1: (UNRELEASED)
+- Added support for ELF symbol type, binding, and visibility
 
 0.1.0:
 - gtirb-rewriting now requires gtirb 1.10.6.

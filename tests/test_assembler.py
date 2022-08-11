@@ -803,3 +803,32 @@ def test_alignment():
         b1: 4,
         b2: 8,
     }
+
+
+def test_elf_symbol_attributes():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+            .hidden foo
+            .globl foo
+            .type foo, @function
+        foo:
+            nop
+        """,
+        gtirb_rewriting.X86Syntax.INTEL,
+    )
+
+    result = assembler.finalize()
+
+    assert len(result.symbols) == 1
+    assert result.symbols[0].name == "foo"
+    assert result.elf_symbol_attributes[
+        result.symbols[0]
+    ] == gtirb_rewriting.Assembler.Result.ElfSymbolAttributes(
+        "FUNC", "GLOBAL", "HIDDEN"
+    )
