@@ -1,6 +1,7 @@
 0.1.1: (UNRELEASED)
 - Added support for ELF symbol type, binding, and visibility
 - Added support for symbols with absolute addresses using .set
+- Added support for the .zero directive
 
 0.1.0:
 - gtirb-rewriting now requires gtirb 1.10.6.

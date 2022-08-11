@@ -699,6 +699,34 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.data += value
         self._state.current_block.size += len(value)
 
+    def emit_value_fill(
+        self,
+        parser_state: mcasm.ParserState,
+        num_bytes: mcasm.mc.Expr,
+        fill_value: int,
+        loc: mcasm.mc.SourceLocation,
+    ) -> None:
+        if not isinstance(num_bytes, mcasm.mc.ConstantExpr) or not isinstance(
+            num_bytes.value, int
+        ):
+            raise _make_error(
+                UnsupportedAssemblyError,
+                "only constant integers are supported for fill sizes",
+                num_bytes.location,
+            )
+
+        # By limiting the fill value to 0, we avoid questions about what to
+        # do if the fill value is multi-byte. This restriction could be lifted
+        # later.
+        if fill_value != 0:
+            raise _make_error(
+                UnsupportedAssemblyError,
+                "only 0 is supported for a fill value",
+                num_bytes.location,
+            )
+
+        self.emit_bytes(parser_state, bytes([fill_value] * num_bytes.value))
+
     def emit_value_to_alignment(
         self, parser_state, alignment, value, value_size, max_bytes
     ):
