@@ -369,22 +369,36 @@ def test_sym_expr_in_data():
     assert text_section.symbolic_expression_sizes[6] == 8
 
 
-@pytest.mark.parametrize("isa", (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64))
+@pytest.mark.parametrize(
+    "isa",
+    (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64, gtirb.Module.ISA.ARM64),
+)
 def test_indirect_call(isa):
     _, m = create_test_module(gtirb.Module.FileFormat.ELF, isa)
 
     assembler = gtirb_rewriting.Assembler(m)
-    assembler.assemble(
-        """
-        # This call needs to be treated as indirect instead of directly
-        # calling foo.
-        call *foo
+    if isa in {gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64}:
+        assembler.assemble(
+            """
+            # This call needs to be treated as indirect instead of directly
+            # calling foo.
+            call *foo
 
-        .data
-        foo:
-        .quad 0
-        """
-    )
+            .data
+            foo:
+            .quad 0
+            """
+        )
+    elif isa == gtirb.Module.ISA.ARM64:
+        assembler.assemble(
+            """
+            blr x1
+
+            .data
+            foo:
+            .quad 0
+            """
+        )
     result = assembler.finalize()
     text_section = result.text_section
 

@@ -27,6 +27,7 @@ from typing import Dict, List, Optional, Set, Tuple, Type, TypeVar
 import gtirb
 import mcasm
 
+from ._mc_utils import is_indirect_call as _is_indirect_call
 from .assembly import X86Syntax
 from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 
@@ -845,7 +846,9 @@ class _Streamer(mcasm.Streamer):
         """
         assert inst.desc.is_call or inst.desc.is_branch
 
-        if inst.desc.is_indirect_branch or self._is_indirect_call(inst):
+        if inst.desc.is_indirect_branch or _is_indirect_call(
+            self._state.module.isa, inst
+        ):
             proxy = gtirb.ProxyBlock()
             self._state.proxies.add(proxy)
             return False, proxy
@@ -1048,38 +1051,3 @@ class _Streamer(mcasm.Streamer):
             return sym
 
         return None
-
-    def _is_indirect_call(self, inst: mcasm.mc.Instruction) -> bool:
-        """
-        Determines if an instruction is an indirect call.
-        """
-
-        if not inst.desc.is_call:
-            return False
-
-        # Sadly LLVM does not expose this directly, so we need to have per-ISA
-        # knowledge about specific instruction forms. Plus these are _LLVM_
-        # instructions, not the actual ISA's instructions.
-        if self._state.module.isa == gtirb.Module.ISA.X64:
-            return inst.name in {
-                "CALL64m",
-                "CALL64r",
-                "FARCALL16m",
-                "FARCALL32m",
-                "FARCALL64m",
-            }
-
-        elif self._state.module.isa == gtirb.Module.ISA.IA32:
-            return inst.name in {
-                "CALL32m",
-                "CALL32r",
-                "FARCALL16i",
-                "FARCALL32i",
-                "FARCALL16m",
-                "FARCALL32m",
-            }
-
-        elif self._state.module.isa == gtirb.Module.ISA.ARM64:
-            return inst.name in {"BLR", "BLRAA", "BLRAAZ", "BLRAB", "BLRABZ"}
-
-        raise NotImplementedError("unknown ISA")
