@@ -272,6 +272,13 @@ section_properties = define_table(
     Dict[gtirb.Section, Tuple[int, int]],
 )
 
+encodings = define_table(
+    gtirb.Module,
+    "encodings",
+    "mapping<UUID,string>",
+    Dict[gtirb.DataBlock, str],
+)
+
 libraries = define_table(
     gtirb.Module,
     "libraries",

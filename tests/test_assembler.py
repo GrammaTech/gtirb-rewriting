@@ -882,3 +882,36 @@ def test_assignments():
     assert len(result.symbols) == 1
     assert result.symbols[0].name == ".L_0"
     assert result.symbols[0].value == 0
+
+
+def test_uleb128():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+    start = add_symbol(m, "start")
+    end = add_symbol(m, "end")
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        .data
+        .uleb128 start - end
+        """,
+        gtirb_rewriting.X86Syntax.ATT,
+    )
+    result = assembler.finalize()
+
+    data_sect = result.sections[".data"]
+    assert data_sect.data == b"\x00"
+
+    data_block = data_sect.blocks[0]
+    assert isinstance(data_block, gtirb.DataBlock)
+    assert data_block.size == 1
+    assert (
+        data_sect.block_types[data_block]
+        == gtirb_rewriting.Assembler.Result.DataType.ULEB128
+    )
+    assert data_sect.symbolic_expressions[0] == gtirb.SymAddrAddr(
+        1, 0, start, end
+    )

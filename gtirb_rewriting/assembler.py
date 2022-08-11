@@ -20,6 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import dataclasses
+import enum
 import itertools
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Type, TypeVar
@@ -181,6 +182,7 @@ class Assembler:
             for extra_block in extra_blocks:
                 assert isinstance(extra_block, gtirb.CodeBlock)
                 assert not extra_block.size
+                assert extra_block not in self._state.block_types
 
                 for edge in list(self._state.cfg.in_edges(extra_block)):
                     self._state.cfg.discard(edge)
@@ -247,6 +249,21 @@ class Assembler:
                     section.alignment[new_block] = section.alignment[block]
                     del section.alignment[block]
 
+                if block in self._state.block_types:
+                    section.block_types[new_block] = self._state.block_types[
+                        block
+                    ]
+
+            else:
+                # If we're not replacing the code block with a data block and
+                # it had a specific block type, this is a problem. It's too
+                # late to issue a specific error here but we can at least
+                # catch the problem.
+                if block in self._state.block_types:
+                    raise UnsupportedAssemblyError(
+                        "A code block was given a data type (e.g. via uleb128)"
+                    )
+
     def finalize(self) -> "Result":
         """
         Finalizes the assembly contents and returns the result.
@@ -280,6 +297,10 @@ class Assembler:
         """
         The result of assembling an assembly patch.
         """
+
+        class DataType(str, enum.Enum):
+            ULEB128 = "uleb128"
+            SLEB128 = "sleb128"
 
         @dataclasses.dataclass
         class Section:
@@ -330,6 +351,11 @@ class Assembler:
             """
             The ELF/PE flags for the section. For ELF this is SHF_* flags, for
             PE this is IMAGE_SCN_* flags.
+            """
+
+            block_types: Dict[gtirb.DataBlock, "Assembler.Result.DataType"]
+            """
+            The types for data blocks that must be rendered a certain way.
             """
 
         @dataclasses.dataclass
@@ -398,6 +424,9 @@ class _State:
             Assembler.Result.ElfSymbolAttributes
         )
     )
+    block_types: Dict[
+        gtirb.ByteBlock, "Assembler.Result.DataType"
+    ] = dataclasses.field(default_factory=dict)
 
     @property
     def current_section(self) -> "Assembler.Result.Section":
@@ -607,6 +636,7 @@ class _Streamer(mcasm.Streamer):
                 alignment={},
                 image_flags=image_flags,
                 image_type=image_type,
+                block_types={},
             )
             self._state.sections[name] = result
 
@@ -694,6 +724,26 @@ class _Streamer(mcasm.Streamer):
         ] = size
         self._state.current_section.data += b"\x00" * size
         self._state.current_block.size += size
+
+    def emit_uleb128_value(
+        self, state: mcasm.ParserState, value: mcasm.mc.Expr
+    ) -> None:
+        self._split_block()
+        self.emit_value_impl(state, value, 1, state.loc)
+        self._state.block_types[
+            self._state.current_block
+        ] = Assembler.Result.DataType.ULEB128
+        self._split_block()
+
+    def emit_sleb128_value(
+        self, state: mcasm.ParserState, value: mcasm.mc.Expr
+    ) -> None:
+        self._split_block()
+        self.emit_value_impl(state, value, 1, None)
+        self._state.block_types[
+            self._state.current_block
+        ] = Assembler.Result.DataType.SLEB128
+        self._split_block()
 
     def emit_bytes(self, parser_state, value):
         self._state.current_section.data += value
