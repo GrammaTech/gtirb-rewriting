@@ -725,25 +725,32 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.data += b"\x00" * size
         self._state.current_block.size += size
 
-    def emit_uleb128_value(
-        self, state: mcasm.ParserState, value: mcasm.mc.Expr
+    def _emit_value_with_encoding(
+        self,
+        parser_state: mcasm.ParserState,
+        value: mcasm.mc.Expr,
+        type: Assembler.Result.DataType,
     ) -> None:
+        # gtirb can only apply an encoding to a data block, so we need for
+        # this value to be in its own block.
         self._split_block()
-        self.emit_value_impl(state, value, 1, state.loc)
-        self._state.block_types[
-            self._state.current_block
-        ] = Assembler.Result.DataType.ULEB128
+        self.emit_value_impl(parser_state, value, 1, parser_state.loc)
+        self._state.block_types[self._state.current_block] = type
         self._split_block()
 
-    def emit_sleb128_value(
-        self, state: mcasm.ParserState, value: mcasm.mc.Expr
+    def emit_uleb128_value(
+        self, parser_state: mcasm.ParserState, value: mcasm.mc.Expr
     ) -> None:
-        self._split_block()
-        self.emit_value_impl(state, value, 1, None)
-        self._state.block_types[
-            self._state.current_block
-        ] = Assembler.Result.DataType.SLEB128
-        self._split_block()
+        self._emit_value_with_encoding(
+            parser_state, value, Assembler.Result.DataType.ULEB128
+        )
+
+    def emit_sleb128_value(
+        self, parser_state: mcasm.ParserState, value: mcasm.mc.Expr
+    ) -> None:
+        self._emit_value_with_encoding(
+            parser_state, value, Assembler.Result.DataType.SLEB128
+        )
 
     def emit_bytes(self, parser_state, value):
         self._state.current_section.data += value
