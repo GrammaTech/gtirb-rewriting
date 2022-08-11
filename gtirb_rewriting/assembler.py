@@ -27,6 +27,7 @@ from typing import Dict, List, Optional, Set, Tuple, Type, TypeVar
 import gtirb
 import mcasm
 
+from ._mc_utils import is_indirect_call as _is_indirect_call
 from .assembly import X86Syntax
 from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 
@@ -854,9 +855,9 @@ class _Streamer(mcasm.Streamer):
         """
         assert inst.desc.is_call or inst.desc.is_branch
 
-        # LLVM doesn't seem to have anything to denote an indirect call, but
-        # we can infer it from the lack of fixups.
-        if inst.desc.is_indirect_branch or (inst.desc.is_call and not fixups):
+        if inst.desc.is_indirect_branch or _is_indirect_call(
+            self._state.module.isa, inst
+        ):
             proxy = gtirb.ProxyBlock()
             self._state.proxies.add(proxy)
             return False, proxy
