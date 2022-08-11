@@ -915,6 +915,25 @@ def test_elf_symbol_attributes():
     )
 
 
+def test_fill():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        .zero 42
+        """,
+        gtirb_rewriting.X86Syntax.ATT,
+    )
+
+    result = assembler.finalize()
+
+    assert result.text_section.data == b"\x00" * 42
+
+
 def test_assignments():
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
