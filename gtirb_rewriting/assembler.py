@@ -1030,7 +1030,6 @@ class _Streamer(mcasm.Streamer):
                 )
             expr = expr.sub_expr
 
-        # TODO: Do we need to support SymAddrAddr fixup types?
         if (
             isinstance(expr, mcasm.mc.BinaryExpr)
             and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add
@@ -1041,6 +1040,35 @@ class _Streamer(mcasm.Streamer):
             attributes |= self._get_symbol_ref_attrs(expr.lhs, sym, is_branch)
             offset = expr.rhs.value
             return gtirb.SymAddrConst(offset, sym, attributes)
+        elif (
+            isinstance(expr, mcasm.mc.BinaryExpr)
+            and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Sub
+            and isinstance(expr.lhs, mcasm.mc.SymbolRefExpr)
+            and isinstance(expr.rhs, mcasm.mc.SymbolRefExpr)
+        ):
+            sym1 = self._resolve_symbol_ref(expr.lhs)
+            if (
+                expr.lhs.variant_kind
+                != mcasm.mc.SymbolRefExpr.VariantKind.None_
+            ):
+                raise _make_error(
+                    UnsupportedAssemblyError,
+                    "cannot have a binary expression with variant kinds",
+                    expr.lhs.location or loc,
+                )
+
+            sym2 = self._resolve_symbol_ref(expr.rhs)
+            if (
+                expr.rhs.variant_kind
+                != mcasm.mc.SymbolRefExpr.VariantKind.None_
+            ):
+                raise _make_error(
+                    UnsupportedAssemblyError,
+                    "cannot have a binary expression with variant kinds",
+                    expr.rhs.location or loc,
+                )
+
+            return gtirb.SymAddrAddr(1, 0, sym1, sym2, set())
         elif isinstance(expr, mcasm.mc.SymbolRefExpr):
             sym = self._resolve_symbol_ref(expr)
             attributes |= self._get_symbol_ref_attrs(expr, sym, is_branch)

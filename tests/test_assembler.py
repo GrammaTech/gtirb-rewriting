@@ -934,6 +934,31 @@ def test_fill():
     assert result.text_section.data == b"\x00" * 42
 
 
+def test_sym_minus_sym():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+    foo = add_symbol(m, "foo", add_proxy_block(m))
+    foo2 = add_symbol(m, "foo2", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        .data
+        .byte foo - foo2
+        """,
+        gtirb_rewriting.X86Syntax.ATT,
+    )
+
+    result = assembler.finalize()
+
+    assert result.sections[".data"].data == b"\x00"
+    assert result.sections[".data"].symbolic_expressions[
+        0
+    ] == gtirb.SymAddrAddr(1, 0, foo, foo2)
+
+
 def test_assignments():
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
