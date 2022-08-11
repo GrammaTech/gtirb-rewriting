@@ -829,9 +829,10 @@ class _Streamer(mcasm.Streamer):
         if expr.variant_kind != mcasm.mc.SymbolRefExpr.VariantKind.None_:
             variant_attrs = self._ELF_VARIANT_KINDS.get(expr.variant_kind)
             if variant_attrs is None:
+                name = expr.variant_kind.name
                 raise _make_error(
                     UnsupportedAssemblyError,
-                    f"unsupported symbol variant kind '{expr.variant_kind}'",
+                    f"unsupported symbol variant kind '{name}'",
                     expr.location,
                 )
             attributes.update(variant_attrs)

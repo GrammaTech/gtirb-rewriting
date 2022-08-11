@@ -619,13 +619,38 @@ def test_assembler_errors():
     assembler = gtirb_rewriting.Assembler(m)
     with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
         assembler.assemble("call blah+1", gtirb_rewriting.X86Syntax.INTEL)
+    assert str(exc.value) == "Call and branch targets cannot have offsets"
     assert exc.value.lineno == 1
     assert exc.value.offset == 1
 
     with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
         assembler.assemble("call data", gtirb_rewriting.X86Syntax.INTEL)
+    assert str(exc.value) == (
+        "Call and branch targets cannot be data blocks or other non-CFG "
+        "elements"
+    )
     assert exc.value.lineno == 1
     assert exc.value.offset == 1
+
+    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
+        assembler.assemble(".align 2, 0xFF", gtirb_rewriting.X86Syntax.INTEL)
+    assert str(exc.value) == "trying to pad with a non-zero byte"
+    assert exc.value.lineno == 1
+    assert exc.value.offset == 1
+
+    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
+        assembler.assemble(".align 2, 0, 1", gtirb_rewriting.X86Syntax.INTEL)
+    assert str(exc.value) == "trying to pad with a fixed limit"
+    assert exc.value.lineno == 1
+    assert exc.value.offset == 1
+
+    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
+        assembler.assemble(
+            "call blah@PAGEOFF", gtirb_rewriting.X86Syntax.INTEL
+        )
+    assert str(exc.value) == "unsupported symbol variant kind 'PAGEOFF'"
+    assert exc.value.lineno == 1
+    assert exc.value.offset == 6
 
 
 @pytest.mark.parametrize(
