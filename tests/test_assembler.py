@@ -978,3 +978,45 @@ def test_assignments():
     assert len(result.symbols) == 1
     assert result.symbols[0].name == ".L_0"
     assert result.symbols[0].value == 0
+
+
+@pytest.mark.parametrize("signed", (False, True))
+def test_uleb128_and_sleb128(signed):
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+    start = add_symbol(m, "start")
+    end = add_symbol(m, "end")
+
+    us = "u" if not signed else "s"
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        f"""
+        .data
+        .{us}leb128 start - end
+        """,
+        gtirb_rewriting.X86Syntax.ATT,
+    )
+    result = assembler.finalize()
+
+    data_sect = result.sections[".data"]
+    assert data_sect.data == b"\x00"
+
+    data_block = data_sect.blocks[0]
+    assert isinstance(data_block, gtirb.DataBlock)
+    assert data_block.size == 1
+    if signed:
+        assert (
+            data_sect.block_types[data_block]
+            == gtirb_rewriting.Assembler.Result.DataType.SLEB128
+        )
+    else:
+        assert (
+            data_sect.block_types[data_block]
+            == gtirb_rewriting.Assembler.Result.DataType.ULEB128
+        )
+    assert data_sect.symbolic_expressions[0] == gtirb.SymAddrAddr(
+        1, 0, start, end
+    )

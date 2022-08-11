@@ -946,6 +946,9 @@ def _modify_block_insert(
     alignment_table = _auxdata.alignment.get_or_insert(module)
     alignment_table.update(text_section.alignment.items())
 
+    encodings_table = _auxdata.encodings.get_or_insert(module)
+    encodings_table.update(text_section.block_types.items())
+
     # Introducing new functions would introduce ambiguity and is more hassle
     # than it is worth.
     for attrs in code.elf_symbol_attributes.values():
@@ -1150,6 +1153,9 @@ def _add_other_section_contents(
 
     alignment_table = _auxdata.alignment.get_or_insert(module)
     alignment_table.update(sect.alignment.items())
+
+    encodings_table = _auxdata.encodings.get_or_insert(module)
+    encodings_table.update(sect.block_types.items())
 
 
 def _edit_byte_interval(

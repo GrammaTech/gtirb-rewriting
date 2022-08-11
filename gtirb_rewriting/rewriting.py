@@ -437,6 +437,7 @@ class RewritingContext:
             alignment={},
             image_type=image_type,
             image_flags=image_flags,
+            block_types={},
         )
         return Assembler.Result(
             sections={sect.name: sect},
