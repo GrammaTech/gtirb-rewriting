@@ -1020,3 +1020,21 @@ def test_uleb128_and_sleb128(signed):
     assert data_sect.symbolic_expressions[0] == gtirb.SymAddrAddr(
         1, 0, start, end
     )
+
+
+def test_ignore_cfi_directives():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m, ignore_cfi_directives=True)
+    with pytest.warns(gtirb_rewriting.assembler.IgnoredCFIDirectiveWarning):
+        assembler.assemble(
+            """
+            .cfi_startproc
+            .cfi_endproc
+            """,
+        )
+
+    assembler.finalize()

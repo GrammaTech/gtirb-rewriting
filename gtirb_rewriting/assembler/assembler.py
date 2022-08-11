@@ -22,6 +22,7 @@
 import dataclasses
 import enum
 import itertools
+import warnings
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -97,6 +98,14 @@ class MultipleDefinitionsError(AssemblerError):
     pass
 
 
+class IgnoredCFIDirectiveWarning(Warning):
+    """
+    A CFI directive was ignored.
+    """
+
+    pass
+
+
 class Assembler:
     """
     Assembles chunks of assembly, creating a control flow graph and other
@@ -110,6 +119,7 @@ class Assembler:
         temp_symbol_suffix: Optional[str] = None,
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
+        ignore_cfi_directives: bool = False,
     ) -> None:
         """
         :param module: The module the patch will be inserted into.
@@ -124,12 +134,15 @@ class Assembler:
         :param allow_undef_symbols: Allows the assembly to refer to undefined
                                     symbols. Such symbols will be created and
                                     set to refer to a proxy block.
+        :param ignore_cfi_directives: Ignore CFI directives instead of issuing
+                                      an error.
         """
         self._state = _State(
             module,
             temp_symbol_suffix,
             trivially_unreachable,
             allow_undef_symbols,
+            ignore_cfi_directives,
         )
 
     def assemble(
@@ -294,6 +307,7 @@ class Assembler:
             temp_symbol_suffix=self._state.temp_symbol_suffix,
             trivially_unreachable=self._state.trivially_unreachable,
             allow_undef_symbols=self._state.allow_undef_symbols,
+            ignore_cfi_directives=self._state.ignore_cfi_directives,
         )
 
         return result
@@ -411,6 +425,7 @@ class _State:
     temp_symbol_suffix: Optional[str]
     trivially_unreachable: bool
     allow_undef_symbols: bool
+    ignore_cfi_directives: bool
     cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
     local_symbols: Dict[str, gtirb.Symbol] = dataclasses.field(
         default_factory=dict
@@ -903,6 +918,10 @@ class _Streamer(mcasm.Streamer):
             raise AsmSyntaxError(diag.message, diag.lineno, diag.offset)
 
     def unhandled_event(self, name, base_impl, *args, **kwargs):
+        if "cfi" in name and self._state.ignore_cfi_directives:
+            warnings.warn(f"{name} was ignored", IgnoredCFIDirectiveWarning)
+            return super().unhandled_event(name, base_impl, *args, **kwargs)
+
         if name in {
             "init_sections",
             "add_explicit_comment",
