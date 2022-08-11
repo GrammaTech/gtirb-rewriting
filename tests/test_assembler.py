@@ -369,6 +369,51 @@ def test_sym_expr_in_data():
     assert text_section.symbolic_expression_sizes[6] == 8
 
 
+@pytest.mark.parametrize("isa", (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64))
+def test_indirect_call(isa):
+    _, m = create_test_module(gtirb.Module.FileFormat.ELF, isa)
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        # This call needs to be treated as indirect instead of directly
+        # calling foo.
+        call *foo
+
+        .data
+        foo:
+        .quad 0
+        """
+    )
+    result = assembler.finalize()
+    text_section = result.text_section
+
+    assert len(result.proxies) == 1
+    (proxy,) = result.proxies
+
+    assert len(text_section.blocks)
+    b1, b2 = text_section.blocks
+    assert isinstance(b1, gtirb.CodeBlock)
+    assert isinstance(b2, gtirb.CodeBlock)
+    assert set(result.cfg) == {
+        gtirb.Edge(
+            b1,
+            proxy,
+            gtirb.Edge.Label(gtirb.Edge.Type.Call, direct=False),
+        ),
+        gtirb.Edge(
+            b1,
+            b2,
+            gtirb.Edge.Label(gtirb.Edge.Type.Fallthrough),
+        ),
+    }
+
+    assert ".data" in result.sections
+    data = result.sections[".data"]
+    assert len(data.blocks) == 1
+    assert isinstance(data.blocks[0], gtirb.DataBlock)
+
+
 def test_temp_symbol_suffix():
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
