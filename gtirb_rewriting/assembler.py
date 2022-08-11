@@ -64,42 +64,6 @@ class Assembler:
     GTIRB structures as it goes.
     """
 
-    _ELF_VARIANT_KINDS = {
-        mcasm.mc.SymbolRefExpr.VariantKind.PLT: {
-            gtirb.SymbolicExpression.Attribute.PltRef
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTNTPOFF: {
-            gtirb.SymbolicExpression.Attribute.GotOff,
-            gtirb.SymbolicExpression.Attribute.NtpOff,
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOT: {
-            gtirb.SymbolicExpression.Attribute.GotOff,
-            gtirb.SymbolicExpression.Attribute.GotRef,
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTOFF: {
-            gtirb.SymbolicExpression.Attribute.GotOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTTPOFF: {
-            gtirb.SymbolicExpression.Attribute.GotRelPC,
-            gtirb.SymbolicExpression.Attribute.TpOff,
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTPCREL: {
-            gtirb.SymbolicExpression.Attribute.GotRelPC
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.TPOFF: {
-            gtirb.SymbolicExpression.Attribute.TpOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.NTPOFF: {
-            gtirb.SymbolicExpression.Attribute.NtpOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.DTPOFF: {
-            gtirb.SymbolicExpression.Attribute.DtpOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
-            gtirb.SymbolicExpression.Attribute.TlsGd
-        },
-    }
-
     def __init__(
         self,
         module: gtirb.Module,
@@ -112,9 +76,9 @@ class Assembler:
         :param module: The module the patch will be inserted into.
         :param temp_symbol_suffix: A suffix to use for local symbols that are
                considered temporary. Passing in a unique suffix to each
-               assembler that targets the same module means that the assembly
-               itself does not have to be concerned with having unique
-               temporary symbol names.
+               assembler that targets the same module allows the same assembly
+               to be used each time without worrying about duplicate symbol
+               names.
         :param trivially_unreachable: Is the entry block of the patch
                                       obviously unreachable? For example,
                                       inserting after a ret instruction.
@@ -122,34 +86,12 @@ class Assembler:
                                     symbols. Such symbols will be created and
                                     set to refer to a proxy block.
         """
-        self._module = module
-        self._temp_symbol_suffix = temp_symbol_suffix
-        self._cfg = gtirb.CFG()
-        self._local_symbols: Dict[str, gtirb.Symbol] = {}
-        self._trivially_unreachable = trivially_unreachable
-        self._allow_undef_symbols = allow_undef_symbols
-        self._proxies: Set[gtirb.ProxyBlock] = set()
-        self._blocks_with_code: Set[gtirb.CodeBlock] = set()
-        # This isn't set until the assembler runs, but will exist after that
-        # point. Code should use _current_section instead of this, which takes
-        # care of removing the optional-ness.
-        self._optional_current_section: Optional[
-            "Assembler.Result.Section"
-        ] = None
-        self._sections: Dict[str, "Assembler.Result.Section"] = {}
-
-    @property
-    def _current_section(self) -> "Assembler.Result.Section":
-        assert self._optional_current_section, "not in a section yet"
-        return self._optional_current_section
-
-    @property
-    def _current_block(self) -> gtirb.CodeBlock:
-        result = self._current_section.blocks[-1]
-        assert isinstance(
-            result, gtirb.CodeBlock
-        ), "current block should be a code block"
-        return result
+        self._state = _State(
+            module,
+            temp_symbol_suffix,
+            trivially_unreachable,
+            allow_undef_symbols,
+        )
 
     def assemble(
         self, asm: str, x86_syntax: X86Syntax = X86Syntax.ATT
@@ -158,493 +100,20 @@ class Assembler:
         Assembles additional assembly, continuing where the last call to
         assemble left off.
         """
-        assembler = mcasm.Assembler(_target_triple(self._module))
+        assembler = mcasm.Assembler(_target_triple(self._state.module))
 
         # X86 is hopefully the only ISA with more than one syntax mode that
         # is widely used. If other targets do come up, we may simply choose
         # a blessed syntax and avoid the additional complexity.
-        if self._module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64):
+        if self._state.module.isa in (
+            gtirb.Module.ISA.IA32,
+            gtirb.Module.ISA.X64,
+        ):
             assembler.x86_syntax = x86_syntax
 
-        class LabelExtractor(mcasm.Streamer):
-            def __init__(self, assembler):
-                super().__init__()
-                self._assembler = assembler
+        assembler.assemble(_SymbolCreator(self._state), asm)
 
-            def emit_label(self, state, label, loc):
-                self._assembler._precreate_defined_label(label)
-
-        assembler.assemble(LabelExtractor(self), asm)
-
-        class StreamerAdaptor(mcasm.Streamer):
-            def __init__(self, assembler):
-                super().__init__()
-                self._assembler = assembler
-
-            def emit_label(self, state, label, loc):
-                self._assembler._assemble_label(label)
-
-            def emit_instruction(self, state, inst, bytes, fixups):
-                self._assembler._assemble_instruction(bytes, inst, fixups)
-
-            def change_section(self, state, section, subsection):
-                self._assembler._assemble_change_section(section)
-                super().change_section(state, section, subsection)
-
-            def emit_value_impl(self, state, value, size, loc):
-                self._assembler._assemble_emit_value(value, size)
-
-            def emit_bytes(self, state, value):
-                self._assembler._assemble_bytes(value)
-
-            def emit_value_to_alignment(
-                self, state, alignment, value, value_size, max_bytes
-            ):
-                self._assembler._emit_alignment(
-                    alignment, value, value_size, max_bytes
-                )
-
-            def emit_code_alignment(self, state, alignment, max_bytes):
-                self._assembler._emit_alignment(alignment, 0, 0, max_bytes)
-
-            def diagnostic(self, state, diag):
-                if diag.kind == mcasm.mc.Diagnostic.Kind.Error:
-                    raise AsmSyntaxError(
-                        diag.lineno, diag.offset, diag.message
-                    )
-
-            def unhandled_event(self, name, base_impl, *args, **kwargs):
-                if name in {
-                    "init_sections",
-                    "add_explicit_comment",
-                    "emit_int_value",
-                }:
-                    return super().unhandled_event(
-                        name, base_impl, *args, **kwargs
-                    )
-
-                raise UnsupportedAssemblyError(f"{name} was not handled")
-
-        assembler.assemble(StreamerAdaptor(self), asm)
-
-    def _precreate_defined_label(self, symbol: mcasm.mc.Symbol) -> None:
-        label_name = symbol.name
-
-        # If the symbol is temporary in LLVM's eyes and our client has given
-        # us a suffix to use for temporary symbols, tack it on. This allows
-        # clients to use the same assembly multiple times without worrying
-        # about duplicate symbol names, as long as they pass a different
-        # suffix each time.
-        symbol_name = label_name
-        if symbol.is_temporary and self._temp_symbol_suffix is not None:
-            symbol_name += self._temp_symbol_suffix
-
-        assert label_name not in self._local_symbols and not any(
-            self._module.symbols_named(label_name)
-        ), f"{symbol_name} defined multiple times"
-
-        label_sym = gtirb.Symbol(name=symbol_name, payload=gtirb.CodeBlock())
-        self._local_symbols[label_name] = label_sym
-
-    def _assemble_label(self, symbol: mcasm.mc.Symbol) -> None:
-        label_sym = self._local_symbols[symbol.name]
-        label_block = label_sym.referent
-        assert isinstance(label_block, gtirb.CodeBlock)
-
-        label_block.offset = (
-            self._current_block.offset + self._current_block.size
-        )
-        self._cfg.add(
-            gtirb.Edge(
-                source=self._current_block,
-                target=label_block,
-                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
-            )
-        )
-
-        self._current_section.blocks.append(label_block)
-
-    def _assemble_change_section(self, section: mcasm.mc.Section) -> None:
-        name = section.name
-
-        # LLVM validates that flags don't change when it sees the same section
-        # multiple times, so we don't need to do that here.
-        result = self._sections.get(name)
-        if not result:
-            flags: Set[gtirb.Section.Flag] = set()
-            image_flags = 0
-            image_type = 0
-
-            if isinstance(section, mcasm.mc.SectionELF):
-                SHF_WRITE = 0x1
-                SHF_ALLOC = 0x2
-                SHF_EXECINSTR = 0x4
-                SHT_NOBITS = 8
-
-                image_flags = section.flags
-                image_type = section.type
-                assert image_flags and image_type
-
-                if image_flags & SHF_WRITE:
-                    flags.add(gtirb.Section.Flag.Writable)
-
-                if image_flags & SHF_ALLOC:
-                    flags.add(gtirb.Section.Flag.Loaded)
-                    flags.add(gtirb.Section.Flag.Readable)
-                    if image_type != SHT_NOBITS:
-                        flags.add(gtirb.Section.Flag.Initialized)
-
-                if image_flags & SHF_EXECINSTR:
-                    flags.add(gtirb.Section.Flag.Executable)
-
-            elif isinstance(section, mcasm.mc.SectionCOFF):
-                IMAGE_SCN_CNT_UNINITIALIZED_DATA = 0x00000080
-                IMAGE_SCN_MEM_EXECUTE = 0x20000000
-                IMAGE_SCN_MEM_READ = 0x40000000
-                IMAGE_SCN_MEM_WRITE = 0x80000000
-
-                image_flags = section.characteristics
-
-                if image_flags & IMAGE_SCN_MEM_READ:
-                    flags.add(gtirb.Section.Flag.Loaded)
-                    flags.add(gtirb.Section.Flag.Readable)
-
-                if image_flags & IMAGE_SCN_MEM_WRITE:
-                    flags.add(gtirb.Section.Flag.Writable)
-
-                if image_flags & IMAGE_SCN_MEM_EXECUTE:
-                    flags.add(gtirb.Section.Flag.Executable)
-
-                if not image_flags & IMAGE_SCN_CNT_UNINITIALIZED_DATA:
-                    flags.add(gtirb.Section.Flag.Initialized)
-
-            else:
-                raise NotImplementedError(
-                    f"unsupported section class {type(section)}"
-                )
-
-            result = self.Result.Section(
-                name=name,
-                flags=flags,
-                data=b"",
-                blocks=[gtirb.CodeBlock()],
-                symbolic_expressions={},
-                symbolic_expression_sizes={},
-                alignment={},
-                image_flags=image_flags,
-                image_type=image_type,
-            )
-            self._sections[name] = result
-
-        self._optional_current_section = result
-
-    def _resolve_instruction_target(
-        self,
-        data: bytes,
-        inst: mcasm.mc.Instruction,
-        fixups: List[mcasm.mc.Fixup],
-    ) -> Tuple[bool, gtirb.CfgNode]:
-        """
-        Resolves a call or branch instruction's target to a CFG node.
-        """
-        assert inst.desc.is_call or inst.desc.is_branch
-
-        # LLVM doesn't seem to have anything to denote an indirect call, but
-        # we can infer it from the lack of fixups.
-        if inst.desc.is_indirect_branch or (inst.desc.is_call and not fixups):
-            proxy = gtirb.ProxyBlock()
-            self._proxies.add(proxy)
-            return False, proxy
-
-        assert len(fixups) == 1
-        target_expr = self._fixup_to_symbolic_operand(fixups[0], data, True)
-
-        if not isinstance(target_expr, gtirb.SymAddrConst):
-            raise UnsupportedAssemblyError(
-                "Call and branch targets must be simple expressions"
-            )
-
-        if target_expr.offset != 0:
-            raise UnsupportedAssemblyError(
-                "Call and branch targets cannot have offsets"
-            )
-
-        if not isinstance(target_expr.symbol.referent, gtirb.CfgNode):
-            raise UnsupportedAssemblyError(
-                "Call and branch targets cannot be data blocks or other "
-                "non-CFG elements"
-            )
-
-        return True, target_expr.symbol.referent
-
-    def _assemble_instruction(
-        self,
-        data: bytes,
-        inst: mcasm.mc.Instruction,
-        fixups: List[mcasm.mc.Fixup],
-    ) -> None:
-        for fixup in fixups:
-            pos = len(self._current_section.data) + fixup.offset
-            self._current_section.symbolic_expressions[
-                pos
-            ] = self._fixup_to_symbolic_operand(
-                fixup, data, inst.desc.is_call or inst.desc.is_branch
-            )
-            self._current_section.symbolic_expression_sizes[pos] = (
-                fixup.kind_info.bit_size // 8
-            )
-
-        self._current_section.data += data
-        self._current_block.size += len(data)
-        self._blocks_with_code.add(self._current_block)
-
-        if inst.desc.is_return:
-            proxy = gtirb.ProxyBlock()
-            self._proxies.add(proxy)
-            self._cfg.add(
-                gtirb.Edge(
-                    source=self._current_block,
-                    target=proxy,
-                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
-                )
-            )
-
-            self._split_block()
-
-        elif inst.desc.is_call or inst.desc.is_branch:
-            direct, target = self._resolve_instruction_target(
-                data, inst, fixups
-            )
-
-            if inst.desc.is_call:
-                edge_label = gtirb.Edge.Label(
-                    type=gtirb.Edge.Type.Call,
-                    direct=direct,
-                )
-            elif inst.desc.is_branch:
-                edge_label = gtirb.Edge.Label(
-                    type=gtirb.Edge.Type.Branch,
-                    conditional=inst.desc.is_conditional_branch,
-                    direct=direct,
-                )
-            else:
-                # This if/elif exhaustively covers the cases that let us into
-                # the parent block, so this is just to shut up analysis tools
-                # that don't understant that this is unreachable.
-                assert False
-
-            self._cfg.add(
-                gtirb.Edge(
-                    source=self._current_block,
-                    target=target,
-                    label=edge_label,
-                )
-            )
-
-            # Currently we assume that all calls can return and that they need
-            # a fallthrough edge.
-            add_fallthrough = (
-                inst.desc.is_call or inst.desc.is_conditional_branch
-            )
-            self._split_block(add_fallthrough=add_fallthrough)
-
-    def _assemble_bytes(self, data: bytes) -> None:
-        self._current_section.data += data
-        self._current_block.size += len(data)
-
-    def _assemble_emit_value(self, value: mcasm.mc.Expr, size: int) -> None:
-        self._current_section.symbolic_expressions[
-            len(self._current_section.data)
-        ] = self._mcexpr_to_symbolic_operand(value, False)
-        self._current_section.symbolic_expression_sizes[
-            len(self._current_section.data)
-        ] = size
-        self._current_section.data += b"\x00" * size
-        self._current_block.size += size
-
-    def _emit_alignment(
-        self, alignment: int, value: int, value_size: int, max_bytes: int
-    ) -> None:
-        """
-        Called when the assembler handles a .align directive.
-        """
-
-        if value != 0:
-            raise UnsupportedAssemblyError(
-                "trying to pad with a non-zero byte"
-            )
-
-        if max_bytes != 0:
-            raise UnsupportedAssemblyError("trying to pad with a fixed limit")
-
-        # The assembly parser usually checks this on our behalf, but be
-        # cautious in case we ever add support for an architecture where LLVM
-        # allows it.
-        is_power_of_two = (alignment & (alignment - 1) == 0) and alignment > 0
-        if not is_power_of_two:
-            raise UnsupportedAssemblyError(
-                "alignment values must be powers of 2"
-            )
-
-        # Alignment can only be applied to the start of a block, so we need
-        # to split the current block.
-        if self._current_block.size:
-            self._split_block(add_fallthrough=True)
-
-        self._current_section.alignment[self._current_block] = alignment
-
-    def _split_block(self, add_fallthrough: bool = False) -> gtirb.CodeBlock:
-        """
-        Starts a new block, optionally adding a fallthrough edge from the
-        current block.
-        """
-
-        next_block = gtirb.CodeBlock(
-            offset=self._current_block.offset + self._current_block.size
-        )
-
-        if add_fallthrough:
-            self._cfg.add(
-                gtirb.Edge(
-                    source=self._current_block,
-                    target=next_block,
-                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
-                )
-            )
-
-        self._current_section.blocks.append(next_block)
-        return next_block
-
-    def _resolve_symbol_ref(
-        self, expr: mcasm.mc.SymbolRefExpr
-    ) -> gtirb.Symbol:
-        name = expr.symbol.name
-        sym = self._symbol_lookup(name)
-
-        if not sym:
-            if not self._allow_undef_symbols:
-                raise UndefSymbolError(
-                    f"{name} is an undefined symbol reference"
-                )
-
-            proxy = gtirb.ProxyBlock()
-            sym = gtirb.Symbol(name, payload=proxy)
-            self._local_symbols[name] = sym
-            self._proxies.add(proxy)
-
-        return sym
-
-    def _get_symbol_ref_attrs(
-        self,
-        expr: mcasm.mc.SymbolRefExpr,
-        sym: gtirb.Symbol,
-        is_branch: bool,
-    ) -> Set[gtirb.SymbolicExpression.Attribute]:
-        attributes = set()
-        if expr.variant_kind != mcasm.mc.SymbolRefExpr.VariantKind.None_:
-            variant_attrs = self._ELF_VARIANT_KINDS.get(expr.variant_kind)
-            if variant_attrs is None:
-                raise UnsupportedAssemblyError(
-                    f"unsupported symbol variant kind '{expr.variant_kind}'"
-                )
-            attributes.update(variant_attrs)
-
-        elif (
-            self._module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
-            and _is_elf_pie(self._module)
-            and isinstance(sym.referent, gtirb.ProxyBlock)
-        ):
-            # These appear to only be necessary for X86 ELF, so we're limiting
-            # the inference to that.
-            if is_branch:
-                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
-            else:
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
-        return attributes
-
-    def _mcexpr_to_symbolic_operand(
-        self, expr: mcasm.mc.Expr, is_branch: bool
-    ) -> gtirb.SymAddrConst:
-        """
-        Converts an MC expression to a GTIRB SymbolicExpression.
-        """
-        attributes = set()
-
-        if isinstance(expr, mcasm.mc.TargetExprAArch64):
-            elfName = expr.variant_kind_name
-            if elfName == "":
-                # LLVM wrapped the expression in a target-specific MCExpr, but
-                # it doesn't effect the output assembly so we don't need to
-                # create a symbolic expression attr for it.
-                pass
-            elif elfName == ":got:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
-            elif elfName == ":lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
-            elif elfName == ":got_lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
-            else:
-                raise NotImplementedError(
-                    f"unknown aarch64-specific fixup: {elfName}"
-                )
-            expr = expr.sub_expr
-
-        # TODO: Do we need to support SymAddrAddr fixup types?
-        if (
-            isinstance(expr, mcasm.mc.BinaryExpr)
-            and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add
-            and isinstance(expr.lhs, mcasm.mc.SymbolRefExpr)
-            and isinstance(expr.rhs, mcasm.mc.ConstantExpr)
-        ):
-            sym = self._resolve_symbol_ref(expr.lhs)
-            attributes |= self._get_symbol_ref_attrs(expr.lhs, sym, is_branch)
-            offset = expr.rhs.value
-            return gtirb.SymAddrConst(offset, sym, attributes)
-        elif isinstance(expr, mcasm.mc.SymbolRefExpr):
-            sym = self._resolve_symbol_ref(expr)
-            attributes |= self._get_symbol_ref_attrs(expr, sym, is_branch)
-            return gtirb.SymAddrConst(0, sym, attributes)
-
-        assert False, "Unsupported symbolic expression"
-
-    def _fixup_to_symbolic_operand(
-        self, fixup: mcasm.mc.Fixup, encoding: bytes, is_branch: bool
-    ) -> gtirb.SymAddrConst:
-        """
-        Converts an LLVM fixup to a GTIRB SymbolicExpression.
-        """
-        expr = fixup.value
-
-        # LLVM will automatically add a negative value to make the expression
-        # be PC-relative. We don't care about that and just want to unwrap it.
-        if (
-            fixup.kind_info.is_pc_rel
-            and isinstance(expr, mcasm.mc.BinaryExpr)
-            and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add
-            and isinstance(expr.rhs, mcasm.mc.ConstantExpr)
-            and fixup.offset - expr.rhs.value == len(encoding)
-        ):
-            expr = expr.lhs
-
-        return self._mcexpr_to_symbolic_operand(expr, is_branch)
-
-    def _symbol_lookup(self, name: str) -> Optional[gtirb.Symbol]:
-        """
-        Looks up a symbol by name.
-
-        :param name: The symbol's name.
-        """
-
-        sym = self._local_symbols.get(name, None)
-        if sym:
-            return sym
-
-        sym = next(self._module.symbols_named(name), None)
-        if sym and sym.module == self._module:
-            return sym
-
-        return None
+        assembler.assemble(_Streamer(self._state), asm)
 
     def _replace_symbol_referents(
         self, old_block: gtirb.Block, new_block: gtirb.Block
@@ -652,13 +121,22 @@ class Assembler:
         """
         Alters all symbols referring to an old block to refer to a new block.
         """
-        for sym in self._local_symbols.values():
+        for sym in self._state.local_symbols.values():
             if sym.referent == old_block:
                 sym.referent = new_block
 
     def _remove_empty_blocks(
         self, section: "Assembler.Result.Section"
     ) -> None:
+        """
+        Cleans up all the empty blocks we may have generated during assembly.
+
+        For example, this code generates an empty block for the 'foo' label:
+            foo:
+            bar:
+                ud2
+        """
+
         final_blocks: List[gtirb.ByteBlock] = []
         for _, group in itertools.groupby(
             section.blocks, key=lambda b: b.offset
@@ -673,15 +151,14 @@ class Assembler:
                 assert isinstance(extra_block, gtirb.CodeBlock)
                 assert not extra_block.size
 
-                for edge in list(self._cfg.in_edges(extra_block)):
-                    self._cfg.discard(edge)
+                for edge in list(self._state.cfg.in_edges(extra_block)):
+                    self._state.cfg.discard(edge)
                     if edge.source not in extra_blocks:
-                        assert edge.source != main_block
-                        self._cfg.add(edge._replace(target=main_block))
+                        self._state.cfg.add(edge._replace(target=main_block))
 
                 # Our extra block should only have a single fallthrough edge
                 # that is to another extra block or the main block.
-                for edge in list(self._cfg.out_edges(extra_block)):
+                for edge in list(self._state.cfg.out_edges(extra_block)):
                     assert (
                         edge.label
                         and edge.label.type == gtirb.Edge.Type.Fallthrough
@@ -690,7 +167,7 @@ class Assembler:
                         edge.target in extra_blocks
                         or edge.target == main_block
                     )
-                    self._cfg.discard(edge)
+                    self._state.cfg.discard(edge)
 
                 self._replace_symbol_referents(extra_block, main_block)
 
@@ -718,21 +195,21 @@ class Assembler:
 
             if (
                 block.size
-                and block not in self._blocks_with_code
+                and block not in self._state.blocks_with_code
                 and (
                     gtirb.Section.Flag.Executable not in section.flags
                     or i != 0
-                    or self._trivially_unreachable
+                    or self._state.trivially_unreachable
                 )
-                and not any(self._cfg.in_edges(block))
+                and not any(self._state.cfg.in_edges(block))
             ):
                 new_block = gtirb.DataBlock(
                     offset=block.offset, size=block.size
                 )
                 self._replace_symbol_referents(block, new_block)
-                for out_edge in set(self._cfg.out_edges(block)):
+                for out_edge in set(self._state.cfg.out_edges(block)):
                     assert _is_fallthrough_edge(out_edge)
-                    self._cfg.discard(out_edge)
+                    self._state.cfg.discard(out_edge)
                 section.blocks[i] = new_block
                 if block in section.alignment:
                     section.alignment[new_block] = section.alignment[block]
@@ -743,24 +220,24 @@ class Assembler:
         Finalizes the assembly contents and returns the result.
         """
 
-        for section in self._sections.values():
+        for section in self._state.sections.values():
             self._remove_empty_blocks(section)
             self._convert_data_blocks(section)
 
         result = self.Result(
-            sections=self._sections,
-            cfg=self._cfg,
-            symbols=list(self._local_symbols.values()),
-            proxies=self._proxies,
+            sections=self._state.sections,
+            cfg=self._state.cfg,
+            symbols=list(self._state.local_symbols.values()),
+            proxies=self._state.proxies,
         )
 
         # Reinitialize the assembler just in case someone tries to use the
         # object again.
-        self.__init__(
-            self._module,
-            temp_symbol_suffix=self._temp_symbol_suffix,
-            trivially_unreachable=self._trivially_unreachable,
-            allow_undef_symbols=self._allow_undef_symbols,
+        self._state = _State(
+            self._state.module,
+            temp_symbol_suffix=self._state.temp_symbol_suffix,
+            trivially_unreachable=self._state.trivially_unreachable,
+            allow_undef_symbols=self._state.allow_undef_symbols,
         )
 
         return result
@@ -845,3 +322,544 @@ class Assembler:
         @property
         def text_section(self) -> Section:
             return next(iter(self.sections.values()))
+
+
+@dataclasses.dataclass
+class _State:
+    """
+    All of the state that the assembler accumulates across calls to assemble
+    and is used by the streamer classes.
+    """
+
+    module: gtirb.Module
+    temp_symbol_suffix: Optional[str]
+    trivially_unreachable: bool
+    allow_undef_symbols: bool
+    cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
+    local_symbols: Dict[str, gtirb.Symbol] = dataclasses.field(
+        default_factory=dict
+    )
+    proxies: Set[gtirb.ProxyBlock] = dataclasses.field(default_factory=set)
+    optional_current_section: Optional["Assembler.Result.Section"] = None
+    sections: Dict[str, "Assembler.Result.Section"] = dataclasses.field(
+        default_factory=dict
+    )
+    blocks_with_code: Set[gtirb.ByteBlock] = dataclasses.field(
+        default_factory=set
+    )
+
+    @property
+    def current_section(self) -> "Assembler.Result.Section":
+        assert self.optional_current_section, "not in a section yet"
+        return self.optional_current_section
+
+    @property
+    def current_block(self) -> gtirb.CodeBlock:
+        result = self.current_section.blocks[-1]
+        assert isinstance(
+            result, gtirb.CodeBlock
+        ), "current block should be a code block"
+        return result
+
+
+class _SymbolCreator(mcasm.Streamer):
+    """
+    A streamer that just takes care of precreating defined symbols.
+    """
+
+    def __init__(self, state: "_State"):
+        self._state = state
+        super().__init__()
+
+    def emit_label(self, parser_state, label, loc):
+        # If the symbol is temporary in LLVM's eyes and our client has
+        # given us a suffix to use for temporary symbols, tack it on. This
+        # allows clients to use the same assembly multiple times without
+        # worrying about duplicate symbol names, as long as they pass a
+        # different suffix each time.
+        symbol_name = label.name
+        if label.is_temporary and self._state.temp_symbol_suffix is not None:
+            symbol_name += self._state.temp_symbol_suffix
+
+        assert label.name not in self._state.local_symbols and not any(
+            self._state.module.symbols_named(label.name)
+        ), f"{symbol_name} defined multiple times"
+
+        label_sym = gtirb.Symbol(name=symbol_name, payload=gtirb.CodeBlock())
+        self._state.local_symbols[label.name] = label_sym
+
+
+class _Streamer(mcasm.Streamer):
+    """
+    Handles streamer callbacks and generates GTIRB IR as needed.
+    """
+
+    _ELF_VARIANT_KINDS = {
+        mcasm.mc.SymbolRefExpr.VariantKind.PLT: {
+            gtirb.SymbolicExpression.Attribute.PltRef
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTNTPOFF: {
+            gtirb.SymbolicExpression.Attribute.GotOff,
+            gtirb.SymbolicExpression.Attribute.NtpOff,
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.GOT: {
+            gtirb.SymbolicExpression.Attribute.GotOff,
+            gtirb.SymbolicExpression.Attribute.GotRef,
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTOFF: {
+            gtirb.SymbolicExpression.Attribute.GotOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTTPOFF: {
+            gtirb.SymbolicExpression.Attribute.GotRelPC,
+            gtirb.SymbolicExpression.Attribute.TpOff,
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTPCREL: {
+            gtirb.SymbolicExpression.Attribute.GotRelPC
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.TPOFF: {
+            gtirb.SymbolicExpression.Attribute.TpOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.NTPOFF: {
+            gtirb.SymbolicExpression.Attribute.NtpOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.DTPOFF: {
+            gtirb.SymbolicExpression.Attribute.DtpOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
+            gtirb.SymbolicExpression.Attribute.TlsGd
+        },
+    }
+
+    def __init__(self, state: "_State"):
+        self._state = state
+        super().__init__()
+
+    def emit_label(self, parser_state, label, loc):
+        label_sym = self._state.local_symbols[label.name]
+        label_block = label_sym.referent
+        assert isinstance(label_block, gtirb.CodeBlock)
+
+        label_block.offset = (
+            self._state.current_block.offset + self._state.current_block.size
+        )
+        self._state.cfg.add(
+            gtirb.Edge(
+                source=self._state.current_block,
+                target=label_block,
+                label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+            )
+        )
+
+        self._state.current_section.blocks.append(label_block)
+
+    def change_section(self, parser_state, section, subsection):
+        name = section.name
+
+        # LLVM validates that flags don't change when it sees the same section
+        # multiple times, so we don't need to do that here.
+        result = self._state.sections.get(name)
+        if not result:
+            flags: Set[gtirb.Section.Flag] = set()
+            image_flags = 0
+            image_type = 0
+
+            if isinstance(section, mcasm.mc.SectionELF):
+                SHF_WRITE = 0x1
+                SHF_ALLOC = 0x2
+                SHF_EXECINSTR = 0x4
+                SHT_NOBITS = 8
+
+                image_flags = section.flags
+                image_type = section.type
+                assert image_flags and image_type
+
+                if image_flags & SHF_WRITE:
+                    flags.add(gtirb.Section.Flag.Writable)
+
+                if image_flags & SHF_ALLOC:
+                    flags.add(gtirb.Section.Flag.Loaded)
+                    flags.add(gtirb.Section.Flag.Readable)
+                    if image_type != SHT_NOBITS:
+                        flags.add(gtirb.Section.Flag.Initialized)
+
+                if image_flags & SHF_EXECINSTR:
+                    flags.add(gtirb.Section.Flag.Executable)
+
+            elif isinstance(section, mcasm.mc.SectionCOFF):
+                IMAGE_SCN_CNT_UNINITIALIZED_DATA = 0x00000080
+                IMAGE_SCN_MEM_EXECUTE = 0x20000000
+                IMAGE_SCN_MEM_READ = 0x40000000
+                IMAGE_SCN_MEM_WRITE = 0x80000000
+
+                image_flags = section.characteristics
+
+                if image_flags & IMAGE_SCN_MEM_READ:
+                    flags.add(gtirb.Section.Flag.Loaded)
+                    flags.add(gtirb.Section.Flag.Readable)
+
+                if image_flags & IMAGE_SCN_MEM_WRITE:
+                    flags.add(gtirb.Section.Flag.Writable)
+
+                if image_flags & IMAGE_SCN_MEM_EXECUTE:
+                    flags.add(gtirb.Section.Flag.Executable)
+
+                if not image_flags & IMAGE_SCN_CNT_UNINITIALIZED_DATA:
+                    flags.add(gtirb.Section.Flag.Initialized)
+
+            else:
+                raise NotImplementedError(
+                    f"unsupported section class {type(section)}"
+                )
+
+            result = Assembler.Result.Section(
+                name=name,
+                flags=flags,
+                data=b"",
+                blocks=[gtirb.CodeBlock()],
+                symbolic_expressions={},
+                symbolic_expression_sizes={},
+                alignment={},
+                image_flags=image_flags,
+                image_type=image_type,
+            )
+            self._state.sections[name] = result
+
+        self._state.optional_current_section = result
+        super().change_section(parser_state, section, subsection)
+
+    def emit_instruction(
+        self,
+        parser_state,
+        inst: mcasm.mc.Instruction,
+        data: bytes,
+        fixups: List[mcasm.mc.Fixup],
+    ) -> None:
+        for fixup in fixups:
+            pos = len(self._state.current_section.data) + fixup.offset
+            self._state.current_section.symbolic_expressions[
+                pos
+            ] = self._fixup_to_symbolic_operand(
+                fixup, data, inst.desc.is_call or inst.desc.is_branch
+            )
+            self._state.current_section.symbolic_expression_sizes[pos] = (
+                fixup.kind_info.bit_size // 8
+            )
+
+        self._state.current_section.data += data
+        self._state.current_block.size += len(data)
+        self._state.blocks_with_code.add(self._state.current_block)
+
+        if inst.desc.is_return:
+            proxy = gtirb.ProxyBlock()
+            self._state.proxies.add(proxy)
+            self._state.cfg.add(
+                gtirb.Edge(
+                    source=self._state.current_block,
+                    target=proxy,
+                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Return),
+                )
+            )
+
+            self._split_block()
+
+        elif inst.desc.is_call or inst.desc.is_branch:
+            direct, target = self._resolve_instruction_target(
+                data, inst, fixups
+            )
+
+            if inst.desc.is_call:
+                edge_label = gtirb.Edge.Label(
+                    type=gtirb.Edge.Type.Call,
+                    direct=direct,
+                )
+            elif inst.desc.is_branch:
+                edge_label = gtirb.Edge.Label(
+                    type=gtirb.Edge.Type.Branch,
+                    conditional=inst.desc.is_conditional_branch,
+                    direct=direct,
+                )
+            else:
+                # This if/elif exhaustively covers the cases that let us into
+                # the parent block, so this is just to shut up analysis tools
+                # that don't understant that this is unreachable.
+                assert False
+
+            self._state.cfg.add(
+                gtirb.Edge(
+                    source=self._state.current_block,
+                    target=target,
+                    label=edge_label,
+                )
+            )
+
+            # Currently we assume that all calls can return and that they need
+            # a fallthrough edge.
+            add_fallthrough = (
+                inst.desc.is_call or inst.desc.is_conditional_branch
+            )
+            self._split_block(add_fallthrough=add_fallthrough)
+
+    def emit_value_impl(self, parser_state, value, size, loc):
+        self._state.current_section.symbolic_expressions[
+            len(self._state.current_section.data)
+        ] = self._mcexpr_to_symbolic_operand(value, False)
+        self._state.current_section.symbolic_expression_sizes[
+            len(self._state.current_section.data)
+        ] = size
+        self._state.current_section.data += b"\x00" * size
+        self._state.current_block.size += size
+
+    def emit_bytes(self, parser_state, value):
+        self._state.current_section.data += value
+        self._state.current_block.size += len(value)
+
+    def emit_value_to_alignment(
+        self, parser_state, alignment, value, value_size, max_bytes
+    ):
+        self._emit_alignment(alignment, value, value_size, max_bytes)
+
+    def emit_code_alignment(self, parser_state, alignment, max_bytes):
+        self._emit_alignment(alignment, 0, 0, max_bytes)
+
+    def _emit_alignment(
+        self, alignment: int, value: int, value_size: int, max_bytes: int
+    ) -> None:
+        """
+        Called when the assembler handles a .align directive.
+        """
+
+        if value != 0:
+            raise UnsupportedAssemblyError(
+                "trying to pad with a non-zero byte"
+            )
+
+        if max_bytes != 0:
+            raise UnsupportedAssemblyError("trying to pad with a fixed limit")
+
+        # The assembly parser usually checks this on our behalf, but be
+        # cautious in case we ever add support for an architecture where
+        # LLVM allows it.
+        is_power_of_two = (alignment & (alignment - 1) == 0) and alignment > 0
+        if not is_power_of_two:
+            raise UnsupportedAssemblyError(
+                "alignment values must be powers of 2"
+            )
+
+        # Alignment can only be applied to the start of a block, so we need
+        # to split the current block.
+        if self._state.current_block.size:
+            self._split_block(add_fallthrough=True)
+
+        self._state.current_section.alignment[
+            self._state.current_block
+        ] = alignment
+
+    def diagnostic(self, state, diag):
+        if diag.kind == mcasm.mc.Diagnostic.Kind.Error:
+            raise AsmSyntaxError(diag.lineno, diag.offset, diag.message)
+
+    def unhandled_event(self, name, base_impl, *args, **kwargs):
+        if name in {
+            "init_sections",
+            "add_explicit_comment",
+            "emit_int_value",
+        }:
+            return super().unhandled_event(name, base_impl, *args, **kwargs)
+
+        raise UnsupportedAssemblyError(f"{name} was not handled")
+
+    def _resolve_instruction_target(
+        self,
+        data: bytes,
+        inst: mcasm.mc.Instruction,
+        fixups: List[mcasm.mc.Fixup],
+    ) -> Tuple[bool, gtirb.CfgNode]:
+        """
+        Resolves a call or branch instruction's target to a CFG node.
+        """
+        assert inst.desc.is_call or inst.desc.is_branch
+
+        # LLVM doesn't seem to have anything to denote an indirect call, but
+        # we can infer it from the lack of fixups.
+        if inst.desc.is_indirect_branch or (inst.desc.is_call and not fixups):
+            proxy = gtirb.ProxyBlock()
+            self._state.proxies.add(proxy)
+            return False, proxy
+
+        assert len(fixups) == 1
+        target_expr = self._fixup_to_symbolic_operand(fixups[0], data, True)
+
+        if not isinstance(target_expr, gtirb.SymAddrConst):
+            raise UnsupportedAssemblyError(
+                "Call and branch targets must be simple expressions"
+            )
+
+        if target_expr.offset != 0:
+            raise UnsupportedAssemblyError(
+                "Call and branch targets cannot have offsets"
+            )
+
+        if not isinstance(target_expr.symbol.referent, gtirb.CfgNode):
+            raise UnsupportedAssemblyError(
+                "Call and branch targets cannot be data blocks or other "
+                "non-CFG elements"
+            )
+
+        return True, target_expr.symbol.referent
+
+    def _split_block(self, add_fallthrough: bool = False) -> gtirb.CodeBlock:
+        """
+        Starts a new block, optionally adding a fallthrough edge from the
+        current block.
+        """
+
+        next_block = gtirb.CodeBlock(
+            offset=self._state.current_block.offset
+            + self._state.current_block.size
+        )
+
+        if add_fallthrough:
+            self._state.cfg.add(
+                gtirb.Edge(
+                    source=self._state.current_block,
+                    target=next_block,
+                    label=gtirb.Edge.Label(type=gtirb.Edge.Type.Fallthrough),
+                )
+            )
+
+        self._state.current_section.blocks.append(next_block)
+        return next_block
+
+    def _resolve_symbol(self, sym: mcasm.mc.Symbol) -> gtirb.Symbol:
+        gt_sym = self._symbol_lookup(sym.name)
+
+        if not gt_sym:
+            if not self._state.allow_undef_symbols:
+                raise UndefSymbolError(
+                    f"{sym.name} is an undefined symbol reference"
+                )
+
+            proxy = gtirb.ProxyBlock()
+            gt_sym = gtirb.Symbol(sym.name, payload=proxy)
+            self._state.local_symbols[sym.name] = gt_sym
+            self._state.proxies.add(proxy)
+
+        return gt_sym
+
+    def _resolve_symbol_ref(
+        self, expr: mcasm.mc.SymbolRefExpr
+    ) -> gtirb.Symbol:
+        return self._resolve_symbol(expr.symbol)
+
+    def _get_symbol_ref_attrs(
+        self,
+        expr: mcasm.mc.SymbolRefExpr,
+        sym: gtirb.Symbol,
+        is_branch: bool,
+    ) -> Set[gtirb.SymbolicExpression.Attribute]:
+        attributes = set()
+        if expr.variant_kind != mcasm.mc.SymbolRefExpr.VariantKind.None_:
+            variant_attrs = self._ELF_VARIANT_KINDS.get(expr.variant_kind)
+            if variant_attrs is None:
+                raise UnsupportedAssemblyError(
+                    f"unsupported symbol variant kind '{expr.variant_kind}'"
+                )
+            attributes.update(variant_attrs)
+
+        elif (
+            self._state.module.isa
+            in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
+            and _is_elf_pie(self._state.module)
+            and isinstance(sym.referent, gtirb.ProxyBlock)
+        ):
+            # These appear to only be necessary for X86 ELF, so we're limiting
+            # the inference to that.
+            if is_branch:
+                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+            else:
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
+        return attributes
+
+    def _mcexpr_to_symbolic_operand(
+        self, expr: mcasm.mc.Expr, is_branch: bool
+    ) -> gtirb.SymAddrConst:
+        """
+        Converts an MC expression to a GTIRB SymbolicExpression.
+        """
+        attributes = set()
+
+        if isinstance(expr, mcasm.mc.TargetExprAArch64):
+            elfName = expr.variant_kind_name
+            if elfName == "":
+                # LLVM wrapped the expression in a target-specific MCExpr, but
+                # it doesn't effect the output assembly so we don't need to
+                # create a symbolic expression attr for it.
+                pass
+            elif elfName == ":got:":
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+            elif elfName == ":lo12:":
+                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+            elif elfName == ":got_lo12:":
+                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+            else:
+                raise NotImplementedError(
+                    f"unknown aarch64-specific fixup: {elfName}"
+                )
+            expr = expr.sub_expr
+
+        # TODO: Do we need to support SymAddrAddr fixup types?
+        if (
+            isinstance(expr, mcasm.mc.BinaryExpr)
+            and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add
+            and isinstance(expr.lhs, mcasm.mc.SymbolRefExpr)
+            and isinstance(expr.rhs, mcasm.mc.ConstantExpr)
+        ):
+            sym = self._resolve_symbol_ref(expr.lhs)
+            attributes |= self._get_symbol_ref_attrs(expr.lhs, sym, is_branch)
+            offset = expr.rhs.value
+            return gtirb.SymAddrConst(offset, sym, attributes)
+        elif isinstance(expr, mcasm.mc.SymbolRefExpr):
+            sym = self._resolve_symbol_ref(expr)
+            attributes |= self._get_symbol_ref_attrs(expr, sym, is_branch)
+            return gtirb.SymAddrConst(0, sym, attributes)
+
+        assert False, "Unsupported symbolic expression"
+
+    def _fixup_to_symbolic_operand(
+        self, fixup: mcasm.mc.Fixup, encoding: bytes, is_branch: bool
+    ) -> gtirb.SymAddrConst:
+        """
+        Converts an LLVM fixup to a GTIRB SymbolicExpression.
+        """
+        expr = fixup.value
+
+        # LLVM will automatically add a negative value to make the expression
+        # be PC-relative. We don't care about that and just want to unwrap it.
+        if (
+            fixup.kind_info.is_pc_rel
+            and isinstance(expr, mcasm.mc.BinaryExpr)
+            and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add
+            and isinstance(expr.rhs, mcasm.mc.ConstantExpr)
+            and fixup.offset - expr.rhs.value == len(encoding)
+        ):
+            expr = expr.lhs
+
+        return self._mcexpr_to_symbolic_operand(expr, is_branch)
+
+    def _symbol_lookup(self, name: str) -> Optional[gtirb.Symbol]:
+        """
+        Looks up a symbol by name.
+
+        :param name: The symbol's name.
+        """
+
+        sym = self._state.local_symbols.get(name, None)
+        if sym:
+            return sym
+
+        sym = next(self._state.module.symbols_named(name), None)
+        if sym and sym.module == self._state.module:
+            return sym
+
+        return None

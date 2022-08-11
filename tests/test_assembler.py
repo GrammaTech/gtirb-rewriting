@@ -60,6 +60,41 @@ def test_return_edges():
     assert text_section.data == b"\xC3"
 
 
+def test_empty_label():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+            foo:
+            bar:
+                jmp foo
+                ud2
+        """
+    )
+    result = assembler.finalize()
+
+    assert len(result.symbols) == 2
+    foo_sym = next(sym for sym in result.symbols if sym.name == "foo")
+    bar_sym = next(sym for sym in result.symbols if sym.name == "bar")
+
+    assert len(result.text_section.blocks) == 2
+    b, _ = result.text_section.blocks
+    assert isinstance(b, gtirb.CodeBlock)
+    assert foo_sym.referent is bar_sym.referent is b
+
+    assert result.text_section.blocks[0].size
+    assert set(result.cfg) == {
+        gtirb.Edge(
+            b,
+            b,
+            gtirb.Edge.Label(gtirb.Edge.Type.Branch),
+        )
+    }
+
+
 def test_symbolic_expr():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
@@ -398,7 +433,7 @@ def test_temp_symbol_suffix():
 
 @pytest.mark.parametrize(
     "variant_entry",
-    gtirb_rewriting.Assembler._ELF_VARIANT_KINDS.items(),
+    gtirb_rewriting.assembler._Streamer._ELF_VARIANT_KINDS.items(),
     ids=lambda item: item[0].name,
 )
 def test_elf_sym_attrs(variant_entry):
