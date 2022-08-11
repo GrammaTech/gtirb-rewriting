@@ -431,6 +431,35 @@ class _SymbolCreator(mcasm.Streamer):
         super().__init__()
 
     def emit_label(self, parser_state, label, loc):
+        self._precreate_label(parser_state, label)
+
+    def emit_assignment(
+        self,
+        parser_state: mcasm.ParserState,
+        symbol: mcasm.mc.Symbol,
+        value: mcasm.mc.Expr,
+    ) -> None:
+        if isinstance(value, mcasm.mc.ConstantExpr):
+            gt_sym = self._precreate_label(parser_state, symbol)
+            gt_sym.value = value.value
+        else:
+            # There are interesting uses of assignments that would be nice to
+            # support but that GTIRB cannot represent. For example:
+            #   .data
+            #   str1:
+            #   .string "Hello"
+            #   str1_len = (. - str1)
+            #   .text
+            #   movl $str1_len, %eax
+            raise _make_error(
+                UnsupportedAssemblyError,
+                "only constant expressions can be used in assignments",
+                value.location or parser_state.loc,
+            )
+
+    def _precreate_label(
+        self, parser_state: mcasm.ParserState, label: mcasm.mc.Symbol
+    ) -> gtirb.Symbol:
         # If the symbol is temporary in LLVM's eyes and our client has
         # given us a suffix to use for temporary symbols, tack it on. This
         # allows clients to use the same assembly multiple times without
@@ -802,6 +831,7 @@ class _Streamer(mcasm.Streamer):
             "init_sections",
             "add_explicit_comment",
             "emit_int_value",
+            "emit_assignment",
         }:
             return super().unhandled_event(name, base_impl, *args, **kwargs)
 

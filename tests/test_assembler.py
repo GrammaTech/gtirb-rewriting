@@ -20,6 +20,8 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+import textwrap
+
 import gtirb
 import gtirb_rewriting
 import pytest
@@ -687,6 +689,26 @@ def test_assembler_errors():
     assert exc.value.lineno == 1
     assert exc.value.offset == 6
 
+    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
+        # This would be nice to support, but we don't right now.
+        assembler.assemble(
+            textwrap.dedent(
+                """\
+                .data
+                str1:
+                    .string "Hello"
+                    str1_len = (. - str1)
+                .text
+                    movl $str1_len, %eax
+                """
+            )
+        )
+    assert str(exc.value) == (
+        "only constant expressions can be used in assignments"
+    )
+    assert exc.value.lineno == 4
+    assert exc.value.offset == 19  # Points to the -, which isn't ideal
+
 
 @pytest.mark.parametrize(
     "file_format",
@@ -832,3 +854,24 @@ def test_elf_symbol_attributes():
     ] == gtirb_rewriting.Assembler.Result.ElfSymbolAttributes(
         "FUNC", "GLOBAL", "HIDDEN"
     )
+
+
+def test_assignments():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        .set .L_0, 0
+        """,
+        gtirb_rewriting.X86Syntax.ATT,
+    )
+
+    result = assembler.finalize()
+
+    assert len(result.symbols) == 1
+    assert result.symbols[0].name == ".L_0"
+    assert result.symbols[0].value == 0
