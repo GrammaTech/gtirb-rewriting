@@ -486,6 +486,24 @@ class _Streamer(mcasm.Streamer):
             gtirb.SymbolicExpression.Attribute.TlsGd
         },
     }
+    _ELF_BINDINGS = {
+        mcasm.mc.SymbolAttr.Global: "GLOBAL",
+        mcasm.mc.SymbolAttr.Weak: "WEAK",
+        mcasm.mc.SymbolAttr.Local: "LOCAL",
+        mcasm.mc.SymbolAttr.ELF_TypeGnuUniqueObject: "GNU_UNIQUE",
+    }
+    _ELF_VISIBILITIES = {
+        mcasm.mc.SymbolAttr.Hidden: "HIDDEN",
+        mcasm.mc.SymbolAttr.Protected: "PROTECTED",
+        mcasm.mc.SymbolAttr.Internal: "INTERNAL",
+    }
+    _ELF_TYPES = {
+        mcasm.mc.SymbolAttr.ELF_TypeFunction: "FUNC",
+        mcasm.mc.SymbolAttr.ELF_TypeIndFunction: "GNU_IFUNC",
+        mcasm.mc.SymbolAttr.ELF_TypeNoType: "NOTYPE",
+        mcasm.mc.SymbolAttr.ELF_TypeObject: "OBJECT",
+        mcasm.mc.SymbolAttr.ELF_TypeTLS: "TLS",
+    }
 
     def __init__(self, state: "_State"):
         self._state = state
@@ -744,39 +762,22 @@ class _Streamer(mcasm.Streamer):
     def _emit_elf_symbol_attribute(
         self, symbol: gtirb.Symbol, attribute: mcasm.mc.SymbolAttr
     ) -> bool:
-        BINDINGS = {
-            mcasm.mc.SymbolAttr.Global: "GLOBAL",
-            mcasm.mc.SymbolAttr.Weak: "WEAK",
-            mcasm.mc.SymbolAttr.Local: "LOCAL",
-            mcasm.mc.SymbolAttr.ELF_TypeGnuUniqueObject: "GNU_UNIQUE",
-        }
-        VISIBILITIES = {
-            mcasm.mc.SymbolAttr.Hidden: "HIDDEN",
-            mcasm.mc.SymbolAttr.Protected: "PROTECTED",
-            mcasm.mc.SymbolAttr.Internal: "INTERNAL",
-        }
-        TYPES = {
-            mcasm.mc.SymbolAttr.ELF_TypeFunction: "FUNC",
-            mcasm.mc.SymbolAttr.ELF_TypeIndFunction: "GNU_IFUNC",
-            mcasm.mc.SymbolAttr.ELF_TypeNoType: "NOTYPE",
-            mcasm.mc.SymbolAttr.ELF_TypeObject: "OBJECT",
-            mcasm.mc.SymbolAttr.ELF_TypeTLS: "TLS",
-        }
-
-        if attribute in BINDINGS:
-            self._state.elf_symbol_attributes[symbol].binding = BINDINGS[
-                attribute
-            ]
-            return True
-
-        if attribute in VISIBILITIES:
+        if attribute in self._ELF_BINDINGS:
             self._state.elf_symbol_attributes[
                 symbol
-            ].visibility = VISIBILITIES[attribute]
+            ].binding = self._ELF_BINDINGS[attribute]
             return True
 
-        if attribute in TYPES:
-            self._state.elf_symbol_attributes[symbol].type = TYPES[attribute]
+        if attribute in self._ELF_VISIBILITIES:
+            self._state.elf_symbol_attributes[
+                symbol
+            ].visibility = self._ELF_VISIBILITIES[attribute]
+            return True
+
+        if attribute in self._ELF_TYPES:
+            self._state.elf_symbol_attributes[symbol].type = self._ELF_TYPES[
+                attribute
+            ]
             return True
 
         if attribute == mcasm.mc.SymbolAttr.NoDeadStrip:
