@@ -76,9 +76,9 @@ class Assembler:
         :param module: The module the patch will be inserted into.
         :param temp_symbol_suffix: A suffix to use for local symbols that are
                considered temporary. Passing in a unique suffix to each
-               assembler that targets the same module means that the assembly
-               itself does not have to be concerned with having unique
-               temporary symbol names.
+               assembler that targets the same module allows the same assembly
+               to be used each time without worrying about duplicate symbol
+               names.
         :param trivially_unreachable: Is the entry block of the patch
                                       obviously unreachable? For example,
                                       inserting after a ret instruction.
@@ -128,6 +128,15 @@ class Assembler:
     def _remove_empty_blocks(
         self, section: "Assembler.Result.Section"
     ) -> None:
+        """
+        Cleans up all the empty blocks we may have generated during assembly.
+
+        For example, this code generates an empty block for the 'foo' label:
+            foo:
+            bar:
+                ud2
+        """
+
         final_blocks: List[gtirb.ByteBlock] = []
         for _, group in itertools.groupby(
             section.blocks, key=lambda b: b.offset
@@ -145,7 +154,6 @@ class Assembler:
                 for edge in list(self._state.cfg.in_edges(extra_block)):
                     self._state.cfg.discard(edge)
                     if edge.source not in extra_blocks:
-                        assert edge.source != main_block
                         self._state.cfg.add(edge._replace(target=main_block))
 
                 # Our extra block should only have a single fallthrough edge
