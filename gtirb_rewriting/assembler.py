@@ -30,6 +30,17 @@ from .assembly import X86Syntax
 from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 
 
+class AsmSyntaxError(ValueError):
+    """
+    An error was encountered in the assembly.
+    """
+
+    def __init__(self, lineno: int, column: int, message: str):
+        super().__init__(message)
+        self.lineno = lineno
+        self.column = column
+
+
 class UndefSymbolError(ValueError):
     """
     A symbol was referenced that was not defined.
@@ -54,26 +65,39 @@ class Assembler:
     """
 
     _ELF_VARIANT_KINDS = {
-        "PLT": {gtirb.SymbolicExpression.Attribute.PltRef},
-        "GOTNTPOFF": {
+        mcasm.mc.SymbolRefExpr.VariantKind.PLT: {
+            gtirb.SymbolicExpression.Attribute.PltRef
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTNTPOFF: {
             gtirb.SymbolicExpression.Attribute.GotOff,
             gtirb.SymbolicExpression.Attribute.NtpOff,
         },
-        "GOT": {
+        mcasm.mc.SymbolRefExpr.VariantKind.GOT: {
             gtirb.SymbolicExpression.Attribute.GotOff,
             gtirb.SymbolicExpression.Attribute.GotRef,
         },
-        "GOTOFF": {gtirb.SymbolicExpression.Attribute.GotOff},
-        "GOTTPOFF": {
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTOFF: {
+            gtirb.SymbolicExpression.Attribute.GotOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTTPOFF: {
             gtirb.SymbolicExpression.Attribute.GotRelPC,
             gtirb.SymbolicExpression.Attribute.TpOff,
         },
-        "GOTPCREL": {gtirb.SymbolicExpression.Attribute.GotRelPC},
-        "TPOFF": {gtirb.SymbolicExpression.Attribute.TpOff},
-        "NTPOFF": {gtirb.SymbolicExpression.Attribute.NtpOff},
-        "DTPOFF": {gtirb.SymbolicExpression.Attribute.DtpOff},
-        "TLSGD": {gtirb.SymbolicExpression.Attribute.TlsGd},
-        "TLSLD": {gtirb.SymbolicExpression.Attribute.TlsLd},
+        mcasm.mc.SymbolRefExpr.VariantKind.GOTPCREL: {
+            gtirb.SymbolicExpression.Attribute.GotRelPC
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.TPOFF: {
+            gtirb.SymbolicExpression.Attribute.TpOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.NTPOFF: {
+            gtirb.SymbolicExpression.Attribute.NtpOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.DTPOFF: {
+            gtirb.SymbolicExpression.Attribute.DtpOff
+        },
+        mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
+            gtirb.SymbolicExpression.Attribute.TlsGd
+        },
     }
 
     def __init__(
@@ -142,45 +166,69 @@ class Assembler:
         if self._module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64):
             assembler.x86_syntax = x86_syntax
 
-        events = assembler.assemble(asm)
+        class LabelExtractor(mcasm.Streamer):
+            def __init__(self, assembler):
+                super().__init__()
+                self._assembler = assembler
 
-        for event in events:
-            if event["kind"] == "label":
-                self._precreate_defined_label(event["symbol"])
+            def emit_label(self, state, label, loc):
+                self._assembler._precreate_defined_label(label)
 
-        for event in events:
-            if event["kind"] == "instruction":
-                self._assemble_instruction(
-                    bytes.fromhex(event["data"]),
-                    event["inst"],
-                    event["fixups"],
-                )
-            elif event["kind"] == "label":
-                self._assemble_label(event["symbol"])
-            elif event["kind"] == "changeSection":
-                self._assemble_change_section(event["section"])
-            elif event["kind"] == "bytes":
-                self._assemble_bytes(bytes.fromhex(event["data"]))
-            elif event["kind"] == "emitValue":
-                self._assemble_emit_value(event["value"], event["size"])
-            elif event["kind"] == "emitValueToAlignment":
-                self._emit_alignment(
-                    event["alignment"],
-                    event["value"],
-                    event["valueSize"],
-                    event["maxBytes"],
-                )
-            elif event["kind"] == "emitCodeAlignment":
-                # We currently handle this the same as the previous case, so
-                # just call the same function.
-                self._emit_alignment(
-                    event["alignment"], 0, 0, event["maxBytes"]
-                )
-            else:
-                assert False, f"Unsupported assembler event: {event['kind']}"
+        assembler.assemble(LabelExtractor(self), asm)
 
-    def _precreate_defined_label(self, symbol: dict) -> None:
-        label_name = symbol["name"]
+        class StreamerAdaptor(mcasm.Streamer):
+            def __init__(self, assembler):
+                super().__init__()
+                self._assembler = assembler
+
+            def emit_label(self, state, label, loc):
+                self._assembler._assemble_label(label)
+
+            def emit_instruction(self, state, inst, bytes, fixups):
+                self._assembler._assemble_instruction(bytes, inst, fixups)
+
+            def change_section(self, state, section, subsection):
+                self._assembler._assemble_change_section(section)
+                super().change_section(state, section, subsection)
+
+            def emit_value_impl(self, state, value, size, loc):
+                self._assembler._assemble_emit_value(value, size)
+
+            def emit_bytes(self, state, value):
+                self._assembler._assemble_bytes(value)
+
+            def emit_value_to_alignment(
+                self, state, alignment, value, value_size, max_bytes
+            ):
+                self._assembler._emit_alignment(
+                    alignment, value, value_size, max_bytes
+                )
+
+            def emit_code_alignment(self, state, alignment, max_bytes):
+                self._assembler._emit_alignment(alignment, 0, 0, max_bytes)
+
+            def diagnostic(self, state, diag):
+                if diag.kind == mcasm.mc.Diagnostic.Kind.Error:
+                    raise AsmSyntaxError(
+                        diag.lineno, diag.offset, diag.message
+                    )
+
+            def unhandled_event(self, name, base_impl, *args, **kwargs):
+                if name in {
+                    "init_sections",
+                    "add_explicit_comment",
+                    "emit_int_value",
+                }:
+                    return super().unhandled_event(
+                        name, base_impl, *args, **kwargs
+                    )
+
+                raise UnsupportedAssemblyError(f"{name} was not handled")
+
+        assembler.assemble(StreamerAdaptor(self), asm)
+
+    def _precreate_defined_label(self, symbol: mcasm.mc.Symbol) -> None:
+        label_name = symbol.name
 
         # If the symbol is temporary in LLVM's eyes and our client has given
         # us a suffix to use for temporary symbols, tack it on. This allows
@@ -188,7 +236,7 @@ class Assembler:
         # about duplicate symbol names, as long as they pass a different
         # suffix each time.
         symbol_name = label_name
-        if symbol["isTemporary"] and self._temp_symbol_suffix is not None:
+        if symbol.is_temporary and self._temp_symbol_suffix is not None:
             symbol_name += self._temp_symbol_suffix
 
         assert label_name not in self._local_symbols and not any(
@@ -198,8 +246,8 @@ class Assembler:
         label_sym = gtirb.Symbol(name=symbol_name, payload=gtirb.CodeBlock())
         self._local_symbols[label_name] = label_sym
 
-    def _assemble_label(self, symbol: dict) -> None:
-        label_sym = self._local_symbols[symbol["name"]]
+    def _assemble_label(self, symbol: mcasm.mc.Symbol) -> None:
+        label_sym = self._local_symbols[symbol.name]
         label_block = label_sym.referent
         assert isinstance(label_block, gtirb.CodeBlock)
 
@@ -216,8 +264,8 @@ class Assembler:
 
         self._current_section.blocks.append(label_block)
 
-    def _assemble_change_section(self, section: dict) -> None:
-        name = section["name"]
+    def _assemble_change_section(self, section: mcasm.mc.Section) -> None:
+        name = section.name
 
         # LLVM validates that flags don't change when it sees the same section
         # multiple times, so we don't need to do that here.
@@ -227,14 +275,14 @@ class Assembler:
             image_flags = 0
             image_type = 0
 
-            if section["class"] == "MCSectionELF":
+            if isinstance(section, mcasm.mc.SectionELF):
                 SHF_WRITE = 0x1
                 SHF_ALLOC = 0x2
                 SHF_EXECINSTR = 0x4
                 SHT_NOBITS = 8
 
-                image_flags = section["flags"]
-                image_type = section["type"]
+                image_flags = section.flags
+                image_type = section.type
                 assert image_flags and image_type
 
                 if image_flags & SHF_WRITE:
@@ -249,13 +297,13 @@ class Assembler:
                 if image_flags & SHF_EXECINSTR:
                     flags.add(gtirb.Section.Flag.Executable)
 
-            elif section["class"] == "MCSectionCOFF":
+            elif isinstance(section, mcasm.mc.SectionCOFF):
                 IMAGE_SCN_CNT_UNINITIALIZED_DATA = 0x00000080
                 IMAGE_SCN_MEM_EXECUTE = 0x20000000
                 IMAGE_SCN_MEM_READ = 0x40000000
                 IMAGE_SCN_MEM_WRITE = 0x80000000
 
-                image_flags = section["characteristics"]
+                image_flags = section.characteristics
 
                 if image_flags & IMAGE_SCN_MEM_READ:
                     flags.add(gtirb.Section.Flag.Loaded)
@@ -272,7 +320,7 @@ class Assembler:
 
             else:
                 raise NotImplementedError(
-                    f"unsupported section class {section['class']}"
+                    f"unsupported section class {type(section)}"
                 )
 
             result = self.Result.Section(
@@ -291,18 +339,19 @@ class Assembler:
         self._optional_current_section = result
 
     def _resolve_instruction_target(
-        self, data: bytes, inst: dict, fixups: List[dict]
+        self,
+        data: bytes,
+        inst: mcasm.mc.Instruction,
+        fixups: List[mcasm.mc.Fixup],
     ) -> Tuple[bool, gtirb.CfgNode]:
         """
         Resolves a call or branch instruction's target to a CFG node.
         """
-        assert inst["desc"]["isCall"] or inst["desc"]["isBranch"]
+        assert inst.desc.is_call or inst.desc.is_branch
 
         # LLVM doesn't seem to have anything to denote an indirect call, but
         # we can infer it from the lack of fixups.
-        if inst["desc"]["isIndirectBranch"] or (
-            inst["desc"]["isCall"] and not fixups
-        ):
+        if inst.desc.is_indirect_branch or (inst.desc.is_call and not fixups):
             proxy = gtirb.ProxyBlock()
             self._proxies.add(proxy)
             return False, proxy
@@ -329,24 +378,27 @@ class Assembler:
         return True, target_expr.symbol.referent
 
     def _assemble_instruction(
-        self, data: bytes, inst: dict, fixups: List[dict]
+        self,
+        data: bytes,
+        inst: mcasm.mc.Instruction,
+        fixups: List[mcasm.mc.Fixup],
     ) -> None:
         for fixup in fixups:
-            pos = len(self._current_section.data) + fixup["offset"]
+            pos = len(self._current_section.data) + fixup.offset
             self._current_section.symbolic_expressions[
                 pos
             ] = self._fixup_to_symbolic_operand(
-                fixup, data, inst["desc"]["isCall"] or inst["desc"]["isBranch"]
+                fixup, data, inst.desc.is_call or inst.desc.is_branch
             )
             self._current_section.symbolic_expression_sizes[pos] = (
-                fixup["targetSize"] // 8
+                fixup.kind_info.bit_size // 8
             )
 
         self._current_section.data += data
         self._current_block.size += len(data)
         self._blocks_with_code.add(self._current_block)
 
-        if inst["desc"]["isReturn"]:
+        if inst.desc.is_return:
             proxy = gtirb.ProxyBlock()
             self._proxies.add(proxy)
             self._cfg.add(
@@ -359,20 +411,20 @@ class Assembler:
 
             self._split_block()
 
-        elif inst["desc"]["isCall"] or inst["desc"]["isBranch"]:
+        elif inst.desc.is_call or inst.desc.is_branch:
             direct, target = self._resolve_instruction_target(
                 data, inst, fixups
             )
 
-            if inst["desc"]["isCall"]:
+            if inst.desc.is_call:
                 edge_label = gtirb.Edge.Label(
                     type=gtirb.Edge.Type.Call,
                     direct=direct,
                 )
-            elif inst["desc"]["isBranch"]:
+            elif inst.desc.is_branch:
                 edge_label = gtirb.Edge.Label(
                     type=gtirb.Edge.Type.Branch,
-                    conditional=inst["desc"]["isConditionalBranch"],
+                    conditional=inst.desc.is_conditional_branch,
                     direct=direct,
                 )
             else:
@@ -392,7 +444,7 @@ class Assembler:
             # Currently we assume that all calls can return and that they need
             # a fallthrough edge.
             add_fallthrough = (
-                inst["desc"]["isCall"] or inst["desc"]["isConditionalBranch"]
+                inst.desc.is_call or inst.desc.is_conditional_branch
             )
             self._split_block(add_fallthrough=add_fallthrough)
 
@@ -400,7 +452,7 @@ class Assembler:
         self._current_section.data += data
         self._current_block.size += len(data)
 
-    def _assemble_emit_value(self, value: dict, size: int) -> None:
+    def _assemble_emit_value(self, value: mcasm.mc.Expr, size: int) -> None:
         self._current_section.symbolic_expressions[
             len(self._current_section.data)
         ] = self._mcexpr_to_symbolic_operand(value, False)
@@ -463,10 +515,10 @@ class Assembler:
         self._current_section.blocks.append(next_block)
         return next_block
 
-    def _resolve_symbol_ref(self, expr: dict) -> gtirb.Symbol:
-        assert expr["kind"] == "symbolRef"
-
-        name = expr["symbol"]["name"]
+    def _resolve_symbol_ref(
+        self, expr: mcasm.mc.SymbolRefExpr
+    ) -> gtirb.Symbol:
+        name = expr.symbol.name
         sym = self._symbol_lookup(name)
 
         if not sym:
@@ -483,18 +535,20 @@ class Assembler:
         return sym
 
     def _get_symbol_ref_attrs(
-        self, expr: dict, sym: gtirb.Symbol, is_branch: bool
+        self,
+        expr: mcasm.mc.SymbolRefExpr,
+        sym: gtirb.Symbol,
+        is_branch: bool,
     ) -> Set[gtirb.SymbolicExpression.Attribute]:
-        assert expr["kind"] == "symbolRef"
-
         attributes = set()
-        if "variantKind" in expr:
-            variant_attrs = self._ELF_VARIANT_KINDS.get(expr["variantKind"])
+        if expr.variant_kind != mcasm.mc.SymbolRefExpr.VariantKind.None_:
+            variant_attrs = self._ELF_VARIANT_KINDS.get(expr.variant_kind)
             if variant_attrs is None:
                 raise UnsupportedAssemblyError(
-                    f"unsupported symbol variant kind '{expr['variantKind']}'"
+                    f"unsupported symbol variant kind '{expr.variant_kind}'"
                 )
             attributes.update(variant_attrs)
+
         elif (
             self._module.isa in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
             and _is_elf_pie(self._module)
@@ -509,15 +563,15 @@ class Assembler:
         return attributes
 
     def _mcexpr_to_symbolic_operand(
-        self, expr: dict, is_branch: bool
+        self, expr: mcasm.mc.Expr, is_branch: bool
     ) -> gtirb.SymAddrConst:
         """
         Converts an MC expression to a GTIRB SymbolicExpression.
         """
         attributes = set()
 
-        if expr["kind"] == "targetExpr" and expr["target"] == "aarch64":
-            elfName = expr["elfName"]
+        if isinstance(expr, mcasm.mc.TargetExprAArch64):
+            elfName = expr.variant_kind_name
             if elfName == "":
                 # LLVM wrapped the expression in a target-specific MCExpr, but
                 # it doesn't effect the output assembly so we don't need to
@@ -534,22 +588,20 @@ class Assembler:
                 raise NotImplementedError(
                     f"unknown aarch64-specific fixup: {elfName}"
                 )
-            expr = expr["expr"]
+            expr = expr.sub_expr
 
         # TODO: Do we need to support SymAddrAddr fixup types?
         if (
-            expr["kind"] == "binaryExpr"
-            and expr["opcode"] == "Add"
-            and expr["lhs"]["kind"] == "symbolRef"
-            and expr["rhs"]["kind"] == "constant"
+            isinstance(expr, mcasm.mc.BinaryExpr)
+            and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add
+            and isinstance(expr.lhs, mcasm.mc.SymbolRefExpr)
+            and isinstance(expr.rhs, mcasm.mc.ConstantExpr)
         ):
-            sym = self._resolve_symbol_ref(expr["lhs"])
-            attributes |= self._get_symbol_ref_attrs(
-                expr["lhs"], sym, is_branch
-            )
-            offset = expr["rhs"]["value"]
+            sym = self._resolve_symbol_ref(expr.lhs)
+            attributes |= self._get_symbol_ref_attrs(expr.lhs, sym, is_branch)
+            offset = expr.rhs.value
             return gtirb.SymAddrConst(offset, sym, attributes)
-        elif expr["kind"] == "symbolRef":
+        elif isinstance(expr, mcasm.mc.SymbolRefExpr):
             sym = self._resolve_symbol_ref(expr)
             attributes |= self._get_symbol_ref_attrs(expr, sym, is_branch)
             return gtirb.SymAddrConst(0, sym, attributes)
@@ -557,23 +609,23 @@ class Assembler:
         assert False, "Unsupported symbolic expression"
 
     def _fixup_to_symbolic_operand(
-        self, fixup: dict, encoding: bytes, is_branch: bool
+        self, fixup: mcasm.mc.Fixup, encoding: bytes, is_branch: bool
     ) -> gtirb.SymAddrConst:
         """
         Converts an LLVM fixup to a GTIRB SymbolicExpression.
         """
-        expr = fixup["value"]
+        expr = fixup.value
 
         # LLVM will automatically add a negative value to make the expression
         # be PC-relative. We don't care about that and just want to unwrap it.
         if (
-            "IsPCRel" in fixup["flags"]
-            and expr["kind"] == "binaryExpr"
-            and expr["opcode"] == "Add"
-            and expr["rhs"]["kind"] == "constant"
-            and fixup["offset"] - expr["rhs"]["value"] == len(encoding)
+            fixup.kind_info.is_pc_rel
+            and isinstance(expr, mcasm.mc.BinaryExpr)
+            and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add
+            and isinstance(expr.rhs, mcasm.mc.ConstantExpr)
+            and fixup.offset - expr.rhs.value == len(encoding)
         ):
-            expr = expr["lhs"]
+            expr = expr.lhs
 
         return self._mcexpr_to_symbolic_operand(expr, is_branch)
 

@@ -43,11 +43,10 @@ from typing import (
 import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
-import mcasm
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from .abi import ABI
-from .assembler import Assembler
+from .assembler import AsmSyntaxError, Assembler
 from .modify import (
     _delete,
     _make_return_cache,
@@ -254,7 +253,7 @@ class RewritingContext:
         asm: str,
         patch: Patch,
         patch_id: int,
-        err: mcasm.assembler.AsmSyntaxError,
+        err: AsmSyntaxError,
     ) -> None:
         """
         Logs an assembly syntax error to our logger.
@@ -403,7 +402,7 @@ class RewritingContext:
             assembler.assemble(snippet.code, snippet.x86_syntax)
         try:
             assembler.assemble(asm, patch.constraints.x86_syntax)
-        except mcasm.assembler.AsmSyntaxError as err:
+        except AsmSyntaxError as err:
             self._log_patch_error(asm, patch, self._patch_id, err)
             raise
         for snippet in epilogue:
