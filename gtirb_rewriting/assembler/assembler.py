@@ -29,9 +29,9 @@ import gtirb
 import mcasm
 from typing_extensions import Self
 
+from ..assembly import X86Syntax
+from ..utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 from ._mc_utils import is_indirect_call as _is_indirect_call
-from .assembly import X86Syntax
-from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 
 
 class AssemblerError(Exception):
