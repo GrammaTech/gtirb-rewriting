@@ -95,33 +95,33 @@ def test_offset_mapping():
 
 
 def test_triples():
-    mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    assert (
+        gtirb_rewriting.utils._target_triple(
+            gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF
+        )
+        == "x86_64-pc-linux"
     )
-    assert gtirb_rewriting.utils._target_triple(mod) == "x86_64-pc-linux"
 
-    mod = gtirb.Module(
-        isa=gtirb.Module.ISA.IA32,
-        file_format=gtirb.Module.FileFormat.ELF,
-        name="test",
+    assert (
+        gtirb_rewriting.utils._target_triple(
+            gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.ELF
+        )
+        == "i386-pc-linux"
     )
-    assert gtirb_rewriting.utils._target_triple(mod) == "i386-pc-linux"
 
-    mod = gtirb.Module(
-        isa=gtirb.Module.ISA.X64,
-        file_format=gtirb.Module.FileFormat.PE,
-        name="test",
+    assert (
+        gtirb_rewriting.utils._target_triple(
+            gtirb.Module.ISA.X64, gtirb.Module.FileFormat.PE
+        )
+        == "x86_64-pc-win32"
     )
-    assert gtirb_rewriting.utils._target_triple(mod) == "x86_64-pc-win32"
 
-    mod = gtirb.Module(
-        isa=gtirb.Module.ISA.IA32,
-        file_format=gtirb.Module.FileFormat.PE,
-        name="test",
+    assert (
+        gtirb_rewriting.utils._target_triple(
+            gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE
+        )
+        == "i386-pc-win32"
     )
-    assert gtirb_rewriting.utils._target_triple(mod) == "i386-pc-win32"
 
 
 def test_nonterminator_instructions():

@@ -24,15 +24,20 @@ import enum
 import itertools
 import warnings
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import gtirb
+import gtirb_rewriting._auxdata as _auxdata
 import mcasm
 from typing_extensions import Self
 
 from ..assembly import X86Syntax
 from ..utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 from ._mc_utils import is_indirect_call as _is_indirect_call
+
+
+def _null_lookup(name):
+    yield from ()
 
 
 class AssemblerError(Exception):
@@ -112,9 +117,35 @@ class Assembler:
     GTIRB structures as it goes.
     """
 
+    @dataclasses.dataclass
+    class Target:
+        """
+        A description of the assembler's target.
+        """
+
+        isa: gtirb.Module.ISA
+        file_format: gtirb.Module.FileFormat
+        binary_type: List[str]
+        symbol_lookup: Callable[[str], Iterator[gtirb.Symbol]] = _null_lookup
+
+    class ModuleTarget(Target):
+        """
+        A target that references an existing module, with the intent being
+        that the assembler result will be compatible with this module.
+        """
+
+        def __init__(self, module: gtirb.Module):
+            binary_type = _auxdata.binary_type.get(module) or []
+            super().__init__(
+                module.isa,
+                module.file_format,
+                binary_type,
+                module.symbols_named,
+            )
+
     def __init__(
         self,
-        module: gtirb.Module,
+        target: Union[gtirb.Module, Target],
         *,
         temp_symbol_suffix: Optional[str] = None,
         trivially_unreachable: bool = False,
@@ -122,7 +153,8 @@ class Assembler:
         ignore_cfi_directives: bool = False,
     ) -> None:
         """
-        :param module: The module the patch will be inserted into.
+        :param target: The module the patch will be inserted into or a Target
+                       object describing the target to assemble for.
         :param temp_symbol_suffix: A suffix to use for local symbols that are
                considered temporary. Passing in a unique suffix to each
                assembler that targets the same module allows the same assembly
@@ -137,8 +169,12 @@ class Assembler:
         :param ignore_cfi_directives: Ignore CFI directives instead of issuing
                                       an error.
         """
+
+        if isinstance(target, gtirb.Module):
+            target = self.ModuleTarget(target)
+
         self._state = _State(
-            module,
+            target,
             temp_symbol_suffix,
             trivially_unreachable,
             allow_undef_symbols,
@@ -152,12 +188,16 @@ class Assembler:
         Assembles additional assembly, continuing where the last call to
         assemble left off.
         """
-        assembler = mcasm.Assembler(_target_triple(self._state.module))
+        assembler = mcasm.Assembler(
+            _target_triple(
+                self._state.target.isa, self._state.target.file_format
+            )
+        )
 
         # X86 is hopefully the only ISA with more than one syntax mode that
         # is widely used. If other targets do come up, we may simply choose
         # a blessed syntax and avoid the additional complexity.
-        if self._state.module.isa in (
+        if self._state.target.isa in (
             gtirb.Module.ISA.IA32,
             gtirb.Module.ISA.X64,
         ):
@@ -293,6 +333,7 @@ class Assembler:
             self._convert_data_blocks(section)
 
         result = self.Result(
+            target=self._state.target,
             sections=self._state.sections,
             cfg=self._state.cfg,
             symbols=list(self._state.local_symbols.values()),
@@ -303,7 +344,7 @@ class Assembler:
         # Reinitialize the assembler just in case someone tries to use the
         # object again.
         self._state = _State(
-            self._state.module,
+            self._state.target,
             temp_symbol_suffix=self._state.temp_symbol_suffix,
             trivially_unreachable=self._state.trivially_unreachable,
             allow_undef_symbols=self._state.allow_undef_symbols,
@@ -384,6 +425,11 @@ class Assembler:
             binding: str = "LOCAL"
             visibility: str = "DEFAULT"
 
+        target: "Assembler.Target"
+        """
+        The target that this result was created for.
+        """
+
         sections: Dict[str, Section]
         """
         Sections in the patch. The first section will be the text section.
@@ -421,7 +467,7 @@ class _State:
     and is used by the streamer classes.
     """
 
-    module: gtirb.Module
+    target: Assembler.Target
     temp_symbol_suffix: Optional[str]
     trivially_unreachable: bool
     allow_undef_symbols: bool
@@ -511,7 +557,7 @@ class _SymbolCreator(mcasm.Streamer):
             symbol_name += self._state.temp_symbol_suffix
 
         if label.name in self._state.local_symbols or any(
-            self._state.module.symbols_named(label.name)
+            self._state.target.symbol_lookup(label.name)
         ):
             raise MultipleDefinitionsError._make(
                 f"{symbol_name} defined multiple times",
@@ -878,7 +924,7 @@ class _Streamer(mcasm.Streamer):
         symbol: mcasm.mc.Symbol,
         attribute: mcasm.mc.SymbolAttr,
     ) -> bool:
-        if self._state.module.file_format == gtirb.Module.FileFormat.ELF:
+        if self._state.target.file_format == gtirb.Module.FileFormat.ELF:
             return self._emit_elf_symbol_attribute(
                 self._resolve_symbol(symbol, parser_state.loc), attribute
             )
@@ -949,7 +995,7 @@ class _Streamer(mcasm.Streamer):
         assert inst.desc.is_call or inst.desc.is_branch
 
         if inst.desc.is_indirect_branch or _is_indirect_call(
-            self._state.module.isa, inst
+            self._state.target.isa, inst
         ):
             proxy = gtirb.ProxyBlock()
             self._state.proxies.add(proxy)
@@ -1044,9 +1090,11 @@ class _Streamer(mcasm.Streamer):
             attributes.update(variant_attrs)
 
         elif (
-            self._state.module.isa
+            self._state.target.isa
             in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
-            and _is_elf_pie(self._state.module)
+            and _is_elf_pie(
+                self._state.target.file_format, self._state.target.binary_type
+            )
             and isinstance(sym.referent, gtirb.ProxyBlock)
         ):
             # These appear to only be necessary for X86 ELF, so we're limiting
@@ -1168,8 +1216,8 @@ class _Streamer(mcasm.Streamer):
         if sym:
             return sym
 
-        sym = next(self._state.module.symbols_named(name), None)
-        if sym and sym.module == self._state.module:
+        sym = next(self._state.target.symbol_lookup(name), None)
+        if sym:
             return sym
 
         return None

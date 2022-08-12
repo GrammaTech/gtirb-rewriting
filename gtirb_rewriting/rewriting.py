@@ -440,6 +440,7 @@ class RewritingContext:
             block_types={},
         )
         return Assembler.Result(
+            Assembler.ModuleTarget(target.module),
             sections={sect.name: sect},
             cfg=gtirb.CFG(),
             symbols=[],
