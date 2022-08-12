@@ -33,6 +33,7 @@ from typing_extensions import Self
 
 from ..assembly import X86Syntax
 from ..utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
+from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
 
 
@@ -458,6 +459,12 @@ class Assembler:
         @property
         def text_section(self) -> Section:
             return next(iter(self.sections.values()))
+
+        def create_ir(self) -> gtirb.IR:
+            """
+            Creates a new GTIRB IR with the contents of this result.
+            """
+            return _create_gtirb(self)
 
 
 @dataclasses.dataclass
