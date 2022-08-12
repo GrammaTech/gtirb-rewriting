@@ -47,7 +47,8 @@ setuptools.setup(
     ],
     entry_points={
         "console_scripts": [
-            "gtirb-rewriting=gtirb_rewriting.driver:generic_main"
+            "gtirb-rewriting=gtirb_rewriting.driver:generic_main",
+            "gtirb-as=gtirb_rewriting.assembler.__main__:main",
         ],
     },
     classifiers=["Programming Language :: Python :: 3"],
