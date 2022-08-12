@@ -43,7 +43,7 @@ setuptools.setup(
         "more-itertools",
         "dataclasses ; python_version<'3.7.0'",
         "entrypoints",
-        "typing-extensions",
+        "typing-extensions ~= 4.0",
     ],
     entry_points={
         "console_scripts": [
