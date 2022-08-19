@@ -797,7 +797,10 @@ class _Streamer(mcasm.Streamer):
             self._state.current_section.symbolic_expressions[
                 pos
             ] = self._fixup_to_symbolic_operand(
-                fixup, data, inst.desc.is_call or inst.desc.is_branch
+                fixup,
+                data,
+                inst.desc.is_call or inst.desc.is_branch,
+                parser_state.loc,
             )
             self._state.current_section.symbolic_expression_sizes[pos] = (
                 fixup.kind_info.bit_size // 8
@@ -1058,7 +1061,9 @@ class _Streamer(mcasm.Streamer):
             return False, proxy
 
         assert len(fixups) == 1
-        target_expr = self._fixup_to_symbolic_operand(fixups[0], data, True)
+        target_expr = self._fixup_to_symbolic_operand(
+            fixups[0], data, True, loc
+        )
 
         if not isinstance(target_expr, gtirb.SymAddrConst):
             raise UnsupportedAssemblyError._make(
@@ -1241,7 +1246,11 @@ class _Streamer(mcasm.Streamer):
         )
 
     def _fixup_to_symbolic_operand(
-        self, fixup: mcasm.mc.Fixup, encoding: bytes, is_branch: bool
+        self,
+        fixup: mcasm.mc.Fixup,
+        encoding: bytes,
+        is_branch: bool,
+        loc: mcasm.mc.SourceLocation,
     ) -> gtirb.SymbolicExpression:
         """
         Converts an LLVM fixup to a GTIRB SymbolicExpression.
@@ -1259,7 +1268,7 @@ class _Streamer(mcasm.Streamer):
         ):
             expr = expr.lhs
 
-        return self._mcexpr_to_symbolic_operand(expr, is_branch)
+        return self._mcexpr_to_symbolic_operand(expr, is_branch, loc)
 
     def _symbol_lookup(self, name: str) -> Optional[gtirb.Symbol]:
         """
