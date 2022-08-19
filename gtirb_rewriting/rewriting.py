@@ -57,6 +57,7 @@ from .patch import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
 from .utils import (
+    OffsetMapping,
     _block_fallthrough_targets,
     _is_partial_disassembly,
     _text_section_name,
@@ -438,6 +439,7 @@ class RewritingContext:
             image_type=image_type,
             image_flags=image_flags,
             block_types={},
+            line_map=OffsetMapping(),
         )
         return Assembler.Result(
             Assembler.ModuleTarget(target.module),

@@ -153,6 +153,7 @@ def main() -> None:
             image_type=SHT_DYNAMIC,
             image_flags=SHF_WRITE | SHF_ALLOC,
             block_types={},
+            line_map={},
         )
 
     ir = result.create_ir()

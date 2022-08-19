@@ -32,7 +32,12 @@ import mcasm
 from typing_extensions import Self
 
 from ..assembly import X86Syntax
-from ..utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
+from ..utils import (
+    OffsetMapping,
+    _is_elf_pie,
+    _is_fallthrough_edge,
+    _target_triple,
+)
 from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
 
@@ -284,6 +289,7 @@ class Assembler:
         Converts blocks that only have data and have no incoming control flow
         to be DataBlocks.
         """
+
         for i, block in enumerate(section.blocks):
             assert isinstance(block, gtirb.CodeBlock)
 
@@ -313,6 +319,10 @@ class Assembler:
                     section.block_types[new_block] = self._state.block_types[
                         block
                     ]
+
+                if block in section.line_map:
+                    section.line_map[new_block] = section.line_map[block]
+                    del section.line_map[block]
 
             else:
                 # If we're not replacing the code block with a data block and
@@ -418,6 +428,11 @@ class Assembler:
             block_types: Dict[gtirb.DataBlock, "Assembler.Result.DataType"]
             """
             The types for data blocks that must be rendered a certain way.
+            """
+
+            line_map: OffsetMapping[int]
+            """
+            A mapping of byte offset to the line of assembly that produced it.
             """
 
         @dataclasses.dataclass
@@ -639,6 +654,21 @@ class _Streamer(mcasm.Streamer):
         self._state = state
         super().__init__()
 
+    def _append_data(self, data: bytes, loc: mcasm.mc.SourceLocation) -> None:
+        """
+        Appends data to the current block. This should be the only way that
+        the section's data is modified.
+        """
+        offset = len(self._state.current_section.data)
+        self._state.current_section.line_map[
+            gtirb.Offset(
+                self._state.current_block,
+                offset - self._state.current_block.offset,
+            )
+        ] = loc.lineno
+        self._state.current_section.data += data
+        self._state.current_block.size += len(data)
+
     def emit_label(self, parser_state, label, loc):
         label_sym = self._state.local_symbols[label.name]
         label_block = label_sym.referent
@@ -727,6 +757,7 @@ class _Streamer(mcasm.Streamer):
                 image_flags=image_flags,
                 image_type=image_type,
                 block_types={},
+                line_map=OffsetMapping(),
             )
             self._state.sections[name] = result
 
@@ -735,7 +766,7 @@ class _Streamer(mcasm.Streamer):
 
     def emit_instruction(
         self,
-        parser_state,
+        parser_state: mcasm.ParserState,
         inst: mcasm.mc.Instruction,
         data: bytes,
         fixups: List[mcasm.mc.Fixup],
@@ -751,8 +782,7 @@ class _Streamer(mcasm.Streamer):
                 fixup.kind_info.bit_size // 8
             )
 
-        self._state.current_section.data += data
-        self._state.current_block.size += len(data)
+        self._append_data(data, parser_state.loc)
         self._state.blocks_with_code.add(self._state.current_block)
 
         if inst.desc.is_return:
@@ -812,8 +842,7 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.symbolic_expression_sizes[
             len(self._state.current_section.data)
         ] = size
-        self._state.current_section.data += b"\x00" * size
-        self._state.current_block.size += size
+        self._append_data(b"\x00" * size, parser_state.loc)
 
     def _emit_value_with_encoding(
         self,
@@ -843,8 +872,7 @@ class _Streamer(mcasm.Streamer):
         )
 
     def emit_bytes(self, parser_state, value):
-        self._state.current_section.data += value
-        self._state.current_block.size += len(value)
+        self._append_data(value, parser_state.loc)
 
     def emit_value_fill(
         self,

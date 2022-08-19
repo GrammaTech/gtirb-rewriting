@@ -1038,3 +1038,39 @@ def test_ignore_cfi_directives():
         )
 
     assembler.finalize()
+
+
+def test_line_numbers():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m, trivially_unreachable=True)
+    assembler.assemble(
+        textwrap.dedent(
+            """\
+            .byte 42   # one byte
+            .quad 4    # eight bytes
+
+            label:
+            ud2        # two bytes
+            nop
+            """
+        )
+    )
+    result = assembler.finalize()
+
+    assert len(result.text_section.blocks) == 2
+    block1, block2 = result.text_section.blocks
+    assert isinstance(block1, gtirb.DataBlock)
+    assert block1.size == 9
+    assert isinstance(block2, gtirb.CodeBlock)
+    assert block2.size == 3
+
+    assert result.text_section.line_map == {
+        gtirb.Offset(block1, 0): 1,
+        gtirb.Offset(block1, 1): 2,
+        gtirb.Offset(block2, 0): 5,
+        gtirb.Offset(block2, 2): 6,
+    }
