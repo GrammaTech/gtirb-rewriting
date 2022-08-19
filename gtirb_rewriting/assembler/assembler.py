@@ -213,18 +213,36 @@ class Assembler:
 
         assembler.assemble(_Streamer(self._state), asm)
 
+    def _make_referent_index(self) -> Dict[gtirb.Block, Set[gtirb.Symbol]]:
+        """
+        Creates a map of blocks to their symbols.
+        """
+
+        result = defaultdict(set)
+        for sym in self._state.local_symbols.values():
+            result[sym.referent].add(sym)
+
+        return result
+
     def _replace_symbol_referents(
-        self, old_block: gtirb.Block, new_block: gtirb.Block
+        self,
+        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        old_block: gtirb.Block,
+        new_block: gtirb.Block,
     ) -> None:
         """
         Alters all symbols referring to an old block to refer to a new block.
         """
-        for sym in self._state.local_symbols.values():
-            if sym.referent == old_block:
-                sym.referent = new_block
+        sym_set = index[old_block]
+        for sym in sym_set:
+            sym.referent = new_block
+        index[new_block].update(sym_set)
+        sym_set.clear()
 
     def _remove_empty_blocks(
-        self, section: "Assembler.Result.Section"
+        self,
+        section: "Assembler.Result.Section",
+        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
     ) -> None:
         """
         Cleans up all the empty blocks we may have generated during assembly.
@@ -268,7 +286,7 @@ class Assembler:
                     )
                     self._state.cfg.discard(edge)
 
-                self._replace_symbol_referents(extra_block, main_block)
+                self._replace_symbol_referents(index, extra_block, main_block)
 
                 if extra_block in section.alignment:
                     max_alignment = max(
@@ -283,7 +301,9 @@ class Assembler:
         section.blocks = final_blocks
 
     def _convert_data_blocks(
-        self, section: "Assembler.Result.Section"
+        self,
+        section: "Assembler.Result.Section",
+        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
     ) -> None:
         """
         Converts blocks that only have data and have no incoming control flow
@@ -306,7 +326,7 @@ class Assembler:
                 new_block = gtirb.DataBlock(
                     offset=block.offset, size=block.size
                 )
-                self._replace_symbol_referents(block, new_block)
+                self._replace_symbol_referents(index, block, new_block)
                 for out_edge in set(self._state.cfg.out_edges(block)):
                     assert _is_fallthrough_edge(out_edge)
                     self._state.cfg.discard(out_edge)
@@ -339,9 +359,10 @@ class Assembler:
         Finalizes the assembly contents and returns the result.
         """
 
+        index = self._make_referent_index()
         for section in self._state.sections.values():
-            self._remove_empty_blocks(section)
-            self._convert_data_blocks(section)
+            self._remove_empty_blocks(section, index)
+            self._convert_data_blocks(section, index)
 
         result = self.Result(
             target=self._state.target,
