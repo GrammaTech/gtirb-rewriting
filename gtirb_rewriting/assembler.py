@@ -23,10 +23,11 @@ import dataclasses
 import enum
 import itertools
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple, Type, TypeVar
+from typing import Dict, List, Optional, Set, Tuple
 
 import gtirb
 import mcasm
+from typing_extensions import Self
 
 from ._mc_utils import is_indirect_call as _is_indirect_call
 from .assembly import X86Syntax
@@ -48,6 +49,19 @@ class AssemblerError(Exception):
         super().__init__(message)
         self.lineno = lineno
         self.offset = offset
+
+    @classmethod
+    def _make(
+        cls, message: str, loc: Optional[mcasm.mc.SourceLocation]
+    ) -> Self:
+        """
+        Makes an instance of the requested error with the right location info.
+        """
+
+        if loc:
+            return cls(message, loc.lineno, loc.offset)
+        else:
+            return cls(message)
 
 
 class AsmSyntaxError(AssemblerError):
@@ -81,23 +95,6 @@ class MultipleDefinitionsError(AssemblerError):
     """
 
     pass
-
-
-_ErrorT = TypeVar("_ErrorT", bound=AssemblerError)
-
-
-def _make_error(
-    err_type: Type[_ErrorT],
-    message: str,
-    loc: Optional[mcasm.mc.SourceLocation],
-) -> _ErrorT:
-    """
-    Makes an instance of the requested error with the correct location info.
-    """
-    if loc:
-        return err_type(message, loc.lineno, loc.offset)
-    else:
-        return err_type(message, None, None)
 
 
 class Assembler:
@@ -481,8 +478,7 @@ class _SymbolCreator(mcasm.Streamer):
             #   str1_len = (. - str1)
             #   .text
             #   movl $str1_len, %eax
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "only constant expressions can be used in assignments",
                 value.location or parser_state.loc,
             )
@@ -502,8 +498,7 @@ class _SymbolCreator(mcasm.Streamer):
         if label.name in self._state.local_symbols or any(
             self._state.module.symbols_named(label.name)
         ):
-            raise _make_error(
-                MultipleDefinitionsError,
+            raise MultipleDefinitionsError._make(
                 f"{symbol_name} defined multiple times",
                 parser_state.loc,
             )
@@ -793,8 +788,7 @@ class _Streamer(mcasm.Streamer):
         if not isinstance(num_bytes, mcasm.mc.ConstantExpr) or not isinstance(
             num_bytes.value, int
         ):
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "only constant integers are supported for fill sizes",
                 num_bytes.location,
             )
@@ -803,8 +797,7 @@ class _Streamer(mcasm.Streamer):
         # do if the fill value is multi-byte. This restriction could be lifted
         # later.
         if fill_value != 0:
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "only 0 is supported for a fill value",
                 num_bytes.location,
             )
@@ -834,15 +827,13 @@ class _Streamer(mcasm.Streamer):
         """
 
         if value != 0:
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "trying to pad with a non-zero byte",
                 parser_state.loc,
             )
 
         if max_bytes != 0:
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "trying to pad with a fixed limit",
                 parser_state.loc,
             )
@@ -852,8 +843,7 @@ class _Streamer(mcasm.Streamer):
         # LLVM allows it.
         is_power_of_two = (alignment & (alignment - 1) == 0) and alignment > 0
         if not is_power_of_two:
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "alignment values must be powers of 2",
                 parser_state.loc,
             )
@@ -922,8 +912,7 @@ class _Streamer(mcasm.Streamer):
             return super().unhandled_event(name, base_impl, *args, **kwargs)
 
         parser_state = args[0]
-        raise _make_error(
-            UnsupportedAssemblyError,
+        raise UnsupportedAssemblyError._make(
             f"{name} was not handled",
             parser_state.loc,
         )
@@ -951,22 +940,19 @@ class _Streamer(mcasm.Streamer):
         target_expr = self._fixup_to_symbolic_operand(fixups[0], data, True)
 
         if not isinstance(target_expr, gtirb.SymAddrConst):
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "Call and branch targets must be simple expressions",
                 loc,
             )
 
         if target_expr.offset != 0:
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "Call and branch targets cannot have offsets",
                 loc,
             )
 
         if not isinstance(target_expr.symbol.referent, gtirb.CfgNode):
-            raise _make_error(
-                UnsupportedAssemblyError,
+            raise UnsupportedAssemblyError._make(
                 "Call and branch targets cannot be data blocks or other "
                 "non-CFG elements",
                 loc,
@@ -1004,8 +990,7 @@ class _Streamer(mcasm.Streamer):
 
         if not gt_sym:
             if not self._state.allow_undef_symbols:
-                raise _make_error(
-                    UndefSymbolError,
+                raise UndefSymbolError._make(
                     f"{sym.name} is an undefined symbol reference",
                     loc,
                 )
@@ -1033,8 +1018,7 @@ class _Streamer(mcasm.Streamer):
             variant_attrs = self._ELF_VARIANT_KINDS.get(expr.variant_kind)
             if variant_attrs is None:
                 name = expr.variant_kind.name
-                raise _make_error(
-                    UnsupportedAssemblyError,
+                raise UnsupportedAssemblyError._make(
                     f"unsupported symbol variant kind '{name}'",
                     expr.location,
                 )
@@ -1080,8 +1064,7 @@ class _Streamer(mcasm.Streamer):
                 attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
                 attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
             else:
-                raise _make_error(
-                    UnsupportedAssemblyError,
+                raise UnsupportedAssemblyError._make(
                     f"unknown aarch64-specific fixup: {elfName}",
                     expr.location or loc,
                 )
@@ -1108,8 +1091,7 @@ class _Streamer(mcasm.Streamer):
                 expr.lhs.variant_kind
                 != mcasm.mc.SymbolRefExpr.VariantKind.None_
             ):
-                raise _make_error(
-                    UnsupportedAssemblyError,
+                raise UnsupportedAssemblyError._make(
                     "cannot have a binary expression with variant kinds",
                     expr.lhs.location or loc,
                 )
@@ -1119,8 +1101,7 @@ class _Streamer(mcasm.Streamer):
                 expr.rhs.variant_kind
                 != mcasm.mc.SymbolRefExpr.VariantKind.None_
             ):
-                raise _make_error(
-                    UnsupportedAssemblyError,
+                raise UnsupportedAssemblyError._make(
                     "cannot have a binary expression with variant kinds",
                     expr.rhs.location or loc,
                 )
@@ -1131,8 +1112,7 @@ class _Streamer(mcasm.Streamer):
             attributes |= self._get_symbol_ref_attrs(expr, sym, is_branch)
             return gtirb.SymAddrConst(0, sym, attributes)
 
-        raise _make_error(
-            UnsupportedAssemblyError,
+        raise UnsupportedAssemblyError._make(
             "unsupported symbolic expression",
             expr.location or loc,
         )
