@@ -85,6 +85,11 @@ def _add_empty_dynamic_section(
 
 
 def create_gtirb(result: "Assembler.Result") -> gtirb.IR:
+    """
+    Creates a GTIRB IR for an assembler result. Internal implementation, do
+    not call.
+    """
+
     _verify_independence(result)
 
     ir = gtirb.IR()

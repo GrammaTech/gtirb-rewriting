@@ -1074,3 +1074,44 @@ def test_line_numbers():
         gtirb.Offset(block2, 0): 5,
         gtirb.Offset(block2, 2): 6,
     }
+
+
+def test_create_ir():
+    assembler = gtirb_rewriting.Assembler(
+        gtirb_rewriting.Assembler.Target(
+            gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF, ["DYN"], True
+        )
+    )
+    assembler.assemble(
+        textwrap.dedent(
+            """\
+            ud2
+
+            .data
+            .byte 42
+            """
+        )
+    )
+    result = assembler.finalize()
+    ir = result.create_ir()
+
+    assert len(ir.modules) == 1
+    (m,) = ir.modules
+
+    assert m.isa == gtirb.Module.ISA.X64
+    assert m.file_format == gtirb.Module.FileFormat.ELF
+
+    assert "binaryType" in m.aux_data
+    assert m.aux_data["binaryType"].data == ["DYN"]
+
+    assert set(s.name for s in m.sections) == {".text", ".data", ".dynamic"}
+
+    text = next(s for s in m.sections if s.name == ".text")
+    assert len(text.byte_intervals) == 1
+    (text_bi,) = text.byte_intervals
+    assert text_bi.contents == b"\x0F\x0B"
+
+    data = next(s for s in m.sections if s.name == ".data")
+    assert len(data.byte_intervals) == 1
+    (data_bi,) = data.byte_intervals
+    assert data_bi.contents == b"\x2A"
