@@ -91,10 +91,6 @@ def main() -> None:
     with args.asm:
         asm: str = args.asm.read()
 
-    # TODO: This is temporary until the gtirb-pprinter stops over-escaping
-    # things. This has the potential to corrupt strings (e.g. .string "\\'").
-    asm = asm.replace(r"\'", "'")
-
     if args.file_format == gtirb.Module.FileFormat.ELF:
         if args.pie:
             binary_type = ["DYN"]
