@@ -405,59 +405,73 @@ class Assembler:
         class Section:
             name: str
 
-            flags: Set[gtirb.Section.Flag]
+            flags: Set[gtirb.Section.Flag] = dataclasses.field(
+                default_factory=set
+            )
             """
             Section flags.
             """
 
-            data: bytes
+            data: bytes = b""
             """
             The encoded bytes from assembling the patch.
             """
 
-            blocks: List[gtirb.ByteBlock]
+            blocks: List[gtirb.ByteBlock] = dataclasses.field(
+                default_factory=list
+            )
             """
             All blocks, in order of offset, for the patch. There will be at
             most one empty block, which will be at the end of the list.
             """
 
-            symbolic_expressions: Dict[int, gtirb.SymbolicExpression]
+            symbolic_expressions: Dict[
+                int, gtirb.SymbolicExpression
+            ] = dataclasses.field(default_factory=dict)
             """
             A map of offset to symbolic expression, with 0 being the start of
             `data`.
             """
 
-            symbolic_expression_sizes: Dict[int, int]
+            symbolic_expression_sizes: Dict[int, int] = dataclasses.field(
+                default_factory=dict
+            )
             """
             A map of offset to symbolic expression size, with 0 being the
             start of `data`.
             """
 
-            alignment: Dict[gtirb.ByteBlock, int]
+            alignment: Dict[gtirb.ByteBlock, int] = dataclasses.field(
+                default_factory=dict
+            )
             """
             A map of block to the requested alignment of the block. Padding is
             not inserted in the data, so the blocks may not currently be at
             this alignment.
             """
 
-            image_type: int
+            image_type: int = 0
             """
             The ELF type for the section. For ELF this is SHT_* values. For PE
             this is ignored.
             """
 
-            image_flags: int
+            image_flags: int = 0
             """
             The ELF/PE flags for the section. For ELF this is SHF_* flags, for
             PE this is IMAGE_SCN_* flags.
             """
 
-            block_types: Dict[gtirb.DataBlock, "Assembler.Result.DataType"]
+            block_types: Dict[
+                gtirb.DataBlock, "Assembler.Result.DataType"
+            ] = dataclasses.field(default_factory=dict)
             """
             The types for data blocks that must be rendered a certain way.
             """
 
-            line_map: OffsetMapping[int]
+            line_map: OffsetMapping[int] = dataclasses.field(
+                default_factory=OffsetMapping
+            )
             """
             A mapping of byte offset to the line of assembly that produced it.
             """
@@ -478,22 +492,24 @@ class Assembler:
         Sections in the patch. The first section will be the text section.
         """
 
-        cfg: gtirb.CFG
+        cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
         """
         The control flow graph for the patch.
         """
 
-        symbols: List[gtirb.Symbol]
+        symbols: List[gtirb.Symbol] = dataclasses.field(default_factory=list)
         """
         Symbols that were defined in the patch.
         """
 
-        proxies: Set[gtirb.ProxyBlock]
+        proxies: Set[gtirb.ProxyBlock] = dataclasses.field(default_factory=set)
         """
         Proxy blocks that represent unknown targets.
         """
 
-        elf_symbol_attributes: Dict[gtirb.Symbol, ElfSymbolAttributes]
+        elf_symbol_attributes: Dict[
+            gtirb.Symbol, ElfSymbolAttributes
+        ] = dataclasses.field(default_factory=dict)
         """
         ELF symbol type and binding information.
         """
