@@ -104,7 +104,9 @@ def main() -> None:
         binary_type = ["EXE"]
 
     assembler = Assembler(
-        Assembler.Target(args.isa, args.file_format, binary_type),
+        Assembler.Target(
+            args.isa, args.file_format, binary_type, not args.static
+        ),
         trivially_unreachable=True,
         allow_undef_symbols=True,
         ignore_cfi_directives=True,

@@ -132,6 +132,7 @@ class Assembler:
         isa: gtirb.Module.ISA
         file_format: gtirb.Module.FileFormat
         binary_type: List[str]
+        is_elf_dynamic: bool
         symbol_lookup: Callable[[str], Iterator[gtirb.Symbol]] = _null_lookup
 
     class ModuleTarget(Target):
@@ -140,13 +141,18 @@ class Assembler:
         that the assembler result will be compatible with this module.
         """
 
-        def __init__(self, module: gtirb.Module):
+        def __init__(self, module: gtirb.Module, detached: bool = False):
             binary_type = _auxdata.binary_type.get(module) or []
             super().__init__(
-                module.isa,
-                module.file_format,
-                binary_type,
-                module.symbols_named,
+                isa=module.isa,
+                file_format=module.file_format,
+                binary_type=binary_type,
+                is_elf_dynamic=any(
+                    sect.name == ".dynamic" for sect in module.sections
+                ),
+                symbol_lookup=(
+                    module.symbols_named if not detached else _null_lookup
+                ),
             )
 
     def __init__(
