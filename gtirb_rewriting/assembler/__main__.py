@@ -130,35 +130,8 @@ def main() -> None:
 
     result = assembler.finalize()
 
-    # In order for the binary to be printed correctly, we need to have a
-    # .dynamic section (assuming we aren't making a static binary).
-    # TODO: This should probably live in create_gtirb, which means that Target
-    # needs to know static vs dynamic.
-    if not args.static and ".dynamic" not in result.sections:
-        SHT_DYNAMIC = 6
-        SHF_WRITE = 1
-        SHF_ALLOC = 2
-
-        result.sections[".dynamic"] = Assembler.Result.Section(
-            name=".dynamic",
-            flags={
-                gtirb.Section.Flag.Initialized,
-                gtirb.Section.Flag.Loaded,
-                gtirb.Section.Flag.Readable,
-                gtirb.Section.Flag.Writable,
-            },
-            data=b"",
-            blocks=[],
-            symbolic_expressions={},
-            symbolic_expression_sizes={},
-            alignment={},
-            image_type=SHT_DYNAMIC,
-            image_flags=SHF_WRITE | SHF_ALLOC,
-            block_types={},
-            line_map={},
-        )
-
     ir = result.create_ir()
+
     ir.save_protobuf_file(args.gtirb)
 
 

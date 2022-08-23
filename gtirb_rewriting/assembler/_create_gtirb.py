@@ -20,12 +20,12 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-import typing
+from typing import TYPE_CHECKING, Dict, Tuple
 
 import gtirb
 import gtirb_rewriting._auxdata as auxdata
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from .assembler import Assembler
 
 
@@ -59,25 +59,29 @@ def _verify_independence(result: "Assembler.Result"):
                     )
 
 
-# def _infer_functions(result: "Assembler.Result", ir: gtirb.IR):
-#     syms_by_block = {
-#         sym.referent: sym for sym in result.symbols if sym.referent
-#     }
+def _add_empty_dynamic_section(
+    module: gtirb.Module,
+    section_properties: Dict[gtirb.Section, Tuple[int, int]],
+) -> None:
+    """
+    Adds an empty .dynamic section to the binary, which is required to tell
+    the pretty-printer that this is not a statically linked executable.
+    """
+    SHT_DYNAMIC = 6
+    SHF_WRITE = 1
+    SHF_ALLOC = 2
 
-#     def is_func_start(b):
-#         if result.target.file_format == gtirb.Module.FileFormat.ELF:
-#             sym = syms_by_block.get(b)
-#             if not sym:
-#                 return False
-#         else:
-#             pass
-
-#     for sect in result.sections.values():
-#         block_iter = iter(sect.blocks)
-#         while func_start := next(
-#             (block for block in block_iter if is_func_start(block)), None
-#         ):
-#             pass
+    sect = gtirb.Section(
+        name=".dynamic",
+        flags={
+            gtirb.Section.Flag.Initialized,
+            gtirb.Section.Flag.Loaded,
+            gtirb.Section.Flag.Readable,
+            gtirb.Section.Flag.Writable,
+        },
+        module=module,
+    )
+    section_properties[sect] = (SHT_DYNAMIC, SHF_WRITE | SHF_ALLOC)
 
 
 def create_gtirb(result: "Assembler.Result") -> gtirb.IR:
@@ -130,6 +134,11 @@ def create_gtirb(result: "Assembler.Result") -> gtirb.IR:
         sect_props[gt_sect] = (sect.image_type, sect.image_flags)
         alignment.update(sect.alignment.items())
         encodings.update(sect.block_types.items())
+
+    # If we need to be a dynamic binary and don't have a .dynamic section,
+    # we need to add one.
+    if result.target.is_elf_dynamic and ".dynamic" not in result.sections:
+        _add_empty_dynamic_section(module, sect_props)
 
     for sym, attrs in result.elf_symbol_attributes.items():
         elf_sym_info[sym] = (0, attrs.type, attrs.binding, attrs.visibility, 0)
