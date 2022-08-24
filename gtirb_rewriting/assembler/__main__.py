@@ -22,6 +22,7 @@
 
 import argparse
 import sys
+from typing import List
 
 import gtirb
 from gtirb_rewriting import Assembler, AssemblerError, X86Syntax
@@ -49,7 +50,7 @@ def enum_names(enum_type, ignore=set()):
     return [v.name.lower() for v in members if v not in ignore]
 
 
-def main() -> None:
+def main(argv: List[str] = sys.argv[1:]) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("asm", type=argparse.FileType("rt"))
     ap.add_argument("gtirb", type=argparse.FileType("wb"))
@@ -86,7 +87,7 @@ def main() -> None:
     )
     ap.add_argument("--pie", action="store_true")
     ap.add_argument("--static", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     with args.asm:
         asm: str = args.asm.read()

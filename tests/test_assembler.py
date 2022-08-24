@@ -20,11 +20,13 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+import pathlib
 import textwrap
 
 import gtirb
 import gtirb_rewriting
 import pytest
+from gtirb_rewriting.assembler.__main__ import main as gtirb_as
 from gtirb_test_helpers import (
     add_data_block,
     add_proxy_block,
@@ -1076,24 +1078,48 @@ def test_line_numbers():
     }
 
 
-def test_create_ir():
-    assembler = gtirb_rewriting.Assembler(
-        gtirb_rewriting.Assembler.Target(
-            gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF, ["DYN"], True
-        )
-    )
-    assembler.assemble(
-        textwrap.dedent(
-            """\
-            ud2
+@pytest.mark.parametrize("use_gtirb_as", (False, True))
+def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
+    asm = textwrap.dedent(
+        """\
+        ud2
 
-            .data
-            .byte 42
-            """
-        )
+        .data
+        .byte 42
+        """
     )
-    result = assembler.finalize()
-    ir = result.create_ir()
+
+    if use_gtirb_as:
+        asm_dest = tmp_path / "asm.s"
+        asm_dest.write_text(asm)
+
+        ir_dest = tmp_path / "out.gtirb"
+        gtirb_as(
+            [
+                str(asm_dest),
+                str(ir_dest),
+                "--file-format",
+                "elf",
+                "--isa",
+                "x64",
+                "--pie",
+            ]
+        )
+
+        ir = gtirb.IR.load_protobuf(str(ir_dest))
+
+    else:
+        assembler = gtirb_rewriting.Assembler(
+            gtirb_rewriting.Assembler.Target(
+                gtirb.Module.ISA.X64,
+                gtirb.Module.FileFormat.ELF,
+                ["DYN"],
+                True,
+            )
+        )
+        assembler.assemble(asm)
+        result = assembler.finalize()
+        ir = result.create_ir()
 
     assert len(ir.modules) == 1
     (m,) = ir.modules
