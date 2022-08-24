@@ -22,16 +22,28 @@
 import dataclasses
 import enum
 import itertools
+import warnings
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import gtirb
+import gtirb_rewriting._auxdata as _auxdata
 import mcasm
 from typing_extensions import Self
 
+from ..assembly import X86Syntax
+from ..utils import (
+    OffsetMapping,
+    _is_elf_pie,
+    _is_fallthrough_edge,
+    _target_triple,
+)
+from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
-from .assembly import X86Syntax
-from .utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
+
+
+def _null_lookup(name):
+    yield from ()
 
 
 class AssemblerError(Exception):
@@ -97,22 +109,64 @@ class MultipleDefinitionsError(AssemblerError):
     pass
 
 
+class IgnoredCFIDirectiveWarning(Warning):
+    """
+    A CFI directive was ignored.
+    """
+
+    pass
+
+
 class Assembler:
     """
     Assembles chunks of assembly, creating a control flow graph and other
     GTIRB structures as it goes.
     """
 
+    @dataclasses.dataclass
+    class Target:
+        """
+        A description of the assembler's target.
+        """
+
+        isa: gtirb.Module.ISA
+        file_format: gtirb.Module.FileFormat
+        binary_type: List[str]
+        is_elf_dynamic: bool
+        symbol_lookup: Callable[[str], Iterator[gtirb.Symbol]] = _null_lookup
+
+    class ModuleTarget(Target):
+        """
+        A target that references an existing module, with the intent being
+        that the assembler result will be compatible with this module.
+        """
+
+        def __init__(self, module: gtirb.Module, detached: bool = False):
+            binary_type = _auxdata.binary_type.get(module) or []
+            super().__init__(
+                isa=module.isa,
+                file_format=module.file_format,
+                binary_type=binary_type,
+                is_elf_dynamic=any(
+                    sect.name == ".dynamic" for sect in module.sections
+                ),
+                symbol_lookup=(
+                    module.symbols_named if not detached else _null_lookup
+                ),
+            )
+
     def __init__(
         self,
-        module: gtirb.Module,
+        target: Union[gtirb.Module, Target],
         *,
         temp_symbol_suffix: Optional[str] = None,
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
+        ignore_cfi_directives: bool = False,
     ) -> None:
         """
-        :param module: The module the patch will be inserted into.
+        :param target: The module the patch will be inserted into or a Target
+                       object describing the target to assemble for.
         :param temp_symbol_suffix: A suffix to use for local symbols that are
                considered temporary. Passing in a unique suffix to each
                assembler that targets the same module allows the same assembly
@@ -124,12 +178,19 @@ class Assembler:
         :param allow_undef_symbols: Allows the assembly to refer to undefined
                                     symbols. Such symbols will be created and
                                     set to refer to a proxy block.
+        :param ignore_cfi_directives: Ignore CFI directives instead of issuing
+                                      an error.
         """
+
+        if isinstance(target, gtirb.Module):
+            target = self.ModuleTarget(target)
+
         self._state = _State(
-            module,
+            target,
             temp_symbol_suffix,
             trivially_unreachable,
             allow_undef_symbols,
+            ignore_cfi_directives,
         )
 
     def assemble(
@@ -139,12 +200,16 @@ class Assembler:
         Assembles additional assembly, continuing where the last call to
         assemble left off.
         """
-        assembler = mcasm.Assembler(_target_triple(self._state.module))
+        assembler = mcasm.Assembler(
+            _target_triple(
+                self._state.target.isa, self._state.target.file_format
+            )
+        )
 
         # X86 is hopefully the only ISA with more than one syntax mode that
         # is widely used. If other targets do come up, we may simply choose
         # a blessed syntax and avoid the additional complexity.
-        if self._state.module.isa in (
+        if self._state.target.isa in (
             gtirb.Module.ISA.IA32,
             gtirb.Module.ISA.X64,
         ):
@@ -154,18 +219,36 @@ class Assembler:
 
         assembler.assemble(_Streamer(self._state), asm)
 
+    def _make_referent_index(self) -> Dict[gtirb.Block, Set[gtirb.Symbol]]:
+        """
+        Creates a map of blocks to their symbols.
+        """
+
+        result = defaultdict(set)
+        for sym in self._state.local_symbols.values():
+            result[sym.referent].add(sym)
+
+        return result
+
     def _replace_symbol_referents(
-        self, old_block: gtirb.Block, new_block: gtirb.Block
+        self,
+        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        old_block: gtirb.Block,
+        new_block: gtirb.Block,
     ) -> None:
         """
         Alters all symbols referring to an old block to refer to a new block.
         """
-        for sym in self._state.local_symbols.values():
-            if sym.referent == old_block:
-                sym.referent = new_block
+        sym_set = index[old_block]
+        for sym in sym_set:
+            sym.referent = new_block
+        index[new_block].update(sym_set)
+        sym_set.clear()
 
     def _remove_empty_blocks(
-        self, section: "Assembler.Result.Section"
+        self,
+        section: "Assembler.Result.Section",
+        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
     ) -> None:
         """
         Cleans up all the empty blocks we may have generated during assembly.
@@ -209,7 +292,7 @@ class Assembler:
                     )
                     self._state.cfg.discard(edge)
 
-                self._replace_symbol_referents(extra_block, main_block)
+                self._replace_symbol_referents(index, extra_block, main_block)
 
                 if extra_block in section.alignment:
                     max_alignment = max(
@@ -224,12 +307,15 @@ class Assembler:
         section.blocks = final_blocks
 
     def _convert_data_blocks(
-        self, section: "Assembler.Result.Section"
+        self,
+        section: "Assembler.Result.Section",
+        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
     ) -> None:
         """
         Converts blocks that only have data and have no incoming control flow
         to be DataBlocks.
         """
+
         for i, block in enumerate(section.blocks):
             assert isinstance(block, gtirb.CodeBlock)
 
@@ -246,7 +332,7 @@ class Assembler:
                 new_block = gtirb.DataBlock(
                     offset=block.offset, size=block.size
                 )
-                self._replace_symbol_referents(block, new_block)
+                self._replace_symbol_referents(index, block, new_block)
                 for out_edge in set(self._state.cfg.out_edges(block)):
                     assert _is_fallthrough_edge(out_edge)
                     self._state.cfg.discard(out_edge)
@@ -259,6 +345,10 @@ class Assembler:
                     section.block_types[new_block] = self._state.block_types[
                         block
                     ]
+
+                if block in section.line_map:
+                    section.line_map[new_block] = section.line_map[block]
+                    del section.line_map[block]
 
             else:
                 # If we're not replacing the code block with a data block and
@@ -275,11 +365,13 @@ class Assembler:
         Finalizes the assembly contents and returns the result.
         """
 
+        index = self._make_referent_index()
         for section in self._state.sections.values():
-            self._remove_empty_blocks(section)
-            self._convert_data_blocks(section)
+            self._remove_empty_blocks(section, index)
+            self._convert_data_blocks(section, index)
 
         result = self.Result(
+            target=self._state.target,
             sections=self._state.sections,
             cfg=self._state.cfg,
             symbols=list(self._state.local_symbols.values()),
@@ -290,10 +382,11 @@ class Assembler:
         # Reinitialize the assembler just in case someone tries to use the
         # object again.
         self._state = _State(
-            self._state.module,
+            self._state.target,
             temp_symbol_suffix=self._state.temp_symbol_suffix,
             trivially_unreachable=self._state.trivially_unreachable,
             allow_undef_symbols=self._state.allow_undef_symbols,
+            ignore_cfi_directives=self._state.ignore_cfi_directives,
         )
 
         return result
@@ -312,56 +405,75 @@ class Assembler:
         class Section:
             name: str
 
-            flags: Set[gtirb.Section.Flag]
+            flags: Set[gtirb.Section.Flag] = dataclasses.field(
+                default_factory=set
+            )
             """
             Section flags.
             """
 
-            data: bytes
+            data: bytes = b""
             """
             The encoded bytes from assembling the patch.
             """
 
-            blocks: List[gtirb.ByteBlock]
+            blocks: List[gtirb.ByteBlock] = dataclasses.field(
+                default_factory=list
+            )
             """
             All blocks, in order of offset, for the patch. There will be at
             most one empty block, which will be at the end of the list.
             """
 
-            symbolic_expressions: Dict[int, gtirb.SymbolicExpression]
+            symbolic_expressions: Dict[
+                int, gtirb.SymbolicExpression
+            ] = dataclasses.field(default_factory=dict)
             """
             A map of offset to symbolic expression, with 0 being the start of
             `data`.
             """
 
-            symbolic_expression_sizes: Dict[int, int]
+            symbolic_expression_sizes: Dict[int, int] = dataclasses.field(
+                default_factory=dict
+            )
             """
             A map of offset to symbolic expression size, with 0 being the
             start of `data`.
             """
 
-            alignment: Dict[gtirb.ByteBlock, int]
+            alignment: Dict[gtirb.ByteBlock, int] = dataclasses.field(
+                default_factory=dict
+            )
             """
             A map of block to the requested alignment of the block. Padding is
             not inserted in the data, so the blocks may not currently be at
             this alignment.
             """
 
-            image_type: int
+            image_type: int = 0
             """
             The ELF type for the section. For ELF this is SHT_* values. For PE
             this is ignored.
             """
 
-            image_flags: int
+            image_flags: int = 0
             """
             The ELF/PE flags for the section. For ELF this is SHF_* flags, for
             PE this is IMAGE_SCN_* flags.
             """
 
-            block_types: Dict[gtirb.DataBlock, "Assembler.Result.DataType"]
+            block_types: Dict[
+                gtirb.DataBlock, "Assembler.Result.DataType"
+            ] = dataclasses.field(default_factory=dict)
             """
             The types for data blocks that must be rendered a certain way.
+            """
+
+            line_map: OffsetMapping[int] = dataclasses.field(
+                default_factory=OffsetMapping
+            )
+            """
+            A mapping of byte offset to the line of assembly that produced it.
             """
 
         @dataclasses.dataclass
@@ -370,27 +482,34 @@ class Assembler:
             binding: str = "LOCAL"
             visibility: str = "DEFAULT"
 
+        target: "Assembler.Target"
+        """
+        The target that this result was created for.
+        """
+
         sections: Dict[str, Section]
         """
         Sections in the patch. The first section will be the text section.
         """
 
-        cfg: gtirb.CFG
+        cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
         """
         The control flow graph for the patch.
         """
 
-        symbols: List[gtirb.Symbol]
+        symbols: List[gtirb.Symbol] = dataclasses.field(default_factory=list)
         """
         Symbols that were defined in the patch.
         """
 
-        proxies: Set[gtirb.ProxyBlock]
+        proxies: Set[gtirb.ProxyBlock] = dataclasses.field(default_factory=set)
         """
         Proxy blocks that represent unknown targets.
         """
 
-        elf_symbol_attributes: Dict[gtirb.Symbol, ElfSymbolAttributes]
+        elf_symbol_attributes: Dict[
+            gtirb.Symbol, ElfSymbolAttributes
+        ] = dataclasses.field(default_factory=dict)
         """
         ELF symbol type and binding information.
         """
@@ -398,6 +517,12 @@ class Assembler:
         @property
         def text_section(self) -> Section:
             return next(iter(self.sections.values()))
+
+        def create_ir(self) -> gtirb.IR:
+            """
+            Creates a new GTIRB IR with the contents of this result.
+            """
+            return _create_gtirb(self)
 
 
 @dataclasses.dataclass
@@ -407,10 +532,11 @@ class _State:
     and is used by the streamer classes.
     """
 
-    module: gtirb.Module
+    target: Assembler.Target
     temp_symbol_suffix: Optional[str]
     trivially_unreachable: bool
     allow_undef_symbols: bool
+    ignore_cfi_directives: bool
     cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
     local_symbols: Dict[str, gtirb.Symbol] = dataclasses.field(
         default_factory=dict
@@ -496,7 +622,7 @@ class _SymbolCreator(mcasm.Streamer):
             symbol_name += self._state.temp_symbol_suffix
 
         if label.name in self._state.local_symbols or any(
-            self._state.module.symbols_named(label.name)
+            self._state.target.symbol_lookup(label.name)
         ):
             raise MultipleDefinitionsError._make(
                 f"{symbol_name} defined multiple times",
@@ -570,6 +696,21 @@ class _Streamer(mcasm.Streamer):
     def __init__(self, state: "_State"):
         self._state = state
         super().__init__()
+
+    def _append_data(self, data: bytes, loc: mcasm.mc.SourceLocation) -> None:
+        """
+        Appends data to the current block. This should be the only way that
+        the section's data is modified.
+        """
+        offset = len(self._state.current_section.data)
+        self._state.current_section.line_map[
+            gtirb.Offset(
+                self._state.current_block,
+                offset - self._state.current_block.offset,
+            )
+        ] = loc.lineno
+        self._state.current_section.data += data
+        self._state.current_block.size += len(data)
 
     def emit_label(self, parser_state, label, loc):
         label_sym = self._state.local_symbols[label.name]
@@ -659,6 +800,7 @@ class _Streamer(mcasm.Streamer):
                 image_flags=image_flags,
                 image_type=image_type,
                 block_types={},
+                line_map=OffsetMapping(),
             )
             self._state.sections[name] = result
 
@@ -667,7 +809,7 @@ class _Streamer(mcasm.Streamer):
 
     def emit_instruction(
         self,
-        parser_state,
+        parser_state: mcasm.ParserState,
         inst: mcasm.mc.Instruction,
         data: bytes,
         fixups: List[mcasm.mc.Fixup],
@@ -677,14 +819,16 @@ class _Streamer(mcasm.Streamer):
             self._state.current_section.symbolic_expressions[
                 pos
             ] = self._fixup_to_symbolic_operand(
-                fixup, data, inst.desc.is_call or inst.desc.is_branch
+                fixup,
+                data,
+                inst.desc.is_call or inst.desc.is_branch,
+                parser_state.loc,
             )
             self._state.current_section.symbolic_expression_sizes[pos] = (
                 fixup.kind_info.bit_size // 8
             )
 
-        self._state.current_section.data += data
-        self._state.current_block.size += len(data)
+        self._append_data(data, parser_state.loc)
         self._state.blocks_with_code.add(self._state.current_block)
 
         if inst.desc.is_return:
@@ -744,8 +888,7 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.symbolic_expression_sizes[
             len(self._state.current_section.data)
         ] = size
-        self._state.current_section.data += b"\x00" * size
-        self._state.current_block.size += size
+        self._append_data(b"\x00" * size, parser_state.loc)
 
     def _emit_value_with_encoding(
         self,
@@ -775,8 +918,7 @@ class _Streamer(mcasm.Streamer):
         )
 
     def emit_bytes(self, parser_state, value):
-        self._state.current_section.data += value
-        self._state.current_block.size += len(value)
+        self._append_data(value, parser_state.loc)
 
     def emit_value_fill(
         self,
@@ -863,7 +1005,7 @@ class _Streamer(mcasm.Streamer):
         symbol: mcasm.mc.Symbol,
         attribute: mcasm.mc.SymbolAttr,
     ) -> bool:
-        if self._state.module.file_format == gtirb.Module.FileFormat.ELF:
+        if self._state.target.file_format == gtirb.Module.FileFormat.ELF:
             return self._emit_elf_symbol_attribute(
                 self._resolve_symbol(symbol, parser_state.loc), attribute
             )
@@ -903,6 +1045,10 @@ class _Streamer(mcasm.Streamer):
             raise AsmSyntaxError(diag.message, diag.lineno, diag.offset)
 
     def unhandled_event(self, name, base_impl, *args, **kwargs):
+        if "cfi" in name and self._state.ignore_cfi_directives:
+            warnings.warn(f"{name} was ignored", IgnoredCFIDirectiveWarning)
+            return super().unhandled_event(name, base_impl, *args, **kwargs)
+
         if name in {
             "init_sections",
             "add_explicit_comment",
@@ -930,14 +1076,16 @@ class _Streamer(mcasm.Streamer):
         assert inst.desc.is_call or inst.desc.is_branch
 
         if inst.desc.is_indirect_branch or _is_indirect_call(
-            self._state.module.isa, inst
+            self._state.target.isa, inst
         ):
             proxy = gtirb.ProxyBlock()
             self._state.proxies.add(proxy)
             return False, proxy
 
         assert len(fixups) == 1
-        target_expr = self._fixup_to_symbolic_operand(fixups[0], data, True)
+        target_expr = self._fixup_to_symbolic_operand(
+            fixups[0], data, True, loc
+        )
 
         if not isinstance(target_expr, gtirb.SymAddrConst):
             raise UnsupportedAssemblyError._make(
@@ -1025,9 +1173,11 @@ class _Streamer(mcasm.Streamer):
             attributes.update(variant_attrs)
 
         elif (
-            self._state.module.isa
+            self._state.target.isa
             in (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64)
-            and _is_elf_pie(self._state.module)
+            and _is_elf_pie(
+                self._state.target.file_format, self._state.target.binary_type
+            )
             and isinstance(sym.referent, gtirb.ProxyBlock)
         ):
             # These appear to only be necessary for X86 ELF, so we're limiting
@@ -1118,7 +1268,11 @@ class _Streamer(mcasm.Streamer):
         )
 
     def _fixup_to_symbolic_operand(
-        self, fixup: mcasm.mc.Fixup, encoding: bytes, is_branch: bool
+        self,
+        fixup: mcasm.mc.Fixup,
+        encoding: bytes,
+        is_branch: bool,
+        loc: mcasm.mc.SourceLocation,
     ) -> gtirb.SymbolicExpression:
         """
         Converts an LLVM fixup to a GTIRB SymbolicExpression.
@@ -1136,7 +1290,7 @@ class _Streamer(mcasm.Streamer):
         ):
             expr = expr.lhs
 
-        return self._mcexpr_to_symbolic_operand(expr, is_branch)
+        return self._mcexpr_to_symbolic_operand(expr, is_branch, loc)
 
     def _symbol_lookup(self, name: str) -> Optional[gtirb.Symbol]:
         """
@@ -1149,8 +1303,8 @@ class _Streamer(mcasm.Streamer):
         if sym:
             return sym
 
-        sym = next(self._state.module.symbols_named(name), None)
-        if sym and sym.module == self._state.module:
+        sym = next(self._state.target.symbol_lookup(name), None)
+        if sym:
             return sym
 
         return None

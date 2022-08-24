@@ -432,19 +432,12 @@ class RewritingContext:
             flags=target.section.flags,
             data=data,
             blocks=[new_block],
-            symbolic_expressions={},
-            symbolic_expression_sizes={},
-            alignment={},
             image_type=image_type,
             image_flags=image_flags,
-            block_types={},
         )
         return Assembler.Result(
+            Assembler.ModuleTarget(target.module),
             sections={sect.name: sect},
-            cfg=gtirb.CFG(),
-            symbols=[],
-            proxies=set(),
-            elf_symbol_attributes={},
         )
 
     def _insert_assembler_result(

@@ -19,39 +19,23 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
-import imp
 
-import setuptools
-
-version = imp.load_source(
-    "pkginfo.version", "gtirb_rewriting/version.py"
-).__version__
-
-setuptools.setup(
-    name="gtirb-rewriting",
-    version=version,
-    author="GrammaTech",
-    author_email="gtirb@grammatech.com",
-    description="Utilities for rewriting GTIRB",
-    packages=setuptools.find_packages(),
-    install_requires=[
-        "capstone-gt",
-        "gtirb-capstone >= 1.0.1",
-        "gtirb-functions",
-        "gtirb >= 1.10.6",
-        "mcasm >= 0.2.0.dev",
-        "more-itertools",
-        "dataclasses ; python_version<'3.7.0'",
-        "entrypoints",
-        "typing-extensions ~= 4.0",
-    ],
-    entry_points={
-        "console_scripts": [
-            "gtirb-rewriting=gtirb_rewriting.driver:generic_main",
-            "gtirb-as=gtirb_rewriting.assembler.__main__:main",
-        ],
-    },
-    classifiers=["Programming Language :: Python :: 3"],
-    url="https://github.com/grammatech/gtirb-rewriting",
-    license="GPLv3",
+from .assembler import (
+    AsmSyntaxError,
+    Assembler,
+    AssemblerError,
+    IgnoredCFIDirectiveWarning,
+    MultipleDefinitionsError,
+    UndefSymbolError,
+    UnsupportedAssemblyError,
 )
+
+__all__ = [
+    "AsmSyntaxError",
+    "Assembler",
+    "AssemblerError",
+    "IgnoredCFIDirectiveWarning",
+    "MultipleDefinitionsError",
+    "UnsupportedAssemblyError",
+    "UndefSymbolError",
+]

@@ -20,11 +20,13 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+import pathlib
 import textwrap
 
 import gtirb
 import gtirb_rewriting
 import pytest
+from gtirb_rewriting.assembler.__main__ import main as gtirb_as
 from gtirb_test_helpers import (
     add_data_block,
     add_proxy_block,
@@ -494,7 +496,7 @@ def test_temp_symbol_suffix():
 
 @pytest.mark.parametrize(
     "variant_entry",
-    gtirb_rewriting.assembler._Streamer._ELF_VARIANT_KINDS.items(),
+    gtirb_rewriting.assembler.assembler._Streamer._ELF_VARIANT_KINDS.items(),
     ids=lambda item: item[0].name,
 )
 def test_elf_sym_attrs(variant_entry):
@@ -1020,3 +1022,122 @@ def test_uleb128_and_sleb128(signed):
     assert data_sect.symbolic_expressions[0] == gtirb.SymAddrAddr(
         1, 0, start, end
     )
+
+
+def test_ignore_cfi_directives():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m, ignore_cfi_directives=True)
+    with pytest.warns(gtirb_rewriting.assembler.IgnoredCFIDirectiveWarning):
+        assembler.assemble(
+            """
+            .cfi_startproc
+            .cfi_endproc
+            """,
+        )
+
+    assembler.finalize()
+
+
+def test_line_numbers():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m, trivially_unreachable=True)
+    assembler.assemble(
+        textwrap.dedent(
+            """\
+            .byte 42   # one byte
+            .quad 4    # eight bytes
+
+            label:
+            ud2        # two bytes
+            nop
+            """
+        )
+    )
+    result = assembler.finalize()
+
+    assert len(result.text_section.blocks) == 2
+    block1, block2 = result.text_section.blocks
+    assert isinstance(block1, gtirb.DataBlock)
+    assert block1.size == 9
+    assert isinstance(block2, gtirb.CodeBlock)
+    assert block2.size == 3
+
+    assert result.text_section.line_map == {
+        gtirb.Offset(block1, 0): 1,
+        gtirb.Offset(block1, 1): 2,
+        gtirb.Offset(block2, 0): 5,
+        gtirb.Offset(block2, 2): 6,
+    }
+
+
+@pytest.mark.parametrize("use_gtirb_as", (False, True))
+def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
+    asm = textwrap.dedent(
+        """\
+        ud2
+
+        .data
+        .byte 42
+        """
+    )
+
+    if use_gtirb_as:
+        asm_dest = tmp_path / "asm.s"
+        asm_dest.write_text(asm)
+
+        ir_dest = tmp_path / "out.gtirb"
+        gtirb_as(
+            [
+                str(asm_dest),
+                str(ir_dest),
+                "--file-format",
+                "elf",
+                "--isa",
+                "x64",
+                "--pie",
+            ]
+        )
+
+        ir = gtirb.IR.load_protobuf(str(ir_dest))
+
+    else:
+        assembler = gtirb_rewriting.Assembler(
+            gtirb_rewriting.Assembler.Target(
+                gtirb.Module.ISA.X64,
+                gtirb.Module.FileFormat.ELF,
+                ["DYN"],
+                True,
+            )
+        )
+        assembler.assemble(asm)
+        result = assembler.finalize()
+        ir = result.create_ir()
+
+    assert len(ir.modules) == 1
+    (m,) = ir.modules
+
+    assert m.isa == gtirb.Module.ISA.X64
+    assert m.file_format == gtirb.Module.FileFormat.ELF
+
+    assert "binaryType" in m.aux_data
+    assert m.aux_data["binaryType"].data == ["DYN"]
+
+    assert set(s.name for s in m.sections) == {".text", ".data", ".dynamic"}
+
+    text = next(s for s in m.sections if s.name == ".text")
+    assert len(text.byte_intervals) == 1
+    (text_bi,) = text.byte_intervals
+    assert text_bi.contents == b"\x0F\x0B"
+
+    data = next(s for s in m.sections if s.name == ".data")
+    assert len(data.byte_intervals) == 1
+    (data_bi,) = data.byte_intervals
+    assert data_bi.contents == b"\x2A"

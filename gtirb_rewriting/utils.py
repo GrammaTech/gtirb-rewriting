@@ -26,6 +26,7 @@ from typing import (
     Dict,
     Iterable,
     Iterator,
+    List,
     Mapping,
     MutableMapping,
     Optional,
@@ -182,30 +183,32 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         return super().setdefault(*args, **kwargs)
 
 
-def _target_triple(module: gtirb.Module) -> str:
+def _target_triple(
+    isa: gtirb.Module.ISA, file_format: gtirb.Module.FileFormat
+) -> str:
     """
-    Generate the appropriate LLVM target triple for a GTIRB Module.
+    Generate the appropriate LLVM target triple.
     """
 
-    if module.isa == gtirb.Module.ISA.X64:
+    if isa == gtirb.Module.ISA.X64:
         arch = "x86_64"
-    elif module.isa == gtirb.Module.ISA.IA32:
+    elif isa == gtirb.Module.ISA.IA32:
         arch = "i386"
-    elif module.isa == gtirb.Module.ISA.ARM:
+    elif isa == gtirb.Module.ISA.ARM:
         arch = "arm"
-    elif module.isa == gtirb.Module.ISA.ARM64:
+    elif isa == gtirb.Module.ISA.ARM64:
         arch = "arm64"
     else:
-        assert False, f"Unsupported ISA: {module.isa}"
+        assert False, f"Unsupported ISA: {isa}"
 
-    if module.file_format == gtirb.Module.FileFormat.ELF:
+    if file_format == gtirb.Module.FileFormat.ELF:
         vendor = "pc"
         os = "linux"
-    elif module.file_format == gtirb.Module.FileFormat.PE:
+    elif file_format == gtirb.Module.FileFormat.PE:
         vendor = "pc"
         os = "win32"
     else:
-        assert False, f"Unsupported file format: {module.file_format}"
+        assert False, f"Unsupported file format: {file_format}"
 
     return f"{arch}-{vendor}-{os}"
 
@@ -345,13 +348,10 @@ def _get_function_blocks(
         return set()
 
 
-def _is_elf_pie(module: gtirb.Module) -> bool:
-    binary_type = _auxdata.binary_type.get(module)
-    return (
-        module.file_format == gtirb.Module.FileFormat.ELF
-        and binary_type is not None
-        and "DYN" in binary_type
-    )
+def _is_elf_pie(
+    file_format: gtirb.Module.FileFormat, binary_type: List[str]
+) -> bool:
+    return file_format == gtirb.Module.FileFormat.ELF and "DYN" in binary_type
 
 
 def _text_section_name(module: gtirb.Module):
