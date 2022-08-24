@@ -25,7 +25,7 @@ import sys
 from typing import List
 
 import gtirb
-from gtirb_rewriting import Assembler, AssemblerError, X86Syntax
+from gtirb_rewriting import Assembler, AssemblerError, X86Syntax, __version__
 
 
 def enum_type(enum_type):
@@ -51,9 +51,10 @@ def enum_names(enum_type, ignore=set()):
 
 
 def main(argv: List[str] = sys.argv[1:]) -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("asm", type=argparse.FileType("rt"))
-    ap.add_argument("gtirb", type=argparse.FileType("wb"))
+    ap = argparse.ArgumentParser(description="convert assembly to GTIRB")
+    ap.add_argument("asm", type=argparse.FileType("rt"), help="input assembly")
+    ap.add_argument("gtirb", type=argparse.FileType("wb"), help="output GTIRB")
+    ap.add_argument("--version", action="version", version=__version__)
     ap.add_argument(
         "--file-format",
         metavar=",".join(
@@ -84,9 +85,18 @@ def main(argv: List[str] = sys.argv[1:]) -> None:
         metavar=",".join(enum_names(X86Syntax)),
         type=enum_type(X86Syntax),
         default=X86Syntax.ATT,
+        help="assembly syntax to use (x86-targets only)",
     )
-    ap.add_argument("--pie", action="store_true")
-    ap.add_argument("--static", action="store_true")
+    ap.add_argument(
+        "--pie",
+        action="store_true",
+        help="create a position independent executable (ELF only)",
+    )
+    ap.add_argument(
+        "--static",
+        action="store_true",
+        help="create a static executable (ELF only)",
+    )
     args = ap.parse_args(argv)
 
     with args.asm:
