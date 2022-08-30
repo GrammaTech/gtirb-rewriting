@@ -49,11 +49,9 @@ def test_return_edges():
     result = assembler.finalize()
     text_section = result.text_section
 
-    assert len(text_section.blocks) == 2
+    assert len(text_section.blocks) == 1
     assert text_section.blocks[0].offset == 0
     assert text_section.blocks[0].size == 1
-    assert text_section.blocks[1].offset == 1
-    assert text_section.blocks[1].size == 0
 
     edges = list(result.cfg.out_edges(text_section.blocks[0]))
     assert len(edges) == 1
@@ -813,10 +811,7 @@ def test_assembler_sections(file_format: gtirb.Module.FileFormat):
         gtirb.Section.Flag.Loaded,
         gtirb.Section.Flag.Readable,
     }
-    assert len(text_section.blocks) == 1
-    assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
-    assert text_section.blocks[0].offset == 0
-    assert text_section.blocks[0].size == 0
+    assert not text_section.blocks
     assert not text_section.data
 
     data_section = result.sections[".data"]
@@ -1022,6 +1017,47 @@ def test_uleb128_and_sleb128(signed):
     assert data_sect.symbolic_expressions[0] == gtirb.SymAddrAddr(
         1, 0, start, end
     )
+
+
+@pytest.mark.parametrize("nul_terminate", (False, True))
+def test_string_and_ascii(nul_terminate):
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+    directive = "string" if nul_terminate else "ascii"
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        f"""
+        .data
+        .{directive} "hi"
+        .byte 0
+        .byte 42
+        """,
+        gtirb_rewriting.X86Syntax.ATT,
+    )
+    result = assembler.finalize()
+
+    data_sect = result.sections[".data"]
+    str_block, byte_block = data_sect.blocks
+    assert isinstance(str_block, gtirb.DataBlock)
+    assert isinstance(byte_block, gtirb.DataBlock)
+
+    if nul_terminate:
+        assert data_sect.data == b"hi\x00\x00\x2A"
+        assert (
+            data_sect.block_types[str_block]
+            == gtirb_rewriting.Assembler.Result.DataType.String
+        )
+    else:
+        assert data_sect.data == b"hi\x00\x2A"
+        assert (
+            data_sect.block_types[str_block]
+            == gtirb_rewriting.Assembler.Result.DataType.ASCII
+        )
+
+    assert set(data_sect.block_types) == {str_block}
 
 
 def test_ignore_cfi_directives():

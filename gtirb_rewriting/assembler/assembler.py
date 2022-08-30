@@ -24,6 +24,7 @@ import enum
 import itertools
 import warnings
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import gtirb
@@ -316,6 +317,15 @@ class Assembler:
                 section.alignment[main_block] = max_alignment
             final_blocks.append(main_block)
 
+        # Remove any trailing empty block
+        if (
+            not final_blocks[-1].size
+            and isinstance(final_blocks[-1], gtirb.CodeBlock)
+            and not any(self._state.cfg.in_edges(final_blocks[-1]))
+            and not index.get(final_blocks[-1])
+        ):
+            final_blocks.pop()
+
         section.blocks = final_blocks
 
     def _convert_data_blocks(
@@ -367,10 +377,22 @@ class Assembler:
                 # it had a specific block type, this is a problem. It's too
                 # late to issue a specific error here but we can at least
                 # catch the problem.
-                if block in self._state.block_types:
+                block_type = self._state.block_types.get(block)
+                if block_type and self._is_required_block_type(block_type):
                     raise UnsupportedAssemblyError(
                         "A code block was given a data type (e.g. via uleb128)"
                     )
+
+    def _is_required_block_type(
+        self, type: "Assembler.Result.DataType"
+    ) -> bool:
+        """
+        Is this block type required for correctness or can it be dropped?
+        """
+        return type in {
+            Assembler.Result.DataType.ULEB128,
+            Assembler.Result.DataType.SLEB128,
+        }
 
     def finalize(self) -> "Result":
         """
@@ -413,6 +435,8 @@ class Assembler:
         class DataType(str, enum.Enum):
             ULEB128 = "uleb128"
             SLEB128 = "sleb128"
+            String = "string"
+            ASCII = "ascii"
 
         @dataclasses.dataclass
         class Section:
@@ -709,6 +733,7 @@ class _Streamer(mcasm.Streamer):
 
     def __init__(self, state: "_State"):
         self._state = state
+        self._prevent_print_as_string_count = 0
         super().__init__()
 
     def _append_data(self, data: bytes, loc: mcasm.mc.SourceLocation) -> None:
@@ -907,13 +932,16 @@ class _Streamer(mcasm.Streamer):
     def _emit_value_with_encoding(
         self,
         parser_state: mcasm.ParserState,
-        value: mcasm.mc.Expr,
+        value: Union[mcasm.mc.Expr, bytes],
         type: Assembler.Result.DataType,
     ) -> None:
         # gtirb can only apply an encoding to a data block, so we need for
         # this value to be in its own block.
         self._split_block()
-        self.emit_value_impl(parser_state, value, 1, parser_state.loc)
+        if isinstance(value, mcasm.mc.Expr):
+            self.emit_value_impl(parser_state, value, 1, parser_state.loc)
+        else:
+            self._append_data(value, parser_state.loc)
         self._state.block_types[self._state.current_block] = type
         self._split_block()
 
@@ -931,8 +959,76 @@ class _Streamer(mcasm.Streamer):
             parser_state, value, Assembler.Result.DataType.SLEB128
         )
 
-    def emit_bytes(self, parser_state, value):
-        self._append_data(value, parser_state.loc)
+    @contextmanager
+    def _prevent_print_as_string(self):
+        """
+        A context manager that prevents emit_bytes from printing a value as
+        a string.
+        """
+
+        self._prevent_print_as_string_count += 1
+        try:
+            yield
+        finally:
+            self._prevent_print_as_string_count -= 1
+
+    def _try_terminate_previous_ascii_block(
+        self, parser_state: mcasm.ParserState, value: bytes
+    ) -> bool:
+        """
+        Attempt to terminate the previous string block. This is required
+        because LLVM's string parser calls emit_bytes twice for a
+        NUL-terminated string -- once for the contents and once for the NUL.
+        """
+
+        # We required that:
+        # - the value is a NUL
+        # - the current block is empty
+        # - we have a previous block
+        # - the previous block's type is ASCII
+        if value != b"\x00":
+            return False
+
+        if self._state.current_block.size:
+            return False
+
+        if len(self._state.current_section.blocks) < 2:
+            return False
+
+        prev_block = self._state.current_section.blocks[-2]
+        prev_block_type = self._state.block_types.get(prev_block)
+        if prev_block_type != Assembler.Result.DataType.ASCII:
+            return False
+
+        current_block = self._state.current_section.blocks.pop()
+        self._append_data(b"\x00", parser_state.loc)
+        self._state.block_types[prev_block] = Assembler.Result.DataType.String
+
+        current_block.offset += 1
+        self._state.current_section.blocks.append(current_block)
+
+        return True
+
+    def emit_bytes(
+        self, parser_state: mcasm.ParserState, value: bytes
+    ) -> None:
+        if not self._prevent_print_as_string_count:
+            if self._try_terminate_previous_ascii_block(parser_state, value):
+                return
+
+            self._emit_value_with_encoding(
+                parser_state, value, Assembler.Result.DataType.ASCII
+            )
+        else:
+            self._append_data(value, parser_state.loc)
+
+    def emit_int_value(
+        self, state: mcasm.ParserState, value: int, size: int
+    ) -> None:
+        # emit_int_value ends up calling emit_bytes, but we don't want it to
+        # print the int bytes as a string.
+        with self._prevent_print_as_string():
+            super().emit_int_value(state, value, size)
 
     def emit_value_fill(
         self,
@@ -958,7 +1054,7 @@ class _Streamer(mcasm.Streamer):
                 num_bytes.location,
             )
 
-        self.emit_bytes(parser_state, bytes([fill_value] * num_bytes.value))
+        self._append_data(bytes(num_bytes.value), parser_state.loc)
 
     def emit_value_to_alignment(
         self, parser_state, alignment, value, value_size, max_bytes

@@ -408,7 +408,21 @@ class RewritingContext:
         for snippet in epilogue:
             assembler.assemble(snippet.code, snippet.x86_syntax)
 
-        return assembler.finalize()
+        result = assembler.finalize()
+
+        # The modify code assumes that the last block is capable of holding
+        # additional code, so make that happen if it needs to.
+        last_block = result.text_section.blocks[-1]
+        needs_additional_block = not isinstance(
+            last_block, gtirb.CodeBlock
+        ) or any(result.cfg.out_edges(last_block))
+        if needs_additional_block:
+            assert last_block.size, "expected last block to have a size"
+            result.text_section.blocks.append(
+                gtirb.CodeBlock(offset=last_block.offset + last_block.size)
+            )
+
+        return result
 
     def _synthesize_result(
         self, target: gtirb.ByteBlock, data: bytes
