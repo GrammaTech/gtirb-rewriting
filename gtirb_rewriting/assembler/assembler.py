@@ -1179,13 +1179,12 @@ class _Streamer(mcasm.Streamer):
                 self._state.target.file_format, self._state.target.binary_type
             )
             and isinstance(sym.referent, gtirb.ProxyBlock)
+            and is_branch
         ):
             # These appear to only be necessary for X86 ELF, so we're limiting
             # the inference to that.
-            if is_branch:
-                attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
-            else:
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRelPC)
+            attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+
         return attributes
 
     def _mcexpr_to_symbolic_operand(

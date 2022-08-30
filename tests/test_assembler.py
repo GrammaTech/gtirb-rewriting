@@ -141,7 +141,7 @@ def test_symbolic_expr_sym_offset():
     assert isinstance(sym_expr, gtirb.SymAddrConst)
     assert sym_expr.symbol == puts_sym
     assert sym_expr.offset == 42
-    assert sym_expr.attributes == {gtirb.SymbolicExpression.Attribute.GotRelPC}
+    assert not sym_expr.attributes
 
 
 def test_byte_directive_as_code_due_to_entrypoint():
