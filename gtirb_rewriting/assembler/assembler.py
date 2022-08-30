@@ -117,6 +117,14 @@ class IgnoredCFIDirectiveWarning(Warning):
     pass
 
 
+class IgnoredSymverDirectiveWarning(Warning):
+    """
+    A .symver directive was ignored.
+    """
+
+    pass
+
+
 class Assembler:
     """
     Assembles chunks of assembly, creating a control flow graph and other
@@ -163,6 +171,7 @@ class Assembler:
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
         ignore_cfi_directives: bool = False,
+        ignore_symver_directives: bool = False,
     ) -> None:
         """
         :param target: The module the patch will be inserted into or a Target
@@ -180,6 +189,8 @@ class Assembler:
                                     set to refer to a proxy block.
         :param ignore_cfi_directives: Ignore CFI directives instead of issuing
                                       an error.
+        :param ignore_symver_directives: Ignore symver directives instead of
+                                         issuing an error.
         """
 
         if isinstance(target, gtirb.Module):
@@ -191,6 +202,7 @@ class Assembler:
             trivially_unreachable,
             allow_undef_symbols,
             ignore_cfi_directives,
+            ignore_symver_directives,
         )
 
     def assemble(
@@ -387,6 +399,7 @@ class Assembler:
             trivially_unreachable=self._state.trivially_unreachable,
             allow_undef_symbols=self._state.allow_undef_symbols,
             ignore_cfi_directives=self._state.ignore_cfi_directives,
+            ignore_symver_directives=self._state.ignore_symver_directives,
         )
 
         return result
@@ -537,6 +550,7 @@ class _State:
     trivially_unreachable: bool
     allow_undef_symbols: bool
     ignore_cfi_directives: bool
+    ignore_symver_directives: bool
     cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
     local_symbols: Dict[str, gtirb.Symbol] = dataclasses.field(
         default_factory=dict
@@ -1047,6 +1061,13 @@ class _Streamer(mcasm.Streamer):
     def unhandled_event(self, name, base_impl, *args, **kwargs):
         if "cfi" in name and self._state.ignore_cfi_directives:
             warnings.warn(f"{name} was ignored", IgnoredCFIDirectiveWarning)
+            return super().unhandled_event(name, base_impl, *args, **kwargs)
+
+        if (
+            name == "emit_elf_symver_directive"
+            and self._state.ignore_symver_directives
+        ):
+            warnings.warn(f"{name} was ignored", IgnoredSymverDirectiveWarning)
             return super().unhandled_event(name, base_impl, *args, **kwargs)
 
         if name in {

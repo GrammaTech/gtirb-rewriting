@@ -1042,6 +1042,24 @@ def test_ignore_cfi_directives():
     assembler.finalize()
 
 
+@pytest.mark.parametrize("ignore", (True, False))
+def test_ignore_symver_directives(ignore: bool):
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m, ignore_symver_directives=ignore)
+    if ignore:
+        filter = pytest.warns(
+            gtirb_rewriting.assembler.IgnoredSymverDirectiveWarning
+        )
+    else:
+        filter = pytest.raises(gtirb_rewriting.UnsupportedAssemblyError)
+    with filter:
+        assembler.assemble(".symver a, a@@1.2.0")
+
+
 def test_line_numbers():
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
