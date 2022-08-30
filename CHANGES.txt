@@ -4,6 +4,8 @@
 - Added support for the .zero directive
 - Added support for sym-sym symbolic expressions
 - Added support for the .uleb128 and .sleb128 directives
+- Removed inference of the GOTPCREL symbolic attribute, which cannot be done
+  correctly in all cases
 
 0.1.0:
 - gtirb-rewriting now requires gtirb 1.10.6.
