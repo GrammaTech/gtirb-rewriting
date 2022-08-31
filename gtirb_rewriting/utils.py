@@ -131,6 +131,17 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         else:
             del self._data[key]
 
+    def __contains__(self, key: Union[gtirb.Offset, ElementT]) -> bool:
+        """
+        Determines if the mapping contains a given Offset or any offset for a
+        given element.
+        """
+        if isinstance(key, gtirb.Offset):
+            map = self._data.get(key.element_id)
+            return map is not None and key.displacement in map
+        else:
+            return key in self._data
+
     # Mapping methods
     @overload
     def get(self, key: gtirb.Offset) -> Union[T, None]:

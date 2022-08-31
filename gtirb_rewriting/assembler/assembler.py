@@ -248,6 +248,7 @@ class Assembler:
         index: Dict[gtirb.Block, Set[gtirb.Symbol]],
         old_block: gtirb.Block,
         new_block: gtirb.Block,
+        make_at_end: bool = False,
     ) -> None:
         """
         Alters all symbols referring to an old block to refer to a new block.
@@ -255,6 +256,8 @@ class Assembler:
         sym_set = index[old_block]
         for sym in sym_set:
             sym.referent = new_block
+            if make_at_end:
+                sym.at_end = True
         index[new_block].update(sym_set)
         sym_set.clear()
 
@@ -317,15 +320,6 @@ class Assembler:
                 section.alignment[main_block] = max_alignment
             final_blocks.append(main_block)
 
-        # Remove any trailing empty block
-        if (
-            not final_blocks[-1].size
-            and isinstance(final_blocks[-1], gtirb.CodeBlock)
-            and not any(self._state.cfg.in_edges(final_blocks[-1]))
-            and not index.get(final_blocks[-1])
-        ):
-            final_blocks.pop()
-
         section.blocks = final_blocks
 
     def _convert_data_blocks(
@@ -352,7 +346,7 @@ class Assembler:
                 and not any(self._state.cfg.in_edges(block))
             ):
                 new_block = gtirb.DataBlock(
-                    offset=block.offset, size=block.size
+                    offset=block.offset, size=block.size, uuid=block.uuid
                 )
                 self._replace_symbol_referents(index, block, new_block)
                 for out_edge in set(self._state.cfg.out_edges(block)):
@@ -394,6 +388,42 @@ class Assembler:
             Assembler.Result.DataType.SLEB128,
         }
 
+    def _remove_trailing_empty_block(
+        self,
+        section: "Assembler.Result.Section",
+        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+    ) -> None:
+        """
+        Attempt to remove an empty block at the end of the section.
+        """
+
+        def drop_block():
+            last_block = section.blocks.pop()
+            section.alignment.pop(last_block, None)
+            # Empty blocks shouldn't be able to be in any of these
+            assert last_block not in section.line_map
+            assert last_block not in section.block_types
+            assert not index.get(last_block)
+
+        is_empty = not section.blocks[-1].size
+        is_reachable = isinstance(section.blocks[-1], gtirb.CodeBlock) and any(
+            self._state.cfg.in_edges(section.blocks[-1])
+        )
+        is_referenced = index.get(section.blocks[-1]) is not None
+        has_other_blocks = len(section.blocks) >= 2
+
+        if is_empty and not is_reachable and not is_referenced:
+            # If there's nothing reaching or referring to this, we can just
+            # drop it.
+            drop_block()
+        elif is_empty and not is_reachable and has_other_blocks:
+            # Otherwise, if nothing reaches this but it has a symbol, make the
+            # symbol be an at_end symbol for the previous block.
+            self._replace_symbol_referents(
+                index, section.blocks[-1], section.blocks[-2], make_at_end=True
+            )
+            drop_block()
+
     def finalize(self) -> "Result":
         """
         Finalizes the assembly contents and returns the result.
@@ -403,6 +433,7 @@ class Assembler:
         for section in self._state.sections.values():
             self._remove_empty_blocks(section, index)
             self._convert_data_blocks(section, index)
+            self._remove_trailing_empty_block(section, index)
 
         result = self.Result(
             target=self._state.target,

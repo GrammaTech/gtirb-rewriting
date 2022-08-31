@@ -97,6 +97,52 @@ def test_empty_label():
     }
 
 
+def test_empty_blocks():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    add_symbol(m, "foo", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+                jmp foo
+            bar:
+                .align 8
+                # This block has no control flow or contents, but a label.
+
+            .data
+            .string "hi"
+                # This block will be empty and can be removed.
+
+            .bss
+                call foo
+                # This empty block will have incoming control flow and we need
+                # to preserve that.
+        """
+    )
+    result = assembler.finalize()
+
+    assert len(result.symbols) == 1
+    bar_sym = next(sym for sym in result.symbols if sym.name == "bar")
+
+    text_section = result.text_section
+    assert len(text_section.blocks) == 1
+    assert bar_sym.referent is text_section.blocks[0]
+    assert bar_sym.at_end
+    assert text_section.blocks[0].size == 2
+    assert not text_section.alignment
+
+    data_section = result.sections[".data"]
+    assert len(data_section.blocks) == 1
+    assert data_section.blocks[0].size == 3
+
+    bss_section = result.sections[".bss"]
+    assert len(bss_section.blocks) == 2
+    assert bss_section.blocks[0].size == 5
+    assert not bss_section.blocks[1].size
+
+
 def test_symbolic_expr():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
