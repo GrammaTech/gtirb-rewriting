@@ -142,6 +142,7 @@ class _CallPatchX86(_CallPatchImpl):
         conv: CallingConventionDesc,
         **constraint_kwargs,
     ):
+        assert sym.module
         self._abi = ABI.get(sym.module)
         self._cconv = conv
         self._sym = sym

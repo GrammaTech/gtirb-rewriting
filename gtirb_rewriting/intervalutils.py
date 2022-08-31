@@ -199,7 +199,7 @@ def join_byte_intervals(
                     if aux_data and bi in aux_data:
                         table[bi] = aux_data[bi]
             if len(table) > 0:
-                tables.append(table)
+                tables.append(table)  # type: ignore # per above this is hacky
 
     destination = intervals[0]
     intervals = intervals[1:]
@@ -272,6 +272,7 @@ def join_byte_intervals(
         if node == interval:
             offset = 0
         else:
+            assert isinstance(node, gtirb.ByteBlock)
             offset = node.offset
         boundary = module_alignment.get(node, 1)
         size = align_address(address + offset, boundary) - (address + offset)

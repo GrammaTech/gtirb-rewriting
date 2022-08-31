@@ -99,7 +99,9 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
             elem, disp = key
             if elem in self._data and disp in self._data[elem]:
                 return self._data[elem][disp]
-        return self._data[key]
+            raise KeyError(key)
+        else:
+            return self._data[key]
 
     @overload
     def __setitem__(self, key: gtirb.Offset, value: T) -> None:
@@ -131,7 +133,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         else:
             del self._data[key]
 
-    def __contains__(self, key: Union[gtirb.Offset, ElementT]) -> bool:
+    def __contains__(self, key: object) -> bool:
         """
         Determines if the mapping contains a given Offset or any offset for a
         given element.
@@ -343,6 +345,7 @@ def _block_fallthrough_targets(block: gtirb.CodeBlock) -> Set[gtirb.CodeBlock]:
         edge.target
         for edge in block.outgoing_edges
         if _is_fallthrough_edge(edge)
+        and isinstance(edge.target, gtirb.CodeBlock)
     }
 
 
