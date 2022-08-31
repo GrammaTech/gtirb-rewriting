@@ -22,6 +22,10 @@
 
 import pathlib
 import textwrap
+from contextlib import contextmanager
+from enum import Enum, auto
+from typing import Iterator, Tuple, Type
+from unittest.mock import Mock
 
 import gtirb
 import gtirb_rewriting
@@ -749,7 +753,37 @@ def test_indirect_calls():
     assert text_section.symbolic_expressions == {}
 
 
-def test_assembler_errors():
+class DiagHandlerBehavior(Enum):
+    NoCallback = auto()
+    Handled = auto()
+    Unhandled = auto()
+
+
+@pytest.mark.parametrize("handler_behavior", DiagHandlerBehavior)
+def test_assembler_errors(handler_behavior: DiagHandlerBehavior):
+    @contextmanager
+    def expect_error(
+        cls: Type, message: str, loc: Tuple[int, int]
+    ) -> Iterator[None]:
+        lineno, offset = loc
+        if handler_behavior != DiagHandlerBehavior.Handled:
+            with pytest.raises(cls) as exc:
+                yield
+
+            assert str(exc.value) == message
+            assert exc.value.lineno == lineno
+            assert exc.value.offset == offset
+        else:
+            yield
+
+        if handler_behavior != DiagHandlerBehavior.NoCallback:
+            assert diagnostic_mock.assert_called
+            (diag,) = diagnostic_mock.call_args[0]
+            assert diag.message == message
+            assert diag.lineno == lineno
+            assert diag.offset == offset
+            diagnostic_mock.reset_mock()
+
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
         gtirb.Module.ISA.X64,
@@ -758,45 +792,76 @@ def test_assembler_errors():
     add_symbol(m, "blah", add_proxy_block(m))
     add_symbol(m, "data", add_data_block(bi, b"\xFF"))
 
-    assembler = gtirb_rewriting.Assembler(m)
-    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
-        assembler.assemble("call blah+1", gtirb_rewriting.X86Syntax.INTEL)
-    assert str(exc.value) == "Call and branch targets cannot have offsets"
-    assert exc.value.lineno == 1
-    assert exc.value.offset == 1
-
-    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
-        assembler.assemble("call data", gtirb_rewriting.X86Syntax.INTEL)
-    assert str(exc.value) == (
-        "Call and branch targets cannot be data blocks or other non-CFG "
-        "elements"
+    diagnostic_mock = Mock(
+        return_value=(handler_behavior == DiagHandlerBehavior.Handled)
     )
-    assert exc.value.lineno == 1
-    assert exc.value.offset == 1
+    if handler_behavior != DiagHandlerBehavior.NoCallback:
+        diagnostic_callback = diagnostic_mock
+    else:
+        diagnostic_callback = None
 
-    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
-        assembler.assemble(".align 2, 0xFF", gtirb_rewriting.X86Syntax.INTEL)
-    assert str(exc.value) == "trying to pad with a non-zero byte"
-    assert exc.value.lineno == 1
-    assert exc.value.offset == 1
+    assembler = gtirb_rewriting.Assembler(
+        m,
+        diagnostic_callback=diagnostic_callback,
+        allow_undef_symbols=True,
+    )
 
-    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
-        assembler.assemble(".align 2, 0, 1", gtirb_rewriting.X86Syntax.INTEL)
-    assert str(exc.value) == "trying to pad with a fixed limit"
-    assert exc.value.lineno == 1
-    assert exc.value.offset == 1
+    assert assembler.assemble("nop")
 
-    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
-        assembler.assemble(
+    with expect_error(
+        gtirb_rewriting.UnsupportedAssemblyError,
+        "Call and branch targets cannot have offsets",
+        (1, 1),
+    ):
+        assert not assembler.assemble(
+            "call blah+1", gtirb_rewriting.X86Syntax.INTEL
+        )
+
+    with expect_error(
+        gtirb_rewriting.UnsupportedAssemblyError,
+        "Call and branch targets cannot be data blocks or other non-CFG "
+        "elements",
+        (1, 1),
+    ):
+        assert not assembler.assemble(
+            "call data", gtirb_rewriting.X86Syntax.INTEL
+        )
+
+    with expect_error(
+        gtirb_rewriting.UnsupportedAssemblyError,
+        "trying to pad with a non-zero byte",
+        (1, 1),
+    ):
+        assert not assembler.assemble(
+            ".align 2, 0xFF", gtirb_rewriting.X86Syntax.INTEL
+        )
+
+    with expect_error(
+        gtirb_rewriting.UnsupportedAssemblyError,
+        "trying to pad with a fixed limit",
+        (1, 1),
+    ):
+        assert not assembler.assemble(
+            ".align 2, 0, 1", gtirb_rewriting.X86Syntax.INTEL
+        )
+
+    with expect_error(
+        gtirb_rewriting.UnsupportedAssemblyError,
+        "unsupported symbol variant kind 'PAGEOFF'",
+        (1, 6),
+    ):
+        assert not assembler.assemble(
             "call blah@PAGEOFF", gtirb_rewriting.X86Syntax.INTEL
         )
-    assert str(exc.value) == "unsupported symbol variant kind 'PAGEOFF'"
-    assert exc.value.lineno == 1
-    assert exc.value.offset == 6
 
-    with pytest.raises(gtirb_rewriting.UnsupportedAssemblyError) as exc:
+    with expect_error(
+        gtirb_rewriting.UnsupportedAssemblyError,
+        "only constant expressions can be used in assignments",
+        # Points to the -, which isn't ideal
+        (4, 19),
+    ):
         # This would be nice to support, but we don't right now.
-        assembler.assemble(
+        assert not assembler.assemble(
             textwrap.dedent(
                 """\
                 .data
@@ -808,11 +873,6 @@ def test_assembler_errors():
                 """
             )
         )
-    assert str(exc.value) == (
-        "only constant expressions can be used in assignments"
-    )
-    assert exc.value.lineno == 4
-    assert exc.value.offset == 19  # Points to the -, which isn't ideal
 
 
 @pytest.mark.parametrize(

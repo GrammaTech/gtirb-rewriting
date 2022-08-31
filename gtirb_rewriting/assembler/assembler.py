@@ -24,6 +24,7 @@
 
 import dataclasses
 import enum
+import functools
 import itertools
 import warnings
 from collections import defaultdict
@@ -37,13 +38,14 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TypeVar,
     Union,
 )
 
 import gtirb
 import gtirb_rewriting._auxdata as _auxdata
 import mcasm
-from typing_extensions import Self
+from typing_extensions import Concatenate, ParamSpec, Self
 
 from ..assembly import X86Syntax
 from ..utils import (
@@ -58,6 +60,73 @@ from ._mc_utils import is_indirect_call as _is_indirect_call
 
 def _null_lookup(name: str) -> Iterator[gtirb.Symbol]:
     yield from ()
+
+
+def _default_diag_callback(diag: "Diagnostic") -> bool:
+    """
+    The default diagnostic callback, which just says that the diagnostic was
+    not handled.
+    """
+    return False
+
+
+@dataclasses.dataclass
+class Diagnostic:
+    """
+    A diagnostic issued while assembling input.
+    """
+
+    kind: "Kind"
+    message: str
+    lineno: Optional[int]
+    offset: Optional[int]
+
+    Kind = mcasm.mc.Diagnostic.Kind
+
+
+DiagnosticCallback = Callable[[Diagnostic], bool]
+
+_StreamerClass = TypeVar(
+    "_StreamerClass", bound=Union["_SymbolCreator", "_Streamer"]
+)
+_RetT = TypeVar("_RetT")
+_ParamsT = ParamSpec("_ParamsT")
+
+
+def _convert_errors(
+    error_ret: _RetT,
+) -> Callable[
+    [Callable[Concatenate[_StreamerClass, _ParamsT], _RetT]],
+    Callable[Concatenate[_StreamerClass, _ParamsT], _RetT],
+]:
+    """
+    A function decorator that converts assembler errors to diagnostics, calls
+    the diagnostic callback, then potentially re-raises the error.
+    """
+
+    def decorator(
+        func: Callable[Concatenate[_StreamerClass, _ParamsT], _RetT]
+    ) -> Callable[Concatenate[_StreamerClass, _ParamsT], _RetT]:
+        @functools.wraps(func)
+        def impl(
+            self: _StreamerClass,
+            *args: _ParamsT.args,
+            **kwargs: _ParamsT.kwargs,
+        ) -> _RetT:
+            try:
+                return func(self, *args, **kwargs)
+            except AssemblerError as exc:
+                diag = Diagnostic(
+                    Diagnostic.Kind.Error, str(exc), exc.lineno, exc.offset
+                )
+                if self._state.issue_diagnostic(diag):
+                    return error_ret
+
+                raise
+
+        return impl
+
+    return decorator
 
 
 class AssemblerError(Exception):
@@ -181,6 +250,7 @@ class Assembler:
         self,
         target: Union[gtirb.Module, Target],
         *,
+        diagnostic_callback: Optional[DiagnosticCallback] = None,
         temp_symbol_suffix: Optional[str] = None,
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
@@ -190,6 +260,11 @@ class Assembler:
         """
         :param target: The module the patch will be inserted into or a Target
                        object describing the target to assemble for.
+        :param diagnostic_callback: A callable invoked when there is a
+               Diagnostic issued. If the diagnostic's kind is an error,
+               returning False from the callback will result in it being
+               raised as an exception (the same behavior as when this callback
+               is not specified).
         :param temp_symbol_suffix: A suffix to use for local symbols that are
                considered temporary. Passing in a unique suffix to each
                assembler that targets the same module allows the same assembly
@@ -212,6 +287,7 @@ class Assembler:
 
         self._state = _State(
             target,
+            diagnostic_callback or _default_diag_callback,
             temp_symbol_suffix,
             trivially_unreachable,
             allow_undef_symbols,
@@ -221,11 +297,14 @@ class Assembler:
 
     def assemble(
         self, asm: str, x86_syntax: X86Syntax = X86Syntax.ATT
-    ) -> None:
+    ) -> bool:
         """
         Assembles additional assembly, continuing where the last call to
         assemble left off.
         """
+
+        self._state.had_error = False
+
         assembler = mcasm.Assembler(
             _target_triple(
                 self._state.target.isa, self._state.target.file_format
@@ -244,6 +323,8 @@ class Assembler:
         assembler.assemble(_SymbolCreator(self._state), asm)
 
         assembler.assemble(_Streamer(self._state), asm)
+
+        return not self._state.had_error
 
     def _make_referent_index(self) -> Dict[gtirb.Block, Set[gtirb.Symbol]]:
         """
@@ -464,6 +545,7 @@ class Assembler:
         # object again.
         self._state = _State(
             self._state.target,
+            diagnostic_callback=self._state.diagnostic_callback,
             temp_symbol_suffix=self._state.temp_symbol_suffix,
             trivially_unreachable=self._state.trivially_unreachable,
             allow_undef_symbols=self._state.allow_undef_symbols,
@@ -617,11 +699,13 @@ class _State:
     """
 
     target: Assembler.Target
+    diagnostic_callback: DiagnosticCallback
     temp_symbol_suffix: Optional[str]
     trivially_unreachable: bool
     allow_undef_symbols: bool
     ignore_cfi_directives: bool
     ignore_symver_directives: bool
+    had_error: bool = False
     cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
     local_symbols: Dict[str, gtirb.Symbol] = dataclasses.field(
         default_factory=dict
@@ -658,6 +742,12 @@ class _State:
         ), "current block should be a code block"
         return result
 
+    def issue_diagnostic(self, diag: Diagnostic) -> bool:
+        if diag.kind == Diagnostic.Kind.Error:
+            self.had_error = True
+
+        return self.diagnostic_callback(diag)
+
 
 class _SymbolCreator(mcasm.Streamer):
     """
@@ -668,6 +758,7 @@ class _SymbolCreator(mcasm.Streamer):
         self._state = state
         super().__init__()
 
+    @_convert_errors(None)
     def emit_label(
         self,
         state: mcasm.ParserState,
@@ -676,6 +767,7 @@ class _SymbolCreator(mcasm.Streamer):
     ) -> None:
         self._precreate_label(state, symbol)
 
+    @_convert_errors(None)
     def emit_assignment(
         self,
         state: mcasm.ParserState,
@@ -803,6 +895,7 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.data += data
         self._state.current_block.size += len(data)
 
+    @_convert_errors(None)
     def emit_label(
         self,
         state: mcasm.ParserState,
@@ -826,6 +919,7 @@ class _Streamer(mcasm.Streamer):
 
         self._state.current_section.blocks.append(label_block)
 
+    @_convert_errors(None)
     def change_section(
         self,
         state: mcasm.ParserState,
@@ -912,6 +1006,7 @@ class _Streamer(mcasm.Streamer):
             subsection,  # type: ignore # mcasm's hints are wrong
         )
 
+    @_convert_errors(None)
     def emit_instruction(
         self,
         state: mcasm.ParserState,
@@ -986,6 +1081,7 @@ class _Streamer(mcasm.Streamer):
             )
             self._split_block(add_fallthrough=add_fallthrough)
 
+    @_convert_errors(None)
     def emit_value_impl(
         self,
         state: mcasm.ParserState,
@@ -1017,6 +1113,7 @@ class _Streamer(mcasm.Streamer):
         self._state.block_types[self._state.current_block] = type
         self._split_block()
 
+    @_convert_errors(None)
     def emit_uleb128_value(
         self, state: mcasm.ParserState, value: mcasm.mc.Expr
     ) -> None:
@@ -1024,6 +1121,7 @@ class _Streamer(mcasm.Streamer):
             state, value, Assembler.Result.DataType.ULEB128
         )
 
+    @_convert_errors(None)
     def emit_sleb128_value(
         self, state: mcasm.ParserState, value: mcasm.mc.Expr
     ) -> None:
@@ -1081,6 +1179,7 @@ class _Streamer(mcasm.Streamer):
 
         return True
 
+    @_convert_errors(None)
     def emit_bytes(self, state: mcasm.ParserState, data: bytes) -> None:
         if not self._prevent_print_as_string_count:
             if self._try_terminate_previous_ascii_block(state, data):
@@ -1092,6 +1191,7 @@ class _Streamer(mcasm.Streamer):
         else:
             self._append_data(data, state.loc)
 
+    @_convert_errors(None)
     def emit_int_value(
         self, state: mcasm.ParserState, value: int, size: int
     ) -> None:
@@ -1100,6 +1200,7 @@ class _Streamer(mcasm.Streamer):
         with self._prevent_print_as_string():
             super().emit_int_value(state, value, size)
 
+    @_convert_errors(None)
     def emit_value_fill(
         self,
         state: mcasm.ParserState,
@@ -1124,6 +1225,7 @@ class _Streamer(mcasm.Streamer):
 
         self._append_data(bytes(num_bytes.value), state.loc)
 
+    @_convert_errors(None)
     def emit_value_to_alignment(
         self,
         state: mcasm.ParserState,
@@ -1136,6 +1238,7 @@ class _Streamer(mcasm.Streamer):
             state, byte_alignment, value, value_size, max_bytes_to_emit
         )
 
+    @_convert_errors(None)
     def emit_code_alignment(
         self,
         state: mcasm.ParserState,
@@ -1187,6 +1290,7 @@ class _Streamer(mcasm.Streamer):
             self._state.current_block
         ] = alignment
 
+    @_convert_errors(True)
     def emit_symbol_attribute(
         self,
         state: mcasm.ParserState,
@@ -1231,9 +1335,14 @@ class _Streamer(mcasm.Streamer):
     def diagnostic(
         self, state: mcasm.ParserState, diag: mcasm.mc.Diagnostic
     ) -> None:
-        if diag.kind == mcasm.mc.Diagnostic.Kind.Error:
+        handled = self._state.issue_diagnostic(
+            Diagnostic(diag.kind, diag.message, diag.lineno, diag.offset)
+        )
+
+        if not handled and diag.kind == mcasm.mc.Diagnostic.Kind.Error:
             raise AsmSyntaxError(diag.message, diag.lineno, diag.offset)
 
+    @_convert_errors(None)
     def unhandled_event(
         self, name: str, base_impl: Any, *args: Any, **kwargs: Any
     ) -> Any:
