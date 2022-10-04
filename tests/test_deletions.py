@@ -291,8 +291,8 @@ def test_delete_whole_block_followed_by_data(retarget):
         assert bi.contents == b"\xFF\xEB\x00"
         assert foo_block1.byte_interval is None
 
-        assert not module.aux_data["functionEntries"].data[foo_func.uuid]
-        assert not module.aux_data["functionBlocks"].data[foo_func.uuid]
+        assert foo_func.uuid not in module.aux_data["functionEntries"].data
+        assert foo_func.uuid not in module.aux_data["functionBlocks"].data
         assert foo_block1 not in module.aux_data["alignment"].data
         assert isinstance(foo_sym.referent, gtirb.ProxyBlock)
 
@@ -348,8 +348,9 @@ def test_delete_whole_function():
 
     assert foo_b1.byte_interval is None
 
-    assert m.aux_data["functionEntries"].data[foo_func.uuid] == set()
-    assert m.aux_data["functionBlocks"].data[foo_func.uuid] == set()
+    assert foo_func.uuid not in m.aux_data["functionEntries"].data
+    assert foo_func.uuid not in m.aux_data["functionBlocks"].data
+    assert foo_func.uuid not in m.aux_data["functionNames"].data
 
     # Check that we removed the return edge from the block and updated the
     # call into it to be to the proxy block.

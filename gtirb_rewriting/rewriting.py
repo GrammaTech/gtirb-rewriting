@@ -1067,7 +1067,31 @@ class RewritingContext:
                     next(iter(next_blocks), None),
                 )
 
+        self._clean_up_functions()
+
         # Remove CFI directives, since we will most likely be invalidating
         # most (or all) of them.
         # TODO: can we not do this?
         _auxdata.cfi_directives.remove(self._module)
+
+    def _clean_up_functions(self) -> None:
+        """
+        Removes functions which no longer have any blocks, which can cause
+        gtirb-pprinter to print an empty assembly file.
+        """
+
+        function_blocks = _auxdata.function_blocks.get_or_insert(self._module)
+        function_entries = _auxdata.function_entries.get_or_insert(
+            self._module
+        )
+        function_names = _auxdata.function_names.get_or_insert(self._module)
+
+        to_remove = [
+            func_uuid
+            for func_uuid, blocks in function_blocks.items()
+            if not blocks
+        ]
+        for func_uuid in to_remove:
+            function_blocks.pop(func_uuid, None)
+            function_entries.pop(func_uuid, None)
+            function_names.pop(func_uuid, None)
