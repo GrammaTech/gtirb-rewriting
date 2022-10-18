@@ -909,7 +909,7 @@ class _Streamer(mcasm.Streamer):
         super().change_section(
             state,
             section,
-            subsection,  # type: ignore # mcasm's hints are wrong
+            subsection,
         )
 
     def emit_instruction(
