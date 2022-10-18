@@ -45,6 +45,7 @@ def test_offset_mapping():
     m = gtirb_rewriting.utils.OffsetMapping[str]()
     assert len(m) == 0
     assert gtirb.Offset(element_id=e0, displacement=0) not in m
+    assert e0 not in m
 
     m[gtirb.Offset(element_id=e0, displacement=0)] = "A"
     assert len(m) == 1
@@ -58,6 +59,7 @@ def test_offset_mapping():
     m[e1] = {0: "B", 23: "C"}
     assert len(m) == 3
     assert gtirb.Offset(element_id=e1, displacement=23) in m
+    assert e1 in m
     assert m[gtirb.Offset(element_id=e1, displacement=23)] == "C"
     assert m == {
         gtirb.Offset(element_id=e0, displacement=0): "A",
@@ -90,7 +92,7 @@ def test_offset_mapping():
     assert m == {gtirb.Offset(element_id=e0, displacement=0): "A"}
 
     with pytest.raises(ValueError) as excinfo:
-        m[e2] = "F"
+        m[e2] = "F"  # type: ignore (intentional)
     assert "not a mapping" in str(excinfo.value)
 
 
