@@ -93,7 +93,7 @@ _RetT = TypeVar("_RetT")
 _ParamsT = ParamSpec("_ParamsT")
 
 
-def _convert_errors(
+def _convert_errors_and_return(
     error_ret: _RetT,
 ) -> Callable[
     [Callable[Concatenate[_StreamerClass, _ParamsT], _RetT]],
@@ -127,6 +127,9 @@ def _convert_errors(
         return impl
 
     return decorator
+
+
+_convert_errors = _convert_errors_and_return(None)
 
 
 class AssemblerError(Exception):
@@ -758,7 +761,7 @@ class _SymbolCreator(mcasm.Streamer):
         self._state = state
         super().__init__()
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_label(
         self,
         state: mcasm.ParserState,
@@ -767,7 +770,7 @@ class _SymbolCreator(mcasm.Streamer):
     ) -> None:
         self._precreate_label(state, symbol)
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_assignment(
         self,
         state: mcasm.ParserState,
@@ -895,7 +898,7 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.data += data
         self._state.current_block.size += len(data)
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_label(
         self,
         state: mcasm.ParserState,
@@ -919,7 +922,7 @@ class _Streamer(mcasm.Streamer):
 
         self._state.current_section.blocks.append(label_block)
 
-    @_convert_errors(None)
+    @_convert_errors
     def change_section(
         self,
         state: mcasm.ParserState,
@@ -1006,7 +1009,7 @@ class _Streamer(mcasm.Streamer):
             subsection,  # type: ignore # mcasm's hints are wrong
         )
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_instruction(
         self,
         state: mcasm.ParserState,
@@ -1081,7 +1084,7 @@ class _Streamer(mcasm.Streamer):
             )
             self._split_block(add_fallthrough=add_fallthrough)
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_value_impl(
         self,
         state: mcasm.ParserState,
@@ -1113,7 +1116,7 @@ class _Streamer(mcasm.Streamer):
         self._state.block_types[self._state.current_block] = type
         self._split_block()
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_uleb128_value(
         self, state: mcasm.ParserState, value: mcasm.mc.Expr
     ) -> None:
@@ -1121,7 +1124,7 @@ class _Streamer(mcasm.Streamer):
             state, value, Assembler.Result.DataType.ULEB128
         )
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_sleb128_value(
         self, state: mcasm.ParserState, value: mcasm.mc.Expr
     ) -> None:
@@ -1179,7 +1182,7 @@ class _Streamer(mcasm.Streamer):
 
         return True
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_bytes(self, state: mcasm.ParserState, data: bytes) -> None:
         if not self._prevent_print_as_string_count:
             if self._try_terminate_previous_ascii_block(state, data):
@@ -1191,7 +1194,7 @@ class _Streamer(mcasm.Streamer):
         else:
             self._append_data(data, state.loc)
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_int_value(
         self, state: mcasm.ParserState, value: int, size: int
     ) -> None:
@@ -1200,7 +1203,7 @@ class _Streamer(mcasm.Streamer):
         with self._prevent_print_as_string():
             super().emit_int_value(state, value, size)
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_value_fill(
         self,
         state: mcasm.ParserState,
@@ -1225,7 +1228,7 @@ class _Streamer(mcasm.Streamer):
 
         self._append_data(bytes(num_bytes.value), state.loc)
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_value_to_alignment(
         self,
         state: mcasm.ParserState,
@@ -1238,7 +1241,7 @@ class _Streamer(mcasm.Streamer):
             state, byte_alignment, value, value_size, max_bytes_to_emit
         )
 
-    @_convert_errors(None)
+    @_convert_errors
     def emit_code_alignment(
         self,
         state: mcasm.ParserState,
@@ -1290,7 +1293,7 @@ class _Streamer(mcasm.Streamer):
             self._state.current_block
         ] = alignment
 
-    @_convert_errors(True)
+    @_convert_errors_and_return(True)
     def emit_symbol_attribute(
         self,
         state: mcasm.ParserState,
@@ -1342,7 +1345,7 @@ class _Streamer(mcasm.Streamer):
         if not handled and diag.kind == mcasm.mc.Diagnostic.Kind.Error:
             raise AsmSyntaxError(diag.message, diag.lineno, diag.offset)
 
-    @_convert_errors(None)
+    @_convert_errors
     def unhandled_event(
         self, name: str, base_impl: Any, *args: Any, **kwargs: Any
     ) -> Any:
