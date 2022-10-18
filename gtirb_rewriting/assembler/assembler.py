@@ -19,13 +19,26 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+#
+# pyright: strict, reportPrivateUsage=false
+
 import dataclasses
 import enum
 import itertools
 import warnings
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import gtirb
 import gtirb_rewriting._auxdata as _auxdata
@@ -43,7 +56,7 @@ from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
 
 
-def _null_lookup(name):
+def _null_lookup(name: str) -> Iterator[gtirb.Symbol]:
     yield from ()
 
 
@@ -237,9 +250,10 @@ class Assembler:
         Creates a map of blocks to their symbols.
         """
 
-        result = defaultdict(set)
+        result: Dict[gtirb.Block, Set[gtirb.Symbol]] = defaultdict(set)
         for sym in self._state.local_symbols.values():
-            result[sym.referent].add(sym)
+            if sym.referent:
+                result[sym.referent].add(sym)
 
         return result
 
@@ -291,6 +305,8 @@ class Assembler:
                 assert extra_block not in self._state.block_types
 
                 for edge in list(self._state.cfg.in_edges(extra_block)):
+                    assert isinstance(edge.source, gtirb.CodeBlock)
+
                     self._state.cfg.discard(edge)
                     if edge.source not in extra_blocks:
                         self._state.cfg.add(edge._replace(target=main_block))
@@ -652,17 +668,22 @@ class _SymbolCreator(mcasm.Streamer):
         self._state = state
         super().__init__()
 
-    def emit_label(self, parser_state, label, loc):
-        self._precreate_label(parser_state, label)
+    def emit_label(
+        self,
+        state: mcasm.ParserState,
+        symbol: mcasm.mc.Symbol,
+        loc: mcasm.mc.SourceLocation,
+    ) -> None:
+        self._precreate_label(state, symbol)
 
     def emit_assignment(
         self,
-        parser_state: mcasm.ParserState,
+        state: mcasm.ParserState,
         symbol: mcasm.mc.Symbol,
         value: mcasm.mc.Expr,
     ) -> None:
         if isinstance(value, mcasm.mc.ConstantExpr):
-            gt_sym = self._precreate_label(parser_state, symbol)
+            gt_sym = self._precreate_label(state, symbol)
             gt_sym.value = value.value
         else:
             # There are interesting uses of assignments that would be nice to
@@ -675,7 +696,7 @@ class _SymbolCreator(mcasm.Streamer):
             #   movl $str1_len, %eax
             raise UnsupportedAssemblyError._make(
                 "only constant expressions can be used in assignments",
-                value.location or parser_state.loc,
+                value.location or state.loc,
             )
 
     def _precreate_label(
@@ -782,8 +803,13 @@ class _Streamer(mcasm.Streamer):
         self._state.current_section.data += data
         self._state.current_block.size += len(data)
 
-    def emit_label(self, parser_state, label, loc):
-        label_sym = self._state.local_symbols[label.name]
+    def emit_label(
+        self,
+        state: mcasm.ParserState,
+        symbol: mcasm.mc.Symbol,
+        loc: mcasm.mc.SourceLocation,
+    ) -> None:
+        label_sym = self._state.local_symbols[symbol.name]
         label_block = label_sym.referent
         assert isinstance(label_block, gtirb.CodeBlock)
 
@@ -800,7 +826,12 @@ class _Streamer(mcasm.Streamer):
 
         self._state.current_section.blocks.append(label_block)
 
-    def change_section(self, parser_state, section, subsection):
+    def change_section(
+        self,
+        state: mcasm.ParserState,
+        section: mcasm.mc.Section,
+        subsection: Optional[mcasm.mc.Expr],
+    ) -> None:
         name = section.name
 
         # LLVM validates that flags don't change when it sees the same section
@@ -875,11 +906,15 @@ class _Streamer(mcasm.Streamer):
             self._state.sections[name] = result
 
         self._state.optional_current_section = result
-        super().change_section(parser_state, section, subsection)
+        super().change_section(
+            state,
+            section,
+            subsection,
+        )
 
     def emit_instruction(
         self,
-        parser_state: mcasm.ParserState,
+        state: mcasm.ParserState,
         inst: mcasm.mc.Instruction,
         data: bytes,
         fixups: List[mcasm.mc.Fixup],
@@ -892,13 +927,13 @@ class _Streamer(mcasm.Streamer):
                 fixup,
                 data,
                 inst.desc.is_call or inst.desc.is_branch,
-                parser_state.loc,
+                state.loc,
             )
             self._state.current_section.symbolic_expression_sizes[pos] = (
                 fixup.kind_info.bit_size // 8
             )
 
-        self._append_data(data, parser_state.loc)
+        self._append_data(data, state.loc)
         self._state.blocks_with_code.add(self._state.current_block)
 
         if inst.desc.is_return:
@@ -916,7 +951,7 @@ class _Streamer(mcasm.Streamer):
 
         elif inst.desc.is_call or inst.desc.is_branch:
             direct, target = self._resolve_instruction_target(
-                data, inst, fixups, parser_state.loc
+                data, inst, fixups, state.loc
             )
 
             if inst.desc.is_call:
@@ -951,14 +986,20 @@ class _Streamer(mcasm.Streamer):
             )
             self._split_block(add_fallthrough=add_fallthrough)
 
-    def emit_value_impl(self, parser_state, value, size, loc):
+    def emit_value_impl(
+        self,
+        state: mcasm.ParserState,
+        value: mcasm.mc.Expr,
+        size: int,
+        loc: mcasm.mc.SourceLocation,
+    ) -> None:
         self._state.current_section.symbolic_expressions[
             len(self._state.current_section.data)
         ] = self._mcexpr_to_symbolic_operand(value, False, loc)
         self._state.current_section.symbolic_expression_sizes[
             len(self._state.current_section.data)
         ] = size
-        self._append_data(b"\x00" * size, parser_state.loc)
+        self._append_data(b"\x00" * size, state.loc)
 
     def _emit_value_with_encoding(
         self,
@@ -977,17 +1018,17 @@ class _Streamer(mcasm.Streamer):
         self._split_block()
 
     def emit_uleb128_value(
-        self, parser_state: mcasm.ParserState, value: mcasm.mc.Expr
+        self, state: mcasm.ParserState, value: mcasm.mc.Expr
     ) -> None:
         self._emit_value_with_encoding(
-            parser_state, value, Assembler.Result.DataType.ULEB128
+            state, value, Assembler.Result.DataType.ULEB128
         )
 
     def emit_sleb128_value(
-        self, parser_state: mcasm.ParserState, value: mcasm.mc.Expr
+        self, state: mcasm.ParserState, value: mcasm.mc.Expr
     ) -> None:
         self._emit_value_with_encoding(
-            parser_state, value, Assembler.Result.DataType.SLEB128
+            state, value, Assembler.Result.DataType.SLEB128
         )
 
     @contextmanager
@@ -1040,18 +1081,16 @@ class _Streamer(mcasm.Streamer):
 
         return True
 
-    def emit_bytes(
-        self, parser_state: mcasm.ParserState, value: bytes
-    ) -> None:
+    def emit_bytes(self, state: mcasm.ParserState, data: bytes) -> None:
         if not self._prevent_print_as_string_count:
-            if self._try_terminate_previous_ascii_block(parser_state, value):
+            if self._try_terminate_previous_ascii_block(state, data):
                 return
 
             self._emit_value_with_encoding(
-                parser_state, value, Assembler.Result.DataType.ASCII
+                state, data, Assembler.Result.DataType.ASCII
             )
         else:
-            self._append_data(value, parser_state.loc)
+            self._append_data(data, state.loc)
 
     def emit_int_value(
         self, state: mcasm.ParserState, value: int, size: int
@@ -1063,14 +1102,12 @@ class _Streamer(mcasm.Streamer):
 
     def emit_value_fill(
         self,
-        parser_state: mcasm.ParserState,
+        state: mcasm.ParserState,
         num_bytes: mcasm.mc.Expr,
         fill_value: int,
         loc: mcasm.mc.SourceLocation,
     ) -> None:
-        if not isinstance(num_bytes, mcasm.mc.ConstantExpr) or not isinstance(
-            num_bytes.value, int
-        ):
+        if not isinstance(num_bytes, mcasm.mc.ConstantExpr):
             raise UnsupportedAssemblyError._make(
                 "only constant integers are supported for fill sizes",
                 num_bytes.location,
@@ -1085,17 +1122,27 @@ class _Streamer(mcasm.Streamer):
                 num_bytes.location,
             )
 
-        self._append_data(bytes(num_bytes.value), parser_state.loc)
+        self._append_data(bytes(num_bytes.value), state.loc)
 
     def emit_value_to_alignment(
-        self, parser_state, alignment, value, value_size, max_bytes
-    ):
+        self,
+        state: mcasm.ParserState,
+        byte_alignment: int,
+        value: int,
+        value_size: int,
+        max_bytes_to_emit: int,
+    ) -> None:
         self._emit_alignment(
-            parser_state, alignment, value, value_size, max_bytes
+            state, byte_alignment, value, value_size, max_bytes_to_emit
         )
 
-    def emit_code_alignment(self, parser_state, alignment, max_bytes):
-        self._emit_alignment(parser_state, alignment, 0, 0, max_bytes)
+    def emit_code_alignment(
+        self,
+        state: mcasm.ParserState,
+        byte_alignment: int,
+        max_bytes_to_emit: int,
+    ) -> None:
+        self._emit_alignment(state, byte_alignment, 0, 0, max_bytes_to_emit)
 
     def _emit_alignment(
         self,
@@ -1142,13 +1189,13 @@ class _Streamer(mcasm.Streamer):
 
     def emit_symbol_attribute(
         self,
-        parser_state: mcasm.ParserState,
+        state: mcasm.ParserState,
         symbol: mcasm.mc.Symbol,
         attribute: mcasm.mc.SymbolAttr,
     ) -> bool:
         if self._state.target.file_format == gtirb.Module.FileFormat.ELF:
             return self._emit_elf_symbol_attribute(
-                self._resolve_symbol(symbol, parser_state.loc), attribute
+                self._resolve_symbol(symbol, state.loc), attribute
             )
 
         # Returning False here will result in LLVM issuing a diagnostic about
@@ -1181,21 +1228,29 @@ class _Streamer(mcasm.Streamer):
 
         return False
 
-    def diagnostic(self, state, diag):
+    def diagnostic(
+        self, state: mcasm.ParserState, diag: mcasm.mc.Diagnostic
+    ) -> None:
         if diag.kind == mcasm.mc.Diagnostic.Kind.Error:
             raise AsmSyntaxError(diag.message, diag.lineno, diag.offset)
 
-    def unhandled_event(self, name, base_impl, *args, **kwargs):
+    def unhandled_event(
+        self, name: str, base_impl: Any, *args: Any, **kwargs: Any
+    ) -> Any:
         if "cfi" in name and self._state.ignore_cfi_directives:
             warnings.warn(f"{name} was ignored", IgnoredCFIDirectiveWarning)
-            return super().unhandled_event(name, base_impl, *args, **kwargs)
+            return super().unhandled_event(  # pyright: ignore
+                name, base_impl, *args, **kwargs
+            )
 
         if (
             name == "emit_elf_symver_directive"
             and self._state.ignore_symver_directives
         ):
             warnings.warn(f"{name} was ignored", IgnoredSymverDirectiveWarning)
-            return super().unhandled_event(name, base_impl, *args, **kwargs)
+            return super().unhandled_event(  # pyright: ignore
+                name, base_impl, *args, **kwargs
+            )
 
         if name in {
             "init_sections",
@@ -1203,9 +1258,11 @@ class _Streamer(mcasm.Streamer):
             "emit_int_value",
             "emit_assignment",
         }:
-            return super().unhandled_event(name, base_impl, *args, **kwargs)
+            return super().unhandled_event(  # pyright: ignore
+                name, base_impl, *args, **kwargs
+            )
 
-        parser_state = args[0]
+        parser_state: mcasm.ParserState = args[0]
         raise UnsupportedAssemblyError._make(
             f"{name} was not handled",
             parser_state.loc,
@@ -1309,7 +1366,7 @@ class _Streamer(mcasm.Streamer):
         sym: gtirb.Symbol,
         is_branch: bool,
     ) -> Set[gtirb.SymbolicExpression.Attribute]:
-        attributes = set()
+        attributes: Set[gtirb.SymbolicExpression.Attribute] = set()
         if expr.variant_kind != mcasm.mc.SymbolRefExpr.VariantKind.None_:
             variant_attrs = self._ELF_VARIANT_KINDS.get(expr.variant_kind)
             if variant_attrs is None:
@@ -1344,7 +1401,7 @@ class _Streamer(mcasm.Streamer):
         """
         Converts an MC expression to a GTIRB SymbolicExpression.
         """
-        attributes = set()
+        attributes: Set[gtirb.SymbolicExpression.Attribute] = set()
 
         if isinstance(expr, mcasm.mc.TargetExprAArch64):
             elfName = expr.variant_kind_name

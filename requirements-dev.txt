@@ -3,7 +3,9 @@ gtirb-test-helpers >= 1.1.0
 isort
 pkginfo
 pre-commit
+pyright ~= 1.1.268
 pytest
 pytest-cov
 requests
 twine
+types-dataclasses
