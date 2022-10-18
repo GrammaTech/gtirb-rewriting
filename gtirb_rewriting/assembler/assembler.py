@@ -916,7 +916,7 @@ class _Streamer(mcasm.Streamer):
         self,
         state: mcasm.ParserState,
         inst: mcasm.mc.Instruction,
-        bytes: bytes,
+        data: bytes,
         fixups: List[mcasm.mc.Fixup],
     ) -> None:
         for fixup in fixups:
@@ -925,7 +925,7 @@ class _Streamer(mcasm.Streamer):
                 pos
             ] = self._fixup_to_symbolic_operand(
                 fixup,
-                bytes,
+                data,
                 inst.desc.is_call or inst.desc.is_branch,
                 state.loc,
             )
@@ -933,7 +933,7 @@ class _Streamer(mcasm.Streamer):
                 fixup.kind_info.bit_size // 8
             )
 
-        self._append_data(bytes, state.loc)
+        self._append_data(data, state.loc)
         self._state.blocks_with_code.add(self._state.current_block)
 
         if inst.desc.is_return:
@@ -951,7 +951,7 @@ class _Streamer(mcasm.Streamer):
 
         elif inst.desc.is_call or inst.desc.is_branch:
             direct, target = self._resolve_instruction_target(
-                bytes, inst, fixups, state.loc
+                data, inst, fixups, state.loc
             )
 
             if inst.desc.is_call:
