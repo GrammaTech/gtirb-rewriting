@@ -1,4 +1,6 @@
-0.1.1: (UNRELEASED)
+0.1.2: (UNRELEASED)
+
+0.1.1:
 - Added support for ELF symbol type, binding, and visibility
 - Added support for symbols with absolute addresses using .set
 - Added support for the .zero directive
