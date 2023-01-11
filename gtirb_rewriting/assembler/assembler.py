@@ -826,37 +826,37 @@ class _Streamer(mcasm.Streamer):
 
     _ELF_VARIANT_KINDS = {
         mcasm.mc.SymbolRefExpr.VariantKind.PLT: {
-            gtirb.SymbolicExpression.Attribute.PltRef
+            gtirb.SymbolicExpression.Attribute.PLT
         },
         mcasm.mc.SymbolRefExpr.VariantKind.GOTNTPOFF: {
-            gtirb.SymbolicExpression.Attribute.GotOff,
-            gtirb.SymbolicExpression.Attribute.NtpOff,
+            gtirb.SymbolicExpression.Attribute.GOT,
+            gtirb.SymbolicExpression.Attribute.NTPOFF,
         },
         mcasm.mc.SymbolRefExpr.VariantKind.GOT: {
-            gtirb.SymbolicExpression.Attribute.GotOff,
-            gtirb.SymbolicExpression.Attribute.GotRef,
+            gtirb.SymbolicExpression.Attribute.GOT,
         },
         mcasm.mc.SymbolRefExpr.VariantKind.GOTOFF: {
-            gtirb.SymbolicExpression.Attribute.GotOff
+            gtirb.SymbolicExpression.Attribute.GOT
         },
         mcasm.mc.SymbolRefExpr.VariantKind.GOTTPOFF: {
-            gtirb.SymbolicExpression.Attribute.GotRelPC,
-            gtirb.SymbolicExpression.Attribute.TpOff,
+            gtirb.SymbolicExpression.Attribute.GOT,
+            gtirb.SymbolicExpression.Attribute.TPOFF,
         },
         mcasm.mc.SymbolRefExpr.VariantKind.GOTPCREL: {
-            gtirb.SymbolicExpression.Attribute.GotRelPC
+            gtirb.SymbolicExpression.Attribute.GOT,
+            gtirb.SymbolicExpression.Attribute.PCREL,
         },
         mcasm.mc.SymbolRefExpr.VariantKind.TPOFF: {
-            gtirb.SymbolicExpression.Attribute.TpOff
+            gtirb.SymbolicExpression.Attribute.TPOFF
         },
         mcasm.mc.SymbolRefExpr.VariantKind.NTPOFF: {
-            gtirb.SymbolicExpression.Attribute.NtpOff
+            gtirb.SymbolicExpression.Attribute.NTPOFF
         },
         mcasm.mc.SymbolRefExpr.VariantKind.DTPOFF: {
-            gtirb.SymbolicExpression.Attribute.DtpOff
+            gtirb.SymbolicExpression.Attribute.DTPOFF
         },
         mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
-            gtirb.SymbolicExpression.Attribute.TlsGd
+            gtirb.SymbolicExpression.Attribute.TLSGD
         },
     }
     _ELF_BINDINGS = {
@@ -1500,7 +1500,7 @@ class _Streamer(mcasm.Streamer):
         ):
             # These appear to only be necessary for X86 ELF, so we're limiting
             # the inference to that.
-            attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+            attributes.add(gtirb.SymbolicExpression.Attribute.PLT)
 
         return attributes
 
@@ -1523,12 +1523,12 @@ class _Streamer(mcasm.Streamer):
                 # create a symbolic expression attr for it.
                 pass
             elif elfName == ":got:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+                attributes.add(gtirb.SymbolicExpression.Attribute.GOT)
             elif elfName == ":lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                attributes.add(gtirb.SymbolicExpression.Attribute.LO12)
             elif elfName == ":got_lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+                attributes.add(gtirb.SymbolicExpression.Attribute.LO12)
+                attributes.add(gtirb.SymbolicExpression.Attribute.GOT)
             else:
                 raise UnsupportedAssemblyError._make(
                     f"unknown aarch64-specific fixup: {elfName}",
