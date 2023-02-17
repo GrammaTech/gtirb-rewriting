@@ -166,7 +166,14 @@ def test_symbolic_expr():
     assert isinstance(sym_expr, gtirb.SymAddrConst)
     assert sym_expr.symbol == puts_sym
     assert sym_expr.offset == 0
-    assert sym_expr.attributes == {gtirb.SymbolicExpression.Attribute.PLT}
+    if gtirb.version.PROTOBUF_VERSION < 4:
+        assert sym_expr.attributes == {
+            gtirb.SymbolicExpression.Attribute.PltRef
+        }  # pyright: ignore
+    else:
+        assert sym_expr.attributes == {
+            gtirb.SymbolicExpression.Attribute.PLT
+        }  # pyright: ignore
     assert text_section.symbolic_expression_sizes == {1: 4}
 
 
@@ -598,9 +605,14 @@ def test_arm64_sym_attribute_lo12():
     assert isinstance(text_section.symbolic_expressions[4], gtirb.SymAddrConst)
     assert text_section.symbolic_expressions[4].symbol is sym
     assert text_section.symbolic_expressions[4].offset == 0
-    assert text_section.symbolic_expressions[4].attributes == {
-        gtirb.SymbolicExpression.Attribute.LO12
-    }
+    if gtirb.version.PROTOBUF_VERSION < 4:
+        assert text_section.symbolic_expressions[4].attributes == {
+            gtirb.SymbolicExpression.Attribute.Lo12  # pyright: ignore
+        }
+    else:
+        assert text_section.symbolic_expressions[4].attributes == {
+            gtirb.SymbolicExpression.Attribute.LO12  # pyright: ignore
+        }
 
 
 def test_arm64_sym_attribute_got():
@@ -625,18 +637,29 @@ def test_arm64_sym_attribute_got():
     assert isinstance(text_section.symbolic_expressions[0], gtirb.SymAddrConst)
     assert text_section.symbolic_expressions[0].symbol is sym
     assert text_section.symbolic_expressions[0].offset == 0
-    assert text_section.symbolic_expressions[0].attributes == {
-        gtirb.SymbolicExpression.Attribute.GOT
-    }
+    if gtirb.version.PROTOBUF_VERSION < 4:
+        assert text_section.symbolic_expressions[0].attributes == {
+            gtirb.SymbolicExpression.Attribute.GotRef  # pyright: ignore
+        }
+    else:
+        assert text_section.symbolic_expressions[0].attributes == {
+            gtirb.SymbolicExpression.Attribute.GOT  # pyright: ignore
+        }
 
     assert 4 in text_section.symbolic_expressions
     assert isinstance(text_section.symbolic_expressions[4], gtirb.SymAddrConst)
     assert text_section.symbolic_expressions[4].symbol is sym
     assert text_section.symbolic_expressions[4].offset == 0
-    assert text_section.symbolic_expressions[4].attributes == {
-        gtirb.SymbolicExpression.Attribute.LO12,
-        gtirb.SymbolicExpression.Attribute.GOT,
-    }
+    if gtirb.version.PROTOBUF_VERSION < 4:
+        assert text_section.symbolic_expressions[4].attributes == {
+            gtirb.SymbolicExpression.Attribute.Lo12,  # pyright: ignore
+            gtirb.SymbolicExpression.Attribute.GotRef,  # pyright: ignore
+        }
+    else:
+        assert text_section.symbolic_expressions[4].attributes == {
+            gtirb.SymbolicExpression.Attribute.LO12,  # pyright: ignore
+            gtirb.SymbolicExpression.Attribute.GOT,  # pyright: ignore
+        }
 
 
 def test_undef_symbols():
