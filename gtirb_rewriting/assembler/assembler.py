@@ -1454,16 +1454,14 @@ class _Streamer(mcasm.Streamer):
     ) -> Set[gtirb.SymbolicExpression.Attribute]:
         attributes: Set[gtirb.SymbolicExpression.Attribute] = set()
         if expr.variant_kind != mcasm.mc.SymbolRefExpr.VariantKind.None_:
-            variant_attrs = self._ELF_VARIANT_KINDS.get(  # pyright: ignore
-                expr.variant_kind
-            )
+            variant_attrs = self._ELF_VARIANT_KINDS.get(expr.variant_kind)
             if variant_attrs is None:
                 name = expr.variant_kind.name
                 raise UnsupportedAssemblyError._make(
                     f"unsupported symbol variant kind '{name}'",
                     expr.location,
                 )
-            attributes.update(variant_attrs)  # pyright: ignore
+            attributes.update(variant_attrs)
 
         elif (
             self._state.target.isa
@@ -1476,6 +1474,7 @@ class _Streamer(mcasm.Streamer):
         ):
             # These appear to only be necessary for X86 ELF, so we're limiting
             # the inference to that.
+
             attributes.add(compat_proto.PLT)
 
         return attributes
