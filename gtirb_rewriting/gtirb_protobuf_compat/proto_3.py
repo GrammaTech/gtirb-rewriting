@@ -27,9 +27,15 @@ from typing import Dict, Set
 import gtirb
 import mcasm
 
-PLT = gtirb.SymbolicExpression.Attribute.PltRef
-GOT = gtirb.SymbolicExpression.Attribute.GotRef
-LO12 = gtirb.SymbolicExpression.Attribute.Lo12
+PLT: gtirb.SymbolicExpression.Attribute = (
+    gtirb.SymbolicExpression.Attribute.PltRef
+)
+GOT: gtirb.SymbolicExpression.Attribute = (
+    gtirb.SymbolicExpression.Attribute.GotRef
+)
+LO12: gtirb.SymbolicExpression.Attribute = (
+    gtirb.SymbolicExpression.Attribute.Lo12
+)
 
 ELF_VARIANT_KINDS: Dict[
     mcasm.mc.SymbolRefExpr.VariantKind, Set[gtirb.SymbolicExpression.Attribute]
