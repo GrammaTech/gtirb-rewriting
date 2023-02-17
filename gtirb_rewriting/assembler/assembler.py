@@ -57,6 +57,11 @@ from ..utils import (
 from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
 
+if gtirb.version.PROTOBUF_VERSION < 4:
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_3 as compat_proto  # pyright: ignore # noqa: E501
+else:
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_4 as compat_proto  # pyright: ignore # noqa: E501
+
 
 def _null_lookup(name: str) -> Iterator[gtirb.Symbol]:
     yield from ()
@@ -824,78 +829,10 @@ class _Streamer(mcasm.Streamer):
     Handles streamer callbacks and generates GTIRB IR as needed.
     """
 
-    if gtirb.version.PROTOBUF_VERSION < 4:
-        _ELF_VARIANT_KINDS = {  # pyright: ignore
-            mcasm.mc.SymbolRefExpr.VariantKind.PLT: {
-                gtirb.SymbolicExpression.Attribute.PltRef  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTNTPOFF: {
-                gtirb.SymbolicExpression.Attribute.GotOff,  # pyright: ignore
-                gtirb.SymbolicExpression.Attribute.NtpOff,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOT: {
-                gtirb.SymbolicExpression.Attribute.GotOff,  # pyright: ignore
-                gtirb.SymbolicExpression.Attribute.GotRef,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTOFF: {
-                gtirb.SymbolicExpression.Attribute.GotOff  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTTPOFF: {
-                gtirb.SymbolicExpression.Attribute.GotRelPC,  # pyright: ignore
-                gtirb.SymbolicExpression.Attribute.TpOff,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTPCREL: {
-                gtirb.SymbolicExpression.Attribute.GotRelPC,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.TPOFF: {
-                gtirb.SymbolicExpression.Attribute.TpOff  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.NTPOFF: {
-                gtirb.SymbolicExpression.Attribute.NtpOff  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.DTPOFF: {
-                gtirb.SymbolicExpression.Attribute.DtpOff  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
-                gtirb.SymbolicExpression.Attribute.TlsGd  # pyright: ignore
-            },
-        }
-    else:
-        _ELF_VARIANT_KINDS = {  # pyright: ignore
-            mcasm.mc.SymbolRefExpr.VariantKind.PLT: {
-                gtirb.SymbolicExpression.Attribute.PLT  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTNTPOFF: {
-                gtirb.SymbolicExpression.Attribute.GOT,  # pyright: ignore
-                gtirb.SymbolicExpression.Attribute.NTPOFF,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOT: {
-                gtirb.SymbolicExpression.Attribute.GOT,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTOFF: {
-                gtirb.SymbolicExpression.Attribute.GOT  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTTPOFF: {
-                gtirb.SymbolicExpression.Attribute.GOT,  # pyright: ignore
-                gtirb.SymbolicExpression.Attribute.TPOFF,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.GOTPCREL: {
-                gtirb.SymbolicExpression.Attribute.GOT,  # pyright: ignore
-                gtirb.SymbolicExpression.Attribute.PCREL,  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.TPOFF: {
-                gtirb.SymbolicExpression.Attribute.TPOFF  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.NTPOFF: {
-                gtirb.SymbolicExpression.Attribute.NTPOFF  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.DTPOFF: {
-                gtirb.SymbolicExpression.Attribute.DTPOFF  # pyright: ignore
-            },
-            mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
-                gtirb.SymbolicExpression.Attribute.TLSGD  # pyright: ignore
-            },
-        }
+    _ELF_VARIANT_KINDS: Dict[
+        mcasm.mc.SymbolRefExpr.VariantKind,
+        Set[gtirb.SymbolicExpression.Attribute],
+    ] = compat_proto.ELF_VARIANT_KINDS  # pyright: ignore
     _ELF_BINDINGS = {
         mcasm.mc.SymbolAttr.Global: "GLOBAL",
         mcasm.mc.SymbolAttr.Weak: "WEAK",
@@ -1539,14 +1476,7 @@ class _Streamer(mcasm.Streamer):
         ):
             # These appear to only be necessary for X86 ELF, so we're limiting
             # the inference to that.
-            if gtirb.version.PROTOBUF_VERSION < 4:
-                attributes.add(
-                    gtirb.SymbolicExpression.Attribute.PltRef  # pyright: ignore  # noqa: 501
-                )
-            else:
-                attributes.add(
-                    gtirb.SymbolicExpression.Attribute.PLT  # pyright: ignore
-                )
+            attributes.add(compat_proto.PLT)
 
         return attributes
 
@@ -1569,38 +1499,12 @@ class _Streamer(mcasm.Streamer):
                 # create a symbolic expression attr for it.
                 pass
             elif elfName == ":got:":
-                if gtirb.version.PROTOBUF_VERSION < 4:
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.GotRef  # pyright: ignore  # noqa: 501
-                    )
-                else:
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.GOT  # pyright: ignore  # noqa: 401
-                    )
+                attributes.add(compat_proto.GOT)
             elif elfName == ":lo12:":
-                if gtirb.version.PROTOBUF_VERSION < 4:
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.Lo12  # pyright: ignore  # noqa: 401
-                    )
-                else:
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.LO12  # pyright: ignore  # noqa: 401
-                    )
+                attributes.add(compat_proto.LO12)
             elif elfName == ":got_lo12:":
-                if gtirb.version.PROTOBUF_VERSION < 4:
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.Lo12  # pyright: ignore  # noqa: 401
-                    )
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.GotRef  # pyright: ignore  # noqa: 401
-                    )
-                else:
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.LO12  # pyright: ignore  # noqa: 401
-                    )
-                    attributes.add(
-                        gtirb.SymbolicExpression.Attribute.GOT  # pyright: ignore  # noqa: 401
-                    )
+                attributes.add(compat_proto.GOT)
+                attributes.add(compat_proto.LO12)
             else:
                 raise UnsupportedAssemblyError._make(
                     f"unknown aarch64-specific fixup: {elfName}",
