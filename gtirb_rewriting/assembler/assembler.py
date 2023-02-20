@@ -58,9 +58,9 @@ from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
 
 if gtirb.version.PROTOBUF_VERSION < 4:
-    import gtirb_rewriting.gtirb_protobuf_compat.proto_3 as compat_proto  # pyright: ignore # noqa: E501
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_3 as compat_proto
 else:
-    import gtirb_rewriting.gtirb_protobuf_compat.proto_4 as compat_proto  # pyright: ignore # noqa: E501
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_4 as compat_proto
 
 
 def _null_lookup(name: str) -> Iterator[gtirb.Symbol]:
@@ -832,7 +832,7 @@ class _Streamer(mcasm.Streamer):
     _ELF_VARIANT_KINDS: Dict[
         mcasm.mc.SymbolRefExpr.VariantKind,
         Set[gtirb.SymbolicExpression.Attribute],
-    ] = compat_proto.ELF_VARIANT_KINDS  # pyright: ignore
+    ] = compat_proto.ELF_VARIANT_KINDS
     _ELF_BINDINGS = {
         mcasm.mc.SymbolAttr.Global: "GLOBAL",
         mcasm.mc.SymbolAttr.Weak: "WEAK",

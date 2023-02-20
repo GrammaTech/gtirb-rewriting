@@ -40,9 +40,9 @@ from gtirb_test_helpers import (
 )
 
 if gtirb.version.PROTOBUF_VERSION < 4:
-    import gtirb_rewriting.gtirb_protobuf_compat.proto_3 as compat_proto  # pyright: ignore # noqa: E501
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_3 as compat_proto
 else:
-    import gtirb_rewriting.gtirb_protobuf_compat.proto_4 as compat_proto  # pyright: ignore # noqa: E501
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_4 as compat_proto
 
 
 def test_return_edges():
