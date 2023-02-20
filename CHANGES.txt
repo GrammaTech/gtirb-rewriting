@@ -1,4 +1,5 @@
 0.1.2: (UNRELEASED)
+- Updated GTIRB symbolic expression attributes.
 
 0.1.1:
 - Added support for ELF symbol type, binding, and visibility

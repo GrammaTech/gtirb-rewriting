@@ -57,6 +57,11 @@ from ..utils import (
 from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
 
+if gtirb.version.PROTOBUF_VERSION < 4:
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_3 as compat_proto
+else:
+    import gtirb_rewriting.gtirb_protobuf_compat.proto_4 as compat_proto
+
 
 def _null_lookup(name: str) -> Iterator[gtirb.Symbol]:
     yield from ()
@@ -824,41 +829,10 @@ class _Streamer(mcasm.Streamer):
     Handles streamer callbacks and generates GTIRB IR as needed.
     """
 
-    _ELF_VARIANT_KINDS = {
-        mcasm.mc.SymbolRefExpr.VariantKind.PLT: {
-            gtirb.SymbolicExpression.Attribute.PltRef
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTNTPOFF: {
-            gtirb.SymbolicExpression.Attribute.GotOff,
-            gtirb.SymbolicExpression.Attribute.NtpOff,
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOT: {
-            gtirb.SymbolicExpression.Attribute.GotOff,
-            gtirb.SymbolicExpression.Attribute.GotRef,
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTOFF: {
-            gtirb.SymbolicExpression.Attribute.GotOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTTPOFF: {
-            gtirb.SymbolicExpression.Attribute.GotRelPC,
-            gtirb.SymbolicExpression.Attribute.TpOff,
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.GOTPCREL: {
-            gtirb.SymbolicExpression.Attribute.GotRelPC
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.TPOFF: {
-            gtirb.SymbolicExpression.Attribute.TpOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.NTPOFF: {
-            gtirb.SymbolicExpression.Attribute.NtpOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.DTPOFF: {
-            gtirb.SymbolicExpression.Attribute.DtpOff
-        },
-        mcasm.mc.SymbolRefExpr.VariantKind.TLSGD: {
-            gtirb.SymbolicExpression.Attribute.TlsGd
-        },
-    }
+    _ELF_VARIANT_KINDS: Dict[
+        mcasm.mc.SymbolRefExpr.VariantKind,
+        Set[gtirb.SymbolicExpression.Attribute],
+    ] = compat_proto.ELF_VARIANT_KINDS
     _ELF_BINDINGS = {
         mcasm.mc.SymbolAttr.Global: "GLOBAL",
         mcasm.mc.SymbolAttr.Weak: "WEAK",
@@ -1500,7 +1474,8 @@ class _Streamer(mcasm.Streamer):
         ):
             # These appear to only be necessary for X86 ELF, so we're limiting
             # the inference to that.
-            attributes.add(gtirb.SymbolicExpression.Attribute.PltRef)
+
+            attributes.add(compat_proto.PLT)
 
         return attributes
 
@@ -1523,12 +1498,12 @@ class _Streamer(mcasm.Streamer):
                 # create a symbolic expression attr for it.
                 pass
             elif elfName == ":got:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+                attributes.add(compat_proto.GOT)
             elif elfName == ":lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
+                attributes.add(compat_proto.LO12)
             elif elfName == ":got_lo12:":
-                attributes.add(gtirb.SymbolicExpression.Attribute.Lo12)
-                attributes.add(gtirb.SymbolicExpression.Attribute.GotRef)
+                attributes.add(compat_proto.GOT)
+                attributes.add(compat_proto.LO12)
             else:
                 raise UnsupportedAssemblyError._make(
                     f"unknown aarch64-specific fixup: {elfName}",
