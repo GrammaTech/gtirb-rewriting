@@ -34,6 +34,7 @@ check-format:
 .test-template: &test
   stage: test
   script:
+    - wget -O - https://deb.nodesource.com/setup_current.x | bash - && apt-get install -y nodejs && npm install -g pyright
     - wget -O - $APT_REPO/conf/apt.gpg.key | apt-key add -
     - echo "deb $APT_REPO $(lsb_release -sc) $APT_COMPONENT" >> /etc/apt/sources.list
     - apt-get update -y
