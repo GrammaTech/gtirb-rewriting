@@ -45,6 +45,7 @@ from typing import (
 import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
+import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from more_itertools import triplewise
 
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
@@ -312,6 +313,36 @@ def _split_block(
                     if k >= offset
                 }
 
+    cfi_data = _auxdata_offsetmap.cfi_directives.get(block.module)
+    if cfi_data:
+        displacement_map = cfi_data.get(block)
+        if displacement_map:
+            cfi_data[block] = {
+                k: v for k, v in displacement_map.items() if k < offset
+            }
+            cfi_data[new_block] = {
+                k - offset: v
+                for k, v in displacement_map.items()
+                if k > offset
+            }
+            items_at_offset = displacement_map.get(offset)
+            if items_at_offset:
+                keep_items = []
+                move_items = []
+
+                items_iter = iter(items_at_offset)
+                for item in items_iter:
+                    if item[0] != ".cfi_endproc":
+                        keep_items.append(item)
+                    else:
+                        move_items.append(item)
+                        move_items.extend(items_iter)
+
+                if keep_items:
+                    cfi_data[block][offset] = keep_items
+                if move_items:
+                    cfi_data[new_block][0] = move_items
+
     return block, new_block, added_fallthrough
 
 
@@ -472,6 +503,16 @@ def _join_blocks(
                 new_displacement_map.update(
                     {block1.size + k: v for k, v in displacement_map.items()}
                 )
+
+    cfi_table_data = _auxdata_offsetmap.cfi_directives.get(module)
+    if cfi_table_data:
+        displacement_map = cfi_table_data.pop(block2, None)
+        if displacement_map:
+            new_displacement_map = cfi_table_data.get(block1, {})
+            for k, v in displacement_map.items():
+                new_k = block1.size + k
+                new_displacement_map.setdefault(new_k, []).extend(v)
+            cfi_table_data[block1] = new_displacement_map
 
     alignment_data = _auxdata.alignment.get(module)
     if alignment_data:
@@ -797,6 +838,27 @@ def _remove_block(
         table = table_def.get(block.module)
         if table is not None and block in table:
             del table[block]
+
+    cfi_table = _auxdata_offsetmap.cfi_directives.get(block.module)
+    if cfi_table:
+        displacement_map = cfi_table.pop(block, None)
+        if next_block and displacement_map:
+            keep_directives = [
+                directive
+                for _, directives in sorted(displacement_map.items())
+                for directive in directives
+                if directive[0]
+                in (
+                    ".cfi_startproc",
+                    ".cfi_endproc",
+                    ".cfi_remember_state",
+                    ".cfi_restore_state",
+                )
+            ]
+            next_directives = cfi_table.setdefault(next_block, {}).setdefault(
+                0, []
+            )
+            next_directives[:0] = keep_directives
 
     aux_alignment = _auxdata.alignment.get(block.module)
     if aux_alignment:
@@ -1197,7 +1259,7 @@ def _edit_byte_interval(
         if k < offset or k >= offset + length
     }
 
-    # adjust aux data if present
+    # adjust aux data if present (specifically for byte interval keys)
     for table_def in OFFSETMAP_AUX_DATA_TABLES:
         table_data = table_def.get(bi.module)
         if table_data and bi in table_data:

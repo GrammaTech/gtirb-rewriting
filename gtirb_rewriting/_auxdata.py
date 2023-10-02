@@ -32,6 +32,7 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
+    Union,
     cast,
     overload,
 )
@@ -243,11 +244,15 @@ binary_type = define_table(
     List[str],
 )
 
+CFIDirectiveType = Tuple[str, List[int], Union[gtirb.Symbol, uuid.UUID]]
+
+NULL_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 cfi_directives = define_table(
     gtirb.Module,
     "cfiDirectives",
     "mapping<Offset,sequence<tuple<string,sequence<int64_t>,UUID>>>",
-    Dict[gtirb.Offset, List[Tuple[str, List[int], Optional[gtirb.Symbol]]]],
+    Dict[gtirb.Offset, List[CFIDirectiveType]],
 )
 
 elf_symbol_info = define_table(
