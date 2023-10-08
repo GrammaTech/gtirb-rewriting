@@ -104,6 +104,24 @@ def test_offset_mapping():
     assert "not a MutableMapping" in str(excinfo.value)
 
 
+def test_identity_set():
+    x1 = {}
+    x2 = {}
+    x3 = {}
+    s = gtirb_rewriting.utils._IdentitySet[dict]()
+    s.add(x1)
+    s.add(x2)
+    assert len(s) == 2
+    assert x1 in s
+    assert x2 in s
+    assert x3 not in s
+    s.remove(x2)
+    assert len(s) == 1
+    assert x1 in s
+    assert x2 not in s
+    assert x3 not in s
+
+
 def test_triples():
     assert (
         gtirb_rewriting.utils._target_triple(
