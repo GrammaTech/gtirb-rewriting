@@ -91,9 +91,17 @@ def test_offset_mapping():
     assert len(m) == 1
     assert m == {gtirb.Offset(element_id=e0, displacement=0): "A"}
 
+    displacement_map = {}
+    assert m.setdefault(e1, displacement_map) is displacement_map
+    displacement_map[1] = "B"
+    assert m == {
+        gtirb.Offset(element_id=e0, displacement=0): "A",
+        gtirb.Offset(element_id=e1, displacement=1): "B",
+    }
+
     with pytest.raises(ValueError) as excinfo:
         m[e2] = "F"  # type: ignore (intentional)
-    assert "not a mapping" in str(excinfo.value)
+    assert "not a dict" in str(excinfo.value)
 
 
 def test_triples():

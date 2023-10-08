@@ -27,7 +27,6 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Mapping,
     MutableMapping,
     Optional,
     Sequence,
@@ -108,7 +107,7 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         ...
 
     @overload
-    def __setitem__(self, key: ElementT, value: Mapping[int, T]) -> None:
+    def __setitem__(self, key: ElementT, value: Dict[int, T]) -> None:
         ...
 
     def __setitem__(self, key, value):
@@ -118,10 +117,10 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
             if elem not in self._data:
                 self._data[elem] = {}
             self._data[elem][disp] = value
-        elif not isinstance(value, Mapping):
-            raise ValueError("not a mapping: %r" % value)
+        elif not isinstance(value, dict):
+            raise ValueError("not a dict: %r" % value)
         else:
-            self._data[key] = dict(value)
+            self._data[key] = value
 
     def __delitem__(self, key: Union[gtirb.Offset, ElementT]) -> None:
         """Delete the mapping for an Offset or all Offsets given an element."""
