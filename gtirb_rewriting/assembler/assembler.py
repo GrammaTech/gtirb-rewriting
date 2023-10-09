@@ -45,11 +45,13 @@ from typing import (
 import gtirb
 import gtirb_rewriting._auxdata as _auxdata
 import mcasm
-from typing_extensions import Concatenate, ParamSpec, Self
+from typing_extensions import Concatenate, ParamSpec, Self, override
 
 from ..assembly import X86Syntax
+from ..dwarf import cfi
 from ..utils import (
     OffsetMapping,
+    _IdentitySet,
     _is_elf_pie,
     _is_fallthrough_edge,
     _target_triple,
@@ -202,7 +204,7 @@ class MultipleDefinitionsError(AssemblerError):
 
 class IgnoredCFIDirectiveWarning(Warning):
     """
-    A CFI directive was ignored.
+    A CFI directive was ignored. Deprecated and no longer issued.
     """
 
     pass
@@ -262,6 +264,7 @@ class Assembler:
         temp_symbol_suffix: Optional[str] = None,
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
+        implicit_cfi_procedure: bool = False,
         ignore_cfi_directives: bool = False,
         ignore_symver_directives: bool = False,
     ) -> None:
@@ -284,8 +287,9 @@ class Assembler:
         :param allow_undef_symbols: Allows the assembly to refer to undefined
                                     symbols. Such symbols will be created and
                                     set to refer to a proxy block.
-        :param ignore_cfi_directives: Ignore CFI directives instead of issuing
-                                      an error.
+        :param implicit_cfi_procedure: Treat the assembly as implicitly being
+                                       in a CFI procedure.
+        :param ignore_cfi_directives: Deprecated and ignored.
         :param ignore_symver_directives: Ignore symver directives instead of
                                          issuing an error.
         """
@@ -299,7 +303,7 @@ class Assembler:
             temp_symbol_suffix,
             trivially_unreachable,
             allow_undef_symbols,
-            ignore_cfi_directives,
+            implicit_cfi_procedure,
             ignore_symver_directives,
         )
 
@@ -318,6 +322,7 @@ class Assembler:
                 self._state.target.isa, self._state.target.file_format
             )
         )
+        assembler.implicit_cfi_procedure = self._state.implicit_cfi_procedure
 
         # X86 is hopefully the only ISA with more than one syntax mode that
         # is widely used. If other targets do come up, we may simply choose
@@ -346,6 +351,19 @@ class Assembler:
 
         return result
 
+    def _make_cfi_index(
+        self,
+    ) -> Dict[gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]]:
+        result: Dict[
+            gtirb.Block, _IdentitySet[Assembler.Result.CFIProcedure]
+        ] = defaultdict(_IdentitySet[Assembler.Result.CFIProcedure])
+        for sect in self._state.sections.values():
+            for proc in sect.cfi_procedures:
+                for block in proc._referenced_nodes():
+                    result[block].add(proc)
+
+        return result
+
     def _replace_symbol_referents(
         self,
         index: Dict[gtirb.Block, Set[gtirb.Symbol]],
@@ -364,10 +382,32 @@ class Assembler:
         index[new_block].update(sym_set)
         sym_set.clear()
 
+    def _replace_cfi_referents(
+        self,
+        index: Dict[
+            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
+        ],
+        old_block: gtirb.Block,
+        new_block: gtirb.Block,
+    ) -> None:
+        """
+        Alters all references in CFI procedures to the block to point to the
+        new block.
+        """
+        proc_set = index[old_block]
+        for proc in proc_set:
+            proc._replace_block(old_block, new_block)
+
+        index[new_block] |= proc_set
+        proc_set.clear()
+
     def _remove_empty_blocks(
         self,
         section: "Assembler.Result.Section",
-        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        symbol_index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        cfi_index: Dict[
+            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
+        ],
     ) -> None:
         """
         Cleans up all the empty blocks we may have generated during assembly.
@@ -413,7 +453,10 @@ class Assembler:
                     )
                     self._state.cfg.discard(edge)
 
-                self._replace_symbol_referents(index, extra_block, main_block)
+                self._replace_symbol_referents(
+                    symbol_index, extra_block, main_block
+                )
+                self._replace_cfi_referents(cfi_index, extra_block, main_block)
 
                 if extra_block in section.alignment:
                     max_alignment = max(
@@ -430,7 +473,10 @@ class Assembler:
     def _convert_data_blocks(
         self,
         section: "Assembler.Result.Section",
-        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        symbol_index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        cfi_index: Dict[
+            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
+        ],
     ) -> None:
         """
         Converts blocks that only have data and have no incoming control flow
@@ -443,6 +489,7 @@ class Assembler:
             if (
                 block.size
                 and block not in self._state.blocks_with_code
+                and not cfi_index.get(block)
                 and (
                     gtirb.Section.Flag.Executable not in section.flags
                     or i != 0
@@ -453,7 +500,7 @@ class Assembler:
                 new_block = gtirb.DataBlock(
                     offset=block.offset, size=block.size, uuid=block.uuid
                 )
-                self._replace_symbol_referents(index, block, new_block)
+                self._replace_symbol_referents(symbol_index, block, new_block)
                 for out_edge in set(self._state.cfg.out_edges(block)):
                     assert _is_fallthrough_edge(out_edge)
                     self._state.cfg.discard(out_edge)
@@ -496,7 +543,10 @@ class Assembler:
     def _remove_trailing_empty_block(
         self,
         section: "Assembler.Result.Section",
-        index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        symbol_index: Dict[gtirb.Block, Set[gtirb.Symbol]],
+        cfi_index: Dict[
+            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
+        ],
     ) -> None:
         """
         Attempt to remove an empty block at the end of the section.
@@ -508,24 +558,38 @@ class Assembler:
             # Empty blocks shouldn't be able to be in any of these
             assert last_block not in section.line_map
             assert last_block not in section.block_types
-            assert not index.get(last_block)
+            assert not symbol_index.get(last_block)
 
         is_empty = not section.blocks[-1].size
         is_reachable = isinstance(section.blocks[-1], gtirb.CodeBlock) and any(
             self._state.cfg.in_edges(section.blocks[-1])
         )
-        is_referenced = index.get(section.blocks[-1]) is not None
+        is_referenced = symbol_index.get(section.blocks[-1]) is not None
+        has_cfi_directives = bool(cfi_index.get(section.blocks[-1]))
         has_other_blocks = len(section.blocks) >= 2
 
-        if is_empty and not is_reachable and not is_referenced:
+        if (
+            is_empty
+            and not is_reachable
+            and not is_referenced
+            and not has_cfi_directives
+        ):
             # If there's nothing reaching or referring to this, we can just
             # drop it.
             drop_block()
-        elif is_empty and not is_reachable and has_other_blocks:
+        elif (
+            is_empty
+            and not is_reachable
+            and has_other_blocks
+            and not has_cfi_directives
+        ):
             # Otherwise, if nothing reaches this but it has a symbol, make the
             # symbol be an at_end symbol for the previous block.
             self._replace_symbol_referents(
-                index, section.blocks[-1], section.blocks[-2], make_at_end=True
+                symbol_index,
+                section.blocks[-1],
+                section.blocks[-2],
+                make_at_end=True,
             )
             drop_block()
 
@@ -534,11 +598,12 @@ class Assembler:
         Finalizes the assembly contents and returns the result.
         """
 
-        index = self._make_referent_index()
+        symbol_index = self._make_referent_index()
+        cfi_index = self._make_cfi_index()
         for section in self._state.sections.values():
-            self._remove_empty_blocks(section, index)
-            self._convert_data_blocks(section, index)
-            self._remove_trailing_empty_block(section, index)
+            self._remove_empty_blocks(section, symbol_index, cfi_index)
+            self._convert_data_blocks(section, symbol_index, cfi_index)
+            self._remove_trailing_empty_block(section, symbol_index, cfi_index)
 
         result = self.Result(
             target=self._state.target,
@@ -557,7 +622,7 @@ class Assembler:
             temp_symbol_suffix=self._state.temp_symbol_suffix,
             trivially_unreachable=self._state.trivially_unreachable,
             allow_undef_symbols=self._state.allow_undef_symbols,
-            ignore_cfi_directives=self._state.ignore_cfi_directives,
+            implicit_cfi_procedure=self._state.implicit_cfi_procedure,
             ignore_symver_directives=self._state.ignore_symver_directives,
         )
 
@@ -574,6 +639,59 @@ class Assembler:
             SLEB128 = "sleb128"
             String = "string"
             ASCII = "ascii"
+
+        @dataclasses.dataclass
+        class CFIPointer:
+            encoding: int
+            symbol: gtirb.Symbol
+
+        @dataclasses.dataclass
+        class CFIProcedure:
+            personality: Optional["Assembler.Result.CFIPointer"] = None
+            lsda: Optional["Assembler.Result.CFIPointer"] = None
+            return_column: Optional[int] = None
+            start_offset: Optional[gtirb.Offset] = None
+            end_offset: Optional[gtirb.Offset] = None
+            instructions: OffsetMapping[
+                List[cfi.Instruction]
+            ] = dataclasses.field(default_factory=OffsetMapping)
+            is_implicit: bool = False
+
+            def _referenced_nodes(self) -> Iterator[gtirb.Block]:
+                if self.start_offset and isinstance(
+                    self.start_offset.element_id, gtirb.Block
+                ):
+                    yield self.start_offset.element_id
+                if self.end_offset and isinstance(
+                    self.end_offset.element_id, gtirb.Block
+                ):
+                    yield self.end_offset.element_id
+                for node in self.instructions.node_keys():
+                    if isinstance(node, gtirb.Block):
+                        yield node
+
+            def _replace_block(
+                self, old_block: gtirb.Block, new_block: gtirb.Block
+            ):
+                if (
+                    self.start_offset
+                    and self.start_offset.element_id == old_block
+                ):
+                    self.start_offset = self.start_offset._replace(
+                        element_id=new_block
+                    )
+                if self.end_offset and self.end_offset.element_id == old_block:
+                    self.end_offset = self.end_offset._replace(
+                        element_id=new_block
+                    )
+
+                old_displacement_map = self.instructions.pop(old_block, None)
+                if old_displacement_map:
+                    new_displacement_map = self.instructions.setdefault(
+                        new_block, {}
+                    )
+                    for key, insts in old_displacement_map.items():
+                        new_displacement_map.setdefault(key, [])[:0] = insts
 
         @dataclasses.dataclass
         class Section:
@@ -650,6 +768,13 @@ class Assembler:
             A mapping of byte offset to the line of assembly that produced it.
             """
 
+            cfi_procedures: List[
+                "Assembler.Result.CFIProcedure"
+            ] = dataclasses.field(default_factory=list)
+            """
+            The CFI procedures in this section.
+            """
+
         @dataclasses.dataclass
         class ElfSymbolAttributes:
             type: str = "NOTYPE"
@@ -711,7 +836,7 @@ class _State:
     temp_symbol_suffix: Optional[str]
     trivially_unreachable: bool
     allow_undef_symbols: bool
-    ignore_cfi_directives: bool
+    implicit_cfi_procedure: bool
     ignore_symver_directives: bool
     had_error: bool = False
     cfg: gtirb.CFG = dataclasses.field(default_factory=gtirb.CFG)
@@ -738,9 +863,24 @@ class _State:
     ] = dataclasses.field(default_factory=dict)
 
     @property
+    def text_section(self) -> "Assembler.Result.Section":
+        return next(iter(self.sections.values()))
+
+    @property
+    def current_cfi_procedure(
+        self,
+    ) -> Optional["Assembler.Result.CFIProcedure"]:
+        procs = self.current_section.cfi_procedures
+        return procs[-1] if procs else None
+
+    @property
     def current_section(self) -> "Assembler.Result.Section":
         assert self.optional_current_section, "not in a section yet"
         return self.optional_current_section
+
+    @property
+    def current_offset(self) -> gtirb.Offset:
+        return gtirb.Offset(self.current_block, self.current_block.size)
 
     @property
     def current_block(self) -> gtirb.CodeBlock:
@@ -1309,6 +1449,174 @@ class _Streamer(mcasm.Streamer):
 
         return False
 
+    @_convert_errors
+    @override
+    def emit_cfi_start_proc_impl(
+        self, state: mcasm.ParserState, frame: mcasm.mc.DwarfFrameInfo
+    ) -> None:
+        super().emit_cfi_start_proc_impl(state, frame)
+
+        is_implicit = (
+            self._state.implicit_cfi_procedure
+            and self._state.current_section == self._state.text_section
+        )
+        procedure = Assembler.Result.CFIProcedure(
+            is_implicit=is_implicit,
+        )
+        if not is_implicit:
+            procedure.start_offset = self._state.current_offset
+        self._state.current_section.cfi_procedures.append(procedure)
+
+    @_convert_errors
+    @override
+    def emit_cfi_end_proc_impl(
+        self, state: mcasm.ParserState, cur_frame: mcasm.mc.DwarfFrameInfo
+    ) -> None:
+        current_proc = self._state.current_cfi_procedure
+        assert current_proc
+
+        if current_proc.is_implicit and state.loc:
+            raise UnsupportedAssemblyError._make(
+                "cannot end an implicit CFI procedure", state.loc
+            )
+
+        if not current_proc.is_implicit:
+            current_proc.end_offset = self._state.current_offset
+
+        super().emit_cfi_end_proc_impl(state, cur_frame)
+
+    @_convert_errors
+    @override
+    def emit_cfi_adjust_cfa_offset(
+        self, state: mcasm.ParserState, adjustment: int
+    ) -> None:
+        super().emit_cfi_adjust_cfa_offset(state, adjustment)
+        self._append_cfi_instruction(cfi.InstAdjustCFAOffset(adjustment))
+
+    @_convert_errors
+    @override
+    def emit_cfi_def_cfa(
+        self, state: mcasm.ParserState, register: int, offset: int
+    ) -> None:
+        super().emit_cfi_def_cfa(state, register, offset)
+        self._append_cfi_instruction(cfi.InstDefCFA(register, offset))
+
+    @_convert_errors
+    @override
+    def emit_cfi_def_cfa_offset(
+        self, state: mcasm.ParserState, offset: int
+    ) -> None:
+        super().emit_cfi_def_cfa_offset(state, offset)
+        self._append_cfi_instruction(cfi.InstDefCFAOffset(offset))
+
+    @_convert_errors
+    @override
+    def emit_cfi_def_cfa_register(
+        self, state: mcasm.ParserState, register: int
+    ) -> None:
+        super().emit_cfi_def_cfa_register(state, register)
+        self._append_cfi_instruction(cfi.InstDefCFARegister(register))
+
+    @_convert_errors
+    @override
+    def emit_cfi_escape(self, state: mcasm.ParserState, values: bytes) -> None:
+        super().emit_cfi_escape(state, values)
+        self._append_cfi_instruction(cfi.InstEscape(values))
+
+    @_convert_errors
+    @override
+    def emit_cfi_lsda(
+        self, state: mcasm.ParserState, sym: mcasm.mc.Symbol, encoding: int
+    ) -> None:
+        super().emit_cfi_lsda(state, sym, encoding)
+        if self._state.current_cfi_procedure:
+            self._state.current_cfi_procedure.lsda = (
+                Assembler.Result.CFIPointer(
+                    encoding, self._resolve_symbol(sym, state.loc)
+                )
+            )
+
+    @_convert_errors
+    @override
+    def emit_cfi_offset(
+        self, state: mcasm.ParserState, register: int, offset: int
+    ) -> None:
+        super().emit_cfi_offset(state, register, offset)
+        self._append_cfi_instruction(cfi.InstOffset(register, offset))
+
+    @_convert_errors
+    @override
+    def emit_cfi_personality(
+        self, state: mcasm.ParserState, sym: mcasm.mc.Symbol, encoding: int
+    ) -> None:
+        super().emit_cfi_personality(state, sym, encoding)
+        if self._state.current_cfi_procedure:
+            self._state.current_cfi_procedure.personality = (
+                Assembler.Result.CFIPointer(
+                    encoding, self._resolve_symbol(sym, state.loc)
+                )
+            )
+
+    @_convert_errors
+    @override
+    def emit_cfi_register(
+        self, state: mcasm.ParserState, register_1: int, register_2: int
+    ) -> None:
+        super().emit_cfi_register(state, register_1, register_2)
+        self._append_cfi_instruction(cfi.InstRegister(register_1, register_2))
+
+    @_convert_errors
+    @override
+    def emit_cfi_rel_offset(
+        self, state: mcasm.ParserState, register: int, offset: int
+    ) -> None:
+        super().emit_cfi_rel_offset(state, register, offset)
+        self._append_cfi_instruction(cfi.InstRelOffset(register, offset))
+
+    @_convert_errors
+    @override
+    def emit_cfi_remember_state(self, state: mcasm.ParserState) -> None:
+        super().emit_cfi_remember_state(state)
+        self._append_cfi_instruction(cfi.InstRememberState())
+
+    @_convert_errors
+    def emit_cfi_restore(
+        self, state: mcasm.ParserState, register: int
+    ) -> None:
+        super().emit_cfi_restore(state, register)
+        self._append_cfi_instruction(cfi.InstRestore(register))
+
+    @_convert_errors
+    @override
+    def emit_cfi_restore_state(self, state: mcasm.ParserState) -> None:
+        super().emit_cfi_restore_state(state)
+        self._append_cfi_instruction(cfi.InstRestoreState())
+
+    @_convert_errors
+    @override
+    def emit_cfi_return_column(
+        self, state: mcasm.ParserState, register: int
+    ) -> None:
+        super().emit_cfi_return_column(state, register)
+        if self._state.current_cfi_procedure:
+            self._state.current_cfi_procedure.return_column = register
+
+    @_convert_errors
+    @override
+    def emit_cfi_same_value(
+        self, state: mcasm.ParserState, register: int
+    ) -> None:
+        super().emit_cfi_same_value(state, register)
+        self._append_cfi_instruction(cfi.InstSameValue(register))
+
+    @_convert_errors
+    @override
+    def emit_cfi_undefined(
+        self, state: mcasm.ParserState, register: int
+    ) -> None:
+        super().emit_cfi_undefined(state, register)
+        self._append_cfi_instruction(cfi.InstUndefined(register))
+
     def diagnostic(
         self, state: mcasm.ParserState, diag: mcasm.mc.Diagnostic
     ) -> None:
@@ -1323,12 +1631,6 @@ class _Streamer(mcasm.Streamer):
     def unhandled_event(
         self, name: str, base_impl: Any, *args: Any, **kwargs: Any
     ) -> Any:
-        if "cfi" in name and self._state.ignore_cfi_directives:
-            warnings.warn(f"{name} was ignored", IgnoredCFIDirectiveWarning)
-            return super().unhandled_event(  # pyright: ignore
-                name, base_impl, *args, **kwargs
-            )
-
         if (
             name == "emit_elf_symver_directive"
             and self._state.ignore_symver_directives
@@ -1343,6 +1645,7 @@ class _Streamer(mcasm.Streamer):
             "add_explicit_comment",
             "emit_int_value",
             "emit_assignment",
+            "emit_cfi_label",
         }:
             return super().unhandled_event(  # pyright: ignore
                 name, base_impl, *args, **kwargs
@@ -1353,6 +1656,16 @@ class _Streamer(mcasm.Streamer):
             f"{name} was not handled",
             parser_state.loc,
         )
+
+    def _append_cfi_instruction(self, inst: cfi.Instruction) -> None:
+        """
+        Appends a CFI instruction to the current procedure at the current
+        offset.
+        """
+        if self._state.current_cfi_procedure:
+            self._state.current_cfi_procedure.instructions.setdefault(
+                self._state.current_offset, []
+            ).append(inst)
 
     def _resolve_instruction_target(
         self,

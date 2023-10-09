@@ -85,6 +85,9 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
             for disp in subdata:
                 yield gtirb.Offset(elem, disp)
 
+    def node_keys(self) -> Iterator[ElementT]:
+        yield from self._data
+
     @overload
     def __getitem__(self, key: gtirb.Offset) -> T:
         ...

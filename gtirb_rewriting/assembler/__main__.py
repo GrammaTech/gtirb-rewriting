@@ -116,7 +116,6 @@ def main(argv: List[str] = sys.argv[1:]) -> None:
         ),
         trivially_unreachable=True,
         allow_undef_symbols=True,
-        ignore_cfi_directives=True,
         ignore_symver_directives=True,
     )
 
