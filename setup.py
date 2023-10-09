@@ -43,6 +43,7 @@ setuptools.setup(
         "more-itertools",
         "entrypoints",
         "typing-extensions ~= 4.0",
+        "leb128 ~= 1.0",
     ],
     entry_points={
         "console_scripts": [

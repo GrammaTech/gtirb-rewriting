@@ -1,8 +1,11 @@
 0.2.0:
+- gtirb-rewriting now requires Python 3.7.
 - OffsetMapping.__setitem__'s behavior changed when indexing by an element. It
   assigns the passed MutableMapping to the internal storage instead of creating
   a copy, which makes setdefault more intuitive.
-- gtirb-rewriting now requires Python 3.7.
+  asssigns the passed dict to the internal storage instead of creating a copy,
+  which makes setdefault more intuitive.
+- Added a dwarf submodule to make creating CFI directives easier.
 
 0.1.2:
 - Updated GTIRB symbolic expression attributes.
