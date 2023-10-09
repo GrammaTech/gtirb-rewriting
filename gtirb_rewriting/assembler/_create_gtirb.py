@@ -20,10 +20,14 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-from typing import TYPE_CHECKING, Dict, Tuple
+from typing import TYPE_CHECKING, Dict, List, Tuple
 
 import gtirb
 import gtirb_rewriting._auxdata as auxdata
+from gtirb_rewriting.abi import _ABIS
+from gtirb_rewriting.utils import OffsetMapping
+
+from .._auxdata import NULL_UUID, CFIDirectiveType
 
 if TYPE_CHECKING:
     from .assembler import Assembler
@@ -110,6 +114,9 @@ def create_gtirb(result: "Assembler.Result") -> gtirb.IR:
     elf_sym_info = auxdata.elf_symbol_info.get_or_insert(module)
     encodings = auxdata.encodings.get_or_insert(module)
 
+    cfi_directives = auxdata.cfi_directives.get_or_insert(module)
+    cfi_directives.update(create_cfi_directives(result))
+
     # We don't (currently) populate these, but they need to exist in the
     # module for the pretty-printer to function.
     auxdata.function_entries.get_or_insert(module)
@@ -153,3 +160,68 @@ def create_gtirb(result: "Assembler.Result") -> gtirb.IR:
     ir.cfg.update(result.cfg)
 
     return ir
+
+
+def create_cfi_directives(
+    result: "Assembler.Result",
+) -> OffsetMapping[List[CFIDirectiveType]]:
+    """
+    Creates the cfiDirectives aux data table for an assembler result.
+    """
+
+    abi = _ABIS.get((result.target.isa, result.target.file_format))
+    if not abi:
+        raise NotImplementedError("unknown ABI")
+
+    directives = OffsetMapping[List[CFIDirectiveType]]()
+
+    def append_instruction(offset: gtirb.Offset, inst: CFIDirectiveType):
+        directives.setdefault(offset, []).append(inst)
+
+    for section in result.sections.values():
+        for procedure in section.cfi_procedures:
+            if not procedure.is_implicit and procedure.start_offset:
+                append_instruction(
+                    procedure.start_offset, (".cfi_startproc", [], NULL_UUID)
+                )
+                if procedure.lsda:
+                    append_instruction(
+                        procedure.start_offset,
+                        (
+                            ".cfi_lsda",
+                            [procedure.lsda.encoding],
+                            procedure.lsda.symbol,
+                        ),
+                    )
+                if procedure.personality:
+                    append_instruction(
+                        procedure.start_offset,
+                        (
+                            ".cfi_personality",
+                            [procedure.personality.encoding],
+                            procedure.personality.symbol,
+                        ),
+                    )
+                if procedure.return_column is not None:
+                    append_instruction(
+                        procedure.start_offset,
+                        (
+                            ".cfi_return_column",
+                            [procedure.return_column],
+                            NULL_UUID,
+                        ),
+                    )
+            for offset, instructions in procedure.instructions.items():
+                for instruction in instructions:
+                    append_instruction(
+                        offset,
+                        instruction.gtirb_encoding(
+                            abi.byteorder(), abi.pointer_size()
+                        ),
+                    )
+            if not procedure.is_implicit and procedure.end_offset:
+                append_instruction(
+                    procedure.end_offset, (".cfi_endproc", [], NULL_UUID)
+                )
+
+    return directives

@@ -25,6 +25,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import gtirb
 import more_itertools
+from typing_extensions import Literal
 
 from .assembly import Constraints, Register, _AsmSnippet
 
@@ -194,6 +195,12 @@ class ABI:
         the values preserved across the call.
         """
         raise NotImplementedError
+
+    def byteorder(self) -> Literal["little", "big"]:
+        """
+        The ABI's native endianness.
+        """
+        return "little"
 
     def pointer_size(self) -> int:
         """

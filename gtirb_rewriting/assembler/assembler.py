@@ -47,6 +47,7 @@ import gtirb_rewriting._auxdata as _auxdata
 import mcasm
 from typing_extensions import Concatenate, ParamSpec, Self, override
 
+from .._auxdata import CFIDirectiveType
 from ..assembly import X86Syntax
 from ..dwarf import cfi
 from ..utils import (
@@ -56,6 +57,7 @@ from ..utils import (
     _is_fallthrough_edge,
     _target_triple,
 )
+from ._create_gtirb import create_cfi_directives as _create_cfi_directives
 from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
 
@@ -816,6 +818,14 @@ class Assembler:
         @property
         def text_section(self) -> Section:
             return next(iter(self.sections.values()))
+
+        def create_cfi_directives(
+            self,
+        ) -> OffsetMapping[List[CFIDirectiveType]]:
+            """
+            Creates the cfiDirectives aux data table for the result.
+            """
+            return _create_cfi_directives(self)
 
         def create_ir(self) -> gtirb.IR:
             """

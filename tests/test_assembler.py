@@ -30,6 +30,7 @@ from unittest.mock import Mock
 import gtirb
 import gtirb_rewriting
 import pytest
+from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_rewriting.assembler.__main__ import main as gtirb_as
 from gtirb_test_helpers import (
     add_data_block,
@@ -1360,9 +1361,17 @@ def test_line_numbers():
 def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
     asm = textwrap.dedent(
         """\
+        .cfi_startproc
+        .cfi_personality 0, personality
+        .cfi_lsda 0, lsda
+        .cfi_return_column 1
         ud2
+        .cfi_undefined 15
+        .cfi_endproc
 
         .data
+        lsda:
+        personality:
         .byte 42
         """
     )
@@ -1414,8 +1423,25 @@ def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
     assert len(text.byte_intervals) == 1
     (text_bi,) = text.byte_intervals
     assert text_bi.contents == b"\x0F\x0B"
+    (text_block,) = text_bi.blocks
 
     data = next(s for s in m.sections if s.name == ".data")
     assert len(data.byte_intervals) == 1
     (data_bi,) = data.byte_intervals
     assert data_bi.contents == b"\x2A"
+
+    (personality_sym,) = m.symbols_named("personality")
+    (lsda_sym,) = m.symbols_named("lsda")
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(text_block, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_lsda", [0], lsda_sym),
+            (".cfi_personality", [0], personality_sym),
+            (".cfi_return_column", [1], NULL_UUID),
+        ],
+        gtirb.Offset(text_block, 2): [
+            (".cfi_undefined", [15], NULL_UUID),
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
