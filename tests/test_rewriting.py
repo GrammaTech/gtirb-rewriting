@@ -25,6 +25,7 @@ import gtirb
 import gtirb_functions
 import gtirb_rewriting
 import pytest
+from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
@@ -220,7 +221,13 @@ def test_inserting_function_and_call():
 
     @gtirb_rewriting.patch_constraints()
     def function_patch(ctx):
-        return "mov $42, %eax; ret"
+        return """
+            .cfi_startproc
+            .cfi_lsda 0, target
+            mov $42, %eax
+            ret
+            .cfi_endproc
+            """
 
     @gtirb_rewriting.patch_constraints()
     def call_patch(ctx):
@@ -250,6 +257,17 @@ def test_inserting_function_and_call():
     ]
     assert len(return_edges) == 1
     assert not isinstance(return_edges[0].target, gtirb.ProxyBlock)
+    source_block = return_edges[0].source
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(source_block, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_lsda", [0], target_sym),
+        ],
+        gtirb.Offset(source_block, 6): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
 
 
 def test_inserting_function_calling_inserted_function():
@@ -288,6 +306,8 @@ def test_inserting_function_calling_inserted_function():
     ]
     assert len(return_edges) == 1
     assert not isinstance(return_edges[0].target, gtirb.ProxyBlock)
+
+    assert m.aux_data["cfiDirectives"].data == {}
 
 
 def test_insert_bytes_offset0():
@@ -916,6 +936,49 @@ def test_insert_byte_directive_as_data_due_to_unreachable_entrypoint():
     assert bi.contents == b"\xC3\x66\x90"
     assert isinstance(new_block, gtirb.DataBlock)
     assert m.aux_data["functionBlocks"].data[func.uuid] == {b}
+
+
+def test_insert_cfi_directives():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    # This mimics:
+    #   func:
+    #   .cfi_startproc
+    #   ret
+    #   .cfi_endproc
+    b = add_code_block(bi, b"\xC3")
+    func = add_function_object(m, "func", b)
+    add_edge(ir.cfg, b, add_proxy_block(m), gtirb.Edge.Type.Return)
+    set_all_blocks_alignment(m, 1)
+
+    m.aux_data["cfiDirectives"].data = {
+        gtirb.Offset(b, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(b, 0, literal_patch("xor %rax, %rax; .cfi_undefined 0"))
+    ctx.apply()
+
+    assert bi.contents == b"\x48\x31\xC0\xC3"
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b, 3): [
+            (".cfi_undefined", [0], NULL_UUID),
+        ],
+        gtirb.Offset(b, 4): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
 
 
 def test_insert_sym_expr_in_data():

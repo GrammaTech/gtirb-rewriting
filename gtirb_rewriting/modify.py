@@ -1024,6 +1024,10 @@ def _modify_block_insert(
     encodings_table = _auxdata.encodings.get_or_insert(module)
     encodings_table.update(text_section.block_types.items())
 
+    # TODO: This should only be done if we're in a CFI procedure?
+    cfi_table = _auxdata_offsetmap.cfi_directives.get_or_insert(module)
+    cfi_table.update(code.create_cfi_directives())
+
     # Introducing new functions would introduce ambiguity and is more hassle
     # than it is worth.
     for attrs in code.elf_symbol_attributes.values():
@@ -1052,6 +1056,9 @@ def _modify_block_insert(
         sym_expr_data[
             gtirb.Offset(bi, block.offset + offset + rel_offset)
         ] = size
+
+    cfi_data = _auxdata.cfi_directives.get_or_insert(module)
+    cfi_data.update(code.create_cfi_directives().items())
 
     for sect in code.sections.values():
         if sect is not code.text_section:

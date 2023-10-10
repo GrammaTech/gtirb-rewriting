@@ -342,6 +342,8 @@ class RewritingContext:
         actual_block: gtirb.ByteBlock,
         actual_offset: int,
         context: InsertionContext,
+        *,
+        implicit_cfi_procedure: bool = True,
     ) -> Optional[Assembler.Result]:
         """
         Invokes a patch at a concrete location and assembles it.
@@ -397,6 +399,7 @@ class RewritingContext:
             self._module,
             temp_symbol_suffix=f"_{self._patch_id}",
             trivially_unreachable=is_trivially_unreachable,
+            implicit_cfi_procedure=implicit_cfi_procedure,
         )
         for snippet in prologue:
             assembler.assemble(snippet.code, snippet.x86_syntax)
@@ -734,6 +737,7 @@ class RewritingContext:
             block,
             0,
             context,
+            implicit_cfi_procedure=False,
         )
         if assembler_result is None:
             return
