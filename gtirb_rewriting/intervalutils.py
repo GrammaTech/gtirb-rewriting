@@ -125,7 +125,7 @@ def split_byte_interval(
 
     # Transfer symbolic expressions and table items to the new intervals.
     symexprs = OffsetMapping()
-    symexprs[interval] = interval.symbolic_expressions
+    symexprs[interval] = dict(interval.symbolic_expressions)
     for table in itertools.chain((symexprs,), tables):
         items = sorted(table.get(interval, {}).items())
         for group, new_interval in zip(groups, intervals):
@@ -283,7 +283,7 @@ def join_byte_intervals(
         # Cache the delta for updating the symbolic expression offsets and the
         # new last block in case we need more padding.
         deltas[interval] = len(destination.contents)
-        symexprs[interval] = interval.symbolic_expressions
+        symexprs[interval] = dict(interval.symbolic_expressions)
         last_block = max(
             interval.blocks, default=last_block, key=lambda b: b.offset
         )
