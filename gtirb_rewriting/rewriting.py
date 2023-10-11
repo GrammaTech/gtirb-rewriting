@@ -28,6 +28,7 @@ import uuid
 import warnings
 from collections import defaultdict
 from typing import (
+    Callable,
     Dict,
     Iterable,
     Iterator,
@@ -43,7 +44,9 @@ from typing import (
 import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
+import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from gtirb_capstone.instructions import GtirbInstructionDecoder
+from intervaltree import IntervalTree
 
 from .abi import ABI
 from .assembler import AsmSyntaxError, Assembler
@@ -183,6 +186,44 @@ class _ModificationStore:
             last_end = offset + modification.scope._replacement_length()
 
         return modifications_and_offsets
+
+
+class _CFIProcedureTracker:
+    """
+    Keeps track of whether or not a given offset is in a CFI procedure.
+    """
+
+    def __init__(
+        self, module: gtirb.Module, sorted_blocks: List[gtirb.ByteBlock]
+    ):
+        self._tree = IntervalTree()
+
+        table = _auxdata_offsetmap.cfi_directives.get(module)
+        if not table:
+            return
+
+        procedure_start = None
+        for idx, block in enumerate(sorted_blocks):
+            if not isinstance(block, gtirb.CodeBlock):
+                continue
+
+            displacement_map = table.get(block)
+            if not displacement_map:
+                continue
+
+            for offset, directives in sorted(displacement_map.items()):
+                for directive, _, _ in directives:
+                    if directive == ".cfi_startproc":
+                        procedure_start = (idx, offset)
+                    elif (
+                        directive == ".cfi_endproc"
+                        and procedure_start is not None
+                    ):
+                        procedure_end = (idx, offset)
+                        self._tree.addi(procedure_start, procedure_end)
+
+    def in_procedure(self, block_idx: int, offset: int) -> bool:
+        return bool(self._tree.at((block_idx, offset)))
 
 
 class RewritingContext:
@@ -577,6 +618,7 @@ class RewritingContext:
         func: Optional[gtirb_functions.Function],
         block: gtirb.ByteBlock,
         next_block: Optional[gtirb.ByteBlock],
+        in_cfi_procedure: Callable[[int], bool],
     ) -> None:
         """
         Applies all of the patches that apply to a single block.
@@ -608,6 +650,10 @@ class RewritingContext:
 
                 if not assembler_result:
                     continue
+
+                if not in_cfi_procedure(offset):
+                    for sect in assembler_result.sections.values():
+                        sect.cfi_procedures.clear()
 
                 actual_block, insert_len = self._insert_assembler_result(
                     modify_cache,
@@ -1044,6 +1090,7 @@ class RewritingContext:
                     modify_cache, func.symbol, func.block, func.patch
                 )
 
+            cfi_tracker = _CFIProcedureTracker(self._module, sorted_blocks)
             for idx, block in enumerate(sorted_blocks):
                 func = None
                 if isinstance(block, gtirb.CodeBlock):
@@ -1069,6 +1116,7 @@ class RewritingContext:
                     func,
                     block,
                     next(iter(next_blocks), None),
+                    lambda offset: cfi_tracker.in_procedure(idx, offset),
                 )
 
         self._clean_up_functions()

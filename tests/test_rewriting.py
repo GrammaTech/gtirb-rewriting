@@ -938,7 +938,7 @@ def test_insert_byte_directive_as_data_due_to_unreachable_entrypoint():
     assert m.aux_data["functionBlocks"].data[func.uuid] == {b}
 
 
-def test_insert_cfi_directives():
+def test_insert_cfi_directives_in_proc():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
@@ -979,6 +979,30 @@ def test_insert_cfi_directives():
             (".cfi_endproc", [], NULL_UUID),
         ],
     }
+
+
+def test_insert_cfi_directives_no_proc():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    # This mimics:
+    #   func:
+    #   ret
+    b = add_code_block(bi, b"\xC3")
+    func = add_function_object(m, "func", b)
+    add_edge(ir.cfg, b, add_proxy_block(m), gtirb.Edge.Type.Return)
+    set_all_blocks_alignment(m, 1)
+
+    m.aux_data["cfiDirectives"].data = {}
+
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.insert_at(b, 0, literal_patch("xor %rax, %rax; .cfi_undefined 0"))
+    ctx.apply()
+
+    assert bi.contents == b"\x48\x31\xC0\xC3"
+    assert m.aux_data["cfiDirectives"].data == {}
 
 
 def test_insert_sym_expr_in_data():

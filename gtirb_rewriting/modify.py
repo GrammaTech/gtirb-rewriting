@@ -1024,7 +1024,6 @@ def _modify_block_insert(
     encodings_table = _auxdata.encodings.get_or_insert(module)
     encodings_table.update(text_section.block_types.items())
 
-    # TODO: This should only be done if we're in a CFI procedure?
     cfi_table = _auxdata_offsetmap.cfi_directives.get_or_insert(module)
     cfi_table.update(code.create_cfi_directives())
 
