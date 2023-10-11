@@ -101,7 +101,7 @@ def test_offset_mapping():
 
     with pytest.raises(ValueError) as excinfo:
         m[e2] = "F"  # type: ignore (intentional)
-    assert "not a dict" in str(excinfo.value)
+    assert "not a MutableMapping" in str(excinfo.value)
 
 
 def test_triples():
