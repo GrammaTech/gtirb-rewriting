@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Dict, List, Tuple
 
 import gtirb
 import gtirb_rewriting._auxdata as auxdata
-from gtirb_rewriting.abi import _ABIS
+from gtirb_rewriting.abi import ABI
 from gtirb_rewriting.utils import OffsetMapping
 
 from .._auxdata import NULL_UUID, CFIDirectiveType
@@ -169,9 +169,7 @@ def create_cfi_directives(
     Creates the cfiDirectives aux data table for an assembler result.
     """
 
-    abi = _ABIS.get((result.target.isa, result.target.file_format))
-    if not abi:
-        raise NotImplementedError("unknown ABI")
+    abi = ABI.get(result.target)
 
     directives = OffsetMapping[List[CFIDirectiveType]]()
 
