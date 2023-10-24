@@ -296,6 +296,12 @@ class Assembler:
                                          issuing an error.
         """
 
+        if ignore_cfi_directives:
+            warnings.warn(
+                "implicit_cfi_procedure is deprecated and ignored",
+                DeprecationWarning,
+            )
+
         if isinstance(target, gtirb.Module):
             target = self.ModuleTarget(target)
 
