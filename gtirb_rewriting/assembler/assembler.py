@@ -823,6 +823,8 @@ class Assembler:
 
         @property
         def text_section(self) -> Section:
+            # The first section is considered the text section, which is true
+            # because mc-asm implicitly starts there.
             return next(iter(self.sections.values()))
 
         def create_cfi_directives(
