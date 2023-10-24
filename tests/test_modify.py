@@ -20,11 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-from uuid import UUID
-
 import gtirb
 import gtirb_rewriting
 import pytest
+from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
@@ -35,8 +34,6 @@ from gtirb_test_helpers import (
     create_test_module,
 )
 from helpers import add_function_object
-
-_NULL_UUID = UUID("00000000-0000-0000-0000-000000000000")
 
 
 def test_return_cache():
@@ -237,11 +234,11 @@ def test_split_block_begin():
     m.aux_data["alignment"].data[b1] = 4
 
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
-        (".cfi_startproc", [], None),
-        (".cfi_personality", [], None),
+        (".cfi_startproc", [], NULL_UUID),
+        (".cfi_personality", [], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 2)] = [
-        (".cfi_endproc", [], None)
+        (".cfi_endproc", [], NULL_UUID)
     ]
 
     modify_cache = gtirb_rewriting.modify._ModifyCache(
@@ -272,11 +269,11 @@ def test_split_block_begin():
 
     assert m.aux_data["cfiDirectives"].data == {
         gtirb.Offset(b1_start, 0): [
-            (".cfi_startproc", [], None),
-            (".cfi_personality", [], None),
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_personality", [], NULL_UUID),
         ],
         gtirb.Offset(b1_end, 2): [
-            (".cfi_endproc", [], None),
+            (".cfi_endproc", [], NULL_UUID),
         ],
     }
 
@@ -403,10 +400,10 @@ def test_split_blocks_proc_begin():
     func = add_function_object(m, "func", b1, {b1})
 
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
-        (".cfi_startproc", [], None),
+        (".cfi_startproc", [], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
-        (".cfi_endproc", [], None),
+        (".cfi_endproc", [], NULL_UUID),
     ]
 
     modify_cache = gtirb_rewriting.modify._ModifyCache(
@@ -424,10 +421,10 @@ def test_split_blocks_proc_begin():
 
     assert m.aux_data["cfiDirectives"].data == {
         gtirb.Offset(split_start, 0): [
-            (".cfi_startproc", [], None),
+            (".cfi_startproc", [], NULL_UUID),
         ],
         gtirb.Offset(split_end, 1): [
-            (".cfi_endproc", [], None),
+            (".cfi_endproc", [], NULL_UUID),
         ],
     }
 
@@ -455,11 +452,11 @@ def test_split_blocks_proc_end():
     func = add_function_object(m, "func", b1, {b1})
 
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
-        (".cfi_startproc", [], None),
+        (".cfi_startproc", [], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
-        (".cfi_undefined", [0], None),
-        (".cfi_endproc", [], None),
+        (".cfi_undefined", [0], NULL_UUID),
+        (".cfi_endproc", [], NULL_UUID),
     ]
 
     modify_cache = gtirb_rewriting.modify._ModifyCache(
@@ -478,13 +475,13 @@ def test_split_blocks_proc_end():
 
     assert m.aux_data["cfiDirectives"].data == {
         gtirb.Offset(split_start, 0): [
-            (".cfi_startproc", [], None),
+            (".cfi_startproc", [], NULL_UUID),
         ],
         gtirb.Offset(split_start, 1): [
-            (".cfi_undefined", [0], None),
+            (".cfi_undefined", [0], NULL_UUID),
         ],
         gtirb.Offset(split_end, 0): [
-            (".cfi_endproc", [], None),
+            (".cfi_endproc", [], NULL_UUID),
         ],
     }
 
@@ -508,13 +505,13 @@ def test_join_blocks_procs_end():
     func = add_function_object(m, "func", b1, {b1, b2})
 
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
-        (".cfi_startproc", [], None),
+        (".cfi_startproc", [], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 0)] = [
-        (".cfi_undefined", [0], None),
+        (".cfi_undefined", [0], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 1)] = [
-        (".cfi_endproc", [], None),
+        (".cfi_endproc", [], NULL_UUID),
     ]
 
     modify_cache = gtirb_rewriting.modify._ModifyCache(
@@ -527,11 +524,11 @@ def test_join_blocks_procs_end():
 
     assert m.aux_data["cfiDirectives"].data == {
         gtirb.Offset(b1, 0): [
-            (".cfi_startproc", [], None),
-            (".cfi_undefined", [0], None),
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_undefined", [0], NULL_UUID),
         ],
         gtirb.Offset(b1, 1): [
-            (".cfi_endproc", [], None),
+            (".cfi_endproc", [], NULL_UUID),
         ],
     }
 
@@ -555,13 +552,13 @@ def test_join_blocks_procs_begin():
     func = add_function_object(m, "func", b1, {b1, b2})
 
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
-        (".cfi_startproc", [], None),
+        (".cfi_startproc", [], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
-        (".cfi_undefined", [0], None),
+        (".cfi_undefined", [0], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 0)] = [
-        (".cfi_endproc", [], None),
+        (".cfi_endproc", [], NULL_UUID),
     ]
 
     modify_cache = gtirb_rewriting.modify._ModifyCache(
@@ -574,11 +571,11 @@ def test_join_blocks_procs_begin():
 
     assert m.aux_data["cfiDirectives"].data == {
         gtirb.Offset(b1, 0): [
-            (".cfi_startproc", [], None),
+            (".cfi_startproc", [], NULL_UUID),
         ],
         gtirb.Offset(b1, 1): [
-            (".cfi_undefined", [0], None),
-            (".cfi_endproc", [], None),
+            (".cfi_undefined", [0], NULL_UUID),
+            (".cfi_endproc", [], NULL_UUID),
         ],
     }
 
@@ -600,13 +597,13 @@ def test_join_blocks_simple():
     m.aux_data["comments"].data[gtirb.Offset(b2, 0)] = "1"
 
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
-        (".cfi_startproc", [], None),
+        (".cfi_startproc", [], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
-        (".cfi_undefined", [0], None),
+        (".cfi_undefined", [0], NULL_UUID),
     ]
     m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 0)] = [
-        (".cfi_undefined", [1], None),
+        (".cfi_undefined", [1], NULL_UUID),
     ]
 
     modify_cache = gtirb_rewriting.modify._ModifyCache(
@@ -628,11 +625,11 @@ def test_join_blocks_simple():
 
     assert m.aux_data["cfiDirectives"].data == {
         gtirb.Offset(b1, 0): [
-            (".cfi_startproc", [], None),
+            (".cfi_startproc", [], NULL_UUID),
         ],
         gtirb.Offset(b1, 1): [
-            (".cfi_undefined", [0], None),
-            (".cfi_undefined", [1], None),
+            (".cfi_undefined", [0], NULL_UUID),
+            (".cfi_undefined", [1], NULL_UUID),
         ],
     }
 
@@ -775,17 +772,17 @@ def test_remove_blocks_simple():
 
     m.aux_data["cfiDirectives"].data = {
         gtirb.Offset(b1, 0): [
-            (".cfi_startproc", [], None),
+            (".cfi_startproc", [], NULL_UUID),
         ],
         gtirb.Offset(b1, 1): [
-            (".cfi_remember_state", [], None),
+            (".cfi_remember_state", [], NULL_UUID),
         ],
         gtirb.Offset(b2, 1): [
-            (".cfi_undef", [0], None),
-            (".cfi_restore_state", [], None),
+            (".cfi_undef", [0], NULL_UUID),
+            (".cfi_restore_state", [], NULL_UUID),
         ],
         gtirb.Offset(b3, 1): [
-            (".cfi_endproc", [], None),
+            (".cfi_endproc", [], NULL_UUID),
         ],
     }
 
@@ -811,16 +808,16 @@ def test_remove_blocks_simple():
 
     assert m.aux_data["cfiDirectives"].data == {
         gtirb.Offset(b1, 0): [
-            (".cfi_startproc", [], None),
+            (".cfi_startproc", [], NULL_UUID),
         ],
         gtirb.Offset(b1, 1): [
-            (".cfi_remember_state", [], None),
+            (".cfi_remember_state", [], NULL_UUID),
         ],
         gtirb.Offset(b3, 0): [
-            (".cfi_restore_state", [], None),
+            (".cfi_restore_state", [], NULL_UUID),
         ],
         gtirb.Offset(b3, 1): [
-            (".cfi_endproc", [], None),
+            (".cfi_endproc", [], NULL_UUID),
         ],
     }
 
