@@ -46,7 +46,7 @@ import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
-from more_itertools import triplewise
+from more_itertools import before_and_after, triplewise
 
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .assembler import Assembler, UnsupportedAssemblyError
@@ -325,23 +325,23 @@ def _split_block(
                 for k, v in displacement_map.items()
                 if k > offset
             }
-            items_at_offset = displacement_map.get(offset)
-            if items_at_offset:
-                keep_items = []
-                move_items = []
+            # For directives at the split offset, we want to put anything
+            # before a .cfi_endproc in the first block and anything after,
+            # including the endproc, into the second block. This allows us to
+            # insert at the end of a function and have the code stay in the
+            # procedure.
+            items_at_offset = displacement_map.get(offset, [])
+            keep, move = before_and_after(
+                lambda directive: directive[0] != ".cfi_endproc",
+                items_at_offset,
+            )
+            keep_list = list(keep)
+            move_list = list(move)
 
-                items_iter = iter(items_at_offset)
-                for item in items_iter:
-                    if item[0] != ".cfi_endproc":
-                        keep_items.append(item)
-                    else:
-                        move_items.append(item)
-                        move_items.extend(items_iter)
-
-                if keep_items:
-                    cfi_data[block][offset] = keep_items
-                if move_items:
-                    cfi_data[new_block][0] = move_items
+            if keep_list:
+                cfi_data[block][offset] = keep_list
+            if move_list:
+                cfi_data[new_block][0] = move_list
 
     return block, new_block, added_fallthrough
 
