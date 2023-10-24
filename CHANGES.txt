@@ -6,7 +6,7 @@
   asssigns the passed dict to the internal storage instead of creating a copy,
   which makes setdefault more intuitive.
 - Added a dwarf submodule to make creating CFI directives easier.
-- Assembler's ignore_cfi_directives parameter is now deprecated and ignored.
+- Assembler's ignore_cfi_directives parameter has been removed.
 
 0.1.2:
 - Updated GTIRB symbolic expression attributes.

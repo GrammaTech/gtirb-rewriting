@@ -267,7 +267,6 @@ class Assembler:
         trivially_unreachable: bool = False,
         allow_undef_symbols: bool = False,
         implicit_cfi_procedure: bool = False,
-        ignore_cfi_directives: bool = False,
         ignore_symver_directives: bool = False,
     ) -> None:
         """
@@ -291,16 +290,9 @@ class Assembler:
                                     set to refer to a proxy block.
         :param implicit_cfi_procedure: Treat the assembly as implicitly being
                                        in a CFI procedure.
-        :param ignore_cfi_directives: Deprecated and ignored.
         :param ignore_symver_directives: Ignore symver directives instead of
                                          issuing an error.
         """
-
-        if ignore_cfi_directives:
-            warnings.warn(
-                "implicit_cfi_procedure is deprecated and ignored",
-                DeprecationWarning,
-            )
 
         if isinstance(target, gtirb.Module):
             target = self.ModuleTarget(target)
