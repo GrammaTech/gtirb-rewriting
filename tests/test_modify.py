@@ -829,6 +829,37 @@ def test_remove_blocks_simple():
     assert m.aux_data["functionBlocks"].data == {func.uuid: {b1, b3}}
 
 
+def test_remove_blocks_invalid():
+    """
+    Test that we reject deleting a block where the CFI directives would be
+    lost.
+    """
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"\x90")
+    b2 = add_code_block(bi, b"\xC3")
+    add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Fallthrough)
+    func = add_function_object(m, "func", b1, {b2})
+
+    m.aux_data["cfiDirectives"].data = {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b2, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    with pytest.raises(gtirb_rewriting.AmbiguousIRError):
+        gtirb_rewriting.modify._remove_block(modify_cache, b2, None)
+
+
 def test_edit_byte_interval_simple():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64

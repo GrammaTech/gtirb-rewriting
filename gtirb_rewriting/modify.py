@@ -61,7 +61,13 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
-class AmbiguousCFGError(RuntimeError):
+class AmbiguousIRError(RuntimeError):
+    """
+    The IR is ambiguous in terms of how it needs to be updated.
+    """
+
+
+class AmbiguousCFGError(AmbiguousIRError):
     pass
 
 
@@ -841,7 +847,7 @@ def _remove_block(
     cfi_table = _auxdata_offsetmap.cfi_directives.get(block.module)
     if cfi_table:
         displacement_map = cfi_table.pop(block, None)
-        if next_block and displacement_map:
+        if displacement_map:
             keep_directives = [
                 directive
                 for _, directives in sorted(displacement_map.items())
@@ -854,10 +860,17 @@ def _remove_block(
                     ".cfi_restore_state",
                 )
             ]
-            next_directives = cfi_table.setdefault(next_block, {}).setdefault(
-                0, []
-            )
-            next_directives[:0] = keep_directives
+
+            if keep_directives:
+                if next_block:
+                    next_directives = cfi_table.setdefault(
+                        next_block, {}
+                    ).setdefault(0, [])
+                    next_directives[:0] = keep_directives
+                else:
+                    raise AmbiguousIRError(
+                        "important CFI directives would be dropped"
+                    )
 
     aux_alignment = _auxdata.alignment.get(block.module)
     if aux_alignment:

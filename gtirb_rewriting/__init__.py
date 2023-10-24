@@ -33,7 +33,7 @@ from .intervalutils import (
     join_byte_intervals,
     split_byte_interval,
 )
-from .modify import AmbiguousCFGError, CFGModifiedError
+from .modify import AmbiguousCFGError, AmbiguousIRError, CFGModifiedError
 from .passes import Pass, PassManager
 from .patch import InsertionContext, Patch, patch_constraints
 from .rewriting import RewritingContext, UnresolvableScopeError
@@ -54,6 +54,7 @@ from .version import __version__
 __all__ = [
     "__version__",
     "AmbiguousCFGError",
+    "AmbiguousIRError",
     "ABI",
     "AllBlocksScope",
     "AllFunctionsScope",
