@@ -22,7 +22,6 @@
 
 import uuid
 from typing import (
-    Any,
     Callable,
     Dict,
     Generic,
@@ -37,25 +36,7 @@ from typing import (
 )
 
 import gtirb
-from typing_extensions import Literal
-
-try:
-    from typing_extensions import get_origin  # type: ignore
-except ImportError:
-    # typing_extensions does not define this on Python 3.6, but we can sort
-    # of make it work in the limited situations we care about.
-    def get_origin(tp: Any) -> Optional[Any]:
-        origin = getattr(tp, "__origin__", None)
-        if origin is Dict:
-            return dict
-        if origin is List:
-            return list
-        if origin is Set:
-            return set
-        if origin is Tuple:
-            return tuple
-        return origin
-
+from typing_extensions import Literal, get_origin
 
 DataT = TypeVar("DataT")
 ContainerT = TypeVar("ContainerT", bound=gtirb.AuxDataContainer)
