@@ -1,6 +1,6 @@
 {
   "include": ["gtirb_rewriting"],
-  "pythonVersion": "3.6",
+  "pythonVersion": "3.7",
   "strictListInference": true,
   "strictDictionaryInference": true,
   "strictSetInference": true,
