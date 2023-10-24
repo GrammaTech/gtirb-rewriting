@@ -508,11 +508,10 @@ def _join_blocks(
     if cfi_table_data:
         displacement_map = cfi_table_data.pop(block2, None)
         if displacement_map:
-            new_displacement_map = cfi_table_data.get(block1, {})
+            new_displacement_map = cfi_table_data.setdefault(block1, {})
             for k, v in displacement_map.items():
                 new_k = block1.size + k
                 new_displacement_map.setdefault(new_k, []).extend(v)
-            cfi_table_data[block1] = new_displacement_map
 
     alignment_data = _auxdata.alignment.get(module)
     if alignment_data:
