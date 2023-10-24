@@ -487,11 +487,10 @@ def test_split_blocks_proc_end():
 
 
 def test_join_blocks_procs_end():
-    ir, m = create_test_module(
-        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
-    )
-    _, bi = add_text_section(m)
-
+    """
+    Test that CFI directives are joined in the correct order when the first
+    block is empty.
+    """
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
@@ -534,11 +533,10 @@ def test_join_blocks_procs_end():
 
 
 def test_join_blocks_procs_begin():
-    ir, m = create_test_module(
-        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
-    )
-    _, bi = add_text_section(m)
-
+    """
+    Test that CFI directives are joined in the correct order when the second
+    block is empty.
+    """
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
