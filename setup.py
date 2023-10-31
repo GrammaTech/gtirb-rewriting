@@ -39,10 +39,11 @@ setuptools.setup(
         "gtirb-capstone >= 1.0.1",
         "gtirb-functions",
         "gtirb >= 1.10.6",
-        "mcasm ~= 0.2.1",
+        "mcasm ~= 0.3.0",
         "more-itertools",
         "entrypoints",
         "typing-extensions ~= 4.0",
+        "leb128 ~= 1.0",
     ],
     entry_points={
         "console_scripts": [

@@ -28,6 +28,7 @@ from typing import (
     Iterator,
     List,
     MutableMapping,
+    MutableSet,
     Optional,
     Sequence,
     Set,
@@ -83,6 +84,9 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         for elem, subdata in self._data.items():
             for disp in subdata:
                 yield gtirb.Offset(elem, disp)
+
+    def node_keys(self) -> Iterator[ElementT]:
+        yield from self._data
 
     @overload
     def __getitem__(self, key: gtirb.Offset) -> T:
@@ -195,6 +199,39 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
 
     def setdefault(self, *args, **kwargs) -> Any:
         return super().setdefault(*args, **kwargs)
+
+    def __repr__(self):
+        return repr(dict(self))
+
+
+class _IdentitySet(MutableSet[T]):
+    """
+    A set that uses object identity instead of __hash__/__eq__.
+    """
+
+    def __init__(self, iterable=()):
+        self._map: Dict[int, T] = {}
+        self |= iterable
+
+    def __len__(self) -> int:
+        return len(self._map)
+
+    def __iter__(self) -> Iterator[T]:
+        yield from self._map.values()
+
+    def __contains__(self, x: T) -> bool:
+        return id(x) in self._map
+
+    def add(self, value: T) -> None:
+        self._map[id(value)] = value
+
+    def discard(self, value: T) -> None:
+        self._map.pop(id(value), None)
+
+    def __repr__(self) -> str:
+        if not self:
+            return "%s()" % (self.__class__.__name__,)
+        return "%s(%r)" % (self.__class__.__name__, list(self))
 
 
 def _target_triple(

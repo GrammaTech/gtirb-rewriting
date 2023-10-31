@@ -25,8 +25,19 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import gtirb
 import more_itertools
+from typing_extensions import Literal, Protocol
 
 from .assembly import Constraints, Register, _AsmSnippet
+
+
+class ABIDescriptor(Protocol):
+    """
+    An object that describes an ABI. This will typically be a GTIRB Module
+    object.
+    """
+
+    file_format: gtirb.Module.FileFormat
+    isa: gtirb.Module.ISA
 
 
 @dataclasses.dataclass
@@ -96,14 +107,14 @@ class ABI:
                 self._register_map[name.lower()] = reg
 
     @classmethod
-    def get(cls, module: gtirb.Module) -> "ABI":
+    def get(cls, format: ABIDescriptor) -> "ABI":
         """
         Gets the appropriate ABI object for a module.
         """
-        result = _ABIS.get((module.isa, module.file_format))
+        result = _ABIS.get((format.isa, format.file_format))
         if result is None:
             raise NotImplementedError(
-                f"Unsupported ISA/format: {module.isa}/{module.file_format}"
+                f"Unsupported ISA/format: {format.isa}/{format.file_format}"
             )
 
         return result
@@ -194,6 +205,12 @@ class ABI:
         the values preserved across the call.
         """
         raise NotImplementedError
+
+    def byteorder(self) -> Literal["little", "big"]:
+        """
+        The ABI's native endianness.
+        """
+        return "little"
 
     def pointer_size(self) -> int:
         """

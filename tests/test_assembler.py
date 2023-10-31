@@ -30,6 +30,7 @@ from unittest.mock import Mock
 import gtirb
 import gtirb_rewriting
 import pytest
+from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_rewriting.assembler.__main__ import main as gtirb_as
 from gtirb_test_helpers import (
     add_data_block,
@@ -76,10 +77,11 @@ def test_empty_label():
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
 
-    assembler = gtirb_rewriting.Assembler(m)
+    assembler = gtirb_rewriting.Assembler(m, implicit_cfi_procedure=True)
     assembler.assemble(
         """
             foo:
+                .cfi_undefined 0
             bar:
                 jmp foo
                 ud2
@@ -104,6 +106,20 @@ def test_empty_label():
             gtirb.Edge.Label(gtirb.Edge.Type.Branch),
         )
     }
+    assert result.text_section.cfi_procedures == [
+        gtirb_rewriting.Assembler.Result.CFIProcedure(
+            is_implicit=True,
+            start_offset=None,
+            end_offset=None,
+            instructions=gtirb_rewriting.OffsetMapping(
+                {
+                    gtirb.Offset(b, 0): [
+                        gtirb_rewriting.dwarf.cfi.InstUndefined(register=0)
+                    ]
+                }
+            ),
+        )
+    ]
 
 
 def test_empty_blocks():
@@ -288,6 +304,42 @@ def test_byte_directive_as_code_due_to_mixing():
     assert text_section.blocks[2].size == 0
 
     assert text_section.data == b"\xEB\x00\x66\x90\xFF\xC0"
+
+
+def test_byte_directive_as_code_due_to_cfi():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64, binary_type=["DYN"]
+    )
+
+    # This gets treated as code because it has a CFI directive
+    assembler = gtirb_rewriting.Assembler(m, implicit_cfi_procedure=True)
+    assembler.assemble(
+        """
+        jmp .L_foo
+        .byte 0x66
+        .cfi_undefined 0
+        .byte 0x90
+        .L_foo:
+        """,
+        gtirb_rewriting.X86Syntax.INTEL,
+    )
+    result = assembler.finalize()
+    text_section = result.text_section
+
+    assert len(text_section.blocks) == 3
+    assert isinstance(text_section.blocks[0], gtirb.CodeBlock)
+    assert text_section.blocks[0].offset == 0
+    assert text_section.blocks[0].size == 2
+
+    assert isinstance(text_section.blocks[1], gtirb.CodeBlock)
+    assert text_section.blocks[1].offset == 2
+    assert text_section.blocks[1].size == 2
+
+    assert isinstance(text_section.blocks[2], gtirb.CodeBlock)
+    assert text_section.blocks[2].offset == 4
+    assert text_section.blocks[2].size == 0
+
+    assert text_section.data == b"\xEB\x00\x66\x90"
 
 
 def test_byte_directive_as_data():
@@ -809,6 +861,7 @@ def test_assembler_errors(handler_behavior: DiagHandlerBehavior):
         m,
         diagnostic_callback=diagnostic_callback,
         allow_undef_symbols=True,
+        implicit_cfi_procedure=True,
     )
 
     assert assembler.assemble("nop")
@@ -877,6 +930,15 @@ def test_assembler_errors(handler_behavior: DiagHandlerBehavior):
                     movl $str1_len, %eax
                 """
             )
+        )
+
+    with expect_error(
+        gtirb_rewriting.UnsupportedAssemblyError,
+        "cannot end an implicit CFI procedure",
+        (1, 1),
+    ):
+        assert not assembler.assemble(
+            ".cfi_endproc", gtirb_rewriting.X86Syntax.INTEL
         )
 
 
@@ -1171,22 +1233,74 @@ def test_string_and_ascii(nul_terminate):
     assert set(data_sect.block_types) == {str_block}
 
 
-def test_ignore_cfi_directives():
+def test_cfi_procedure_implicit():
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
         gtirb.Module.ISA.X64,
     )
 
-    assembler = gtirb_rewriting.Assembler(m, ignore_cfi_directives=True)
-    with pytest.warns(gtirb_rewriting.assembler.IgnoredCFIDirectiveWarning):
-        assembler.assemble(
-            """
-            .cfi_startproc
-            .cfi_endproc
-            """,
-        )
+    assembler = gtirb_rewriting.Assembler(m, implicit_cfi_procedure=True)
 
-    assembler.finalize()
+    assembler.assemble(
+        """
+        nop
+        .cfi_undefined 15
+        """
+    )
+
+    result = assembler.finalize()
+    (b1,) = result.text_section.blocks
+
+    assert result.text_section.cfi_procedures == [
+        gtirb_rewriting.Assembler.Result.CFIProcedure(
+            is_implicit=True,
+            start_offset=None,
+            end_offset=None,
+            instructions=gtirb_rewriting.OffsetMapping(
+                {
+                    gtirb.Offset(b1, 1): [
+                        gtirb_rewriting.dwarf.cfi.InstUndefined(register=15)
+                    ]
+                }
+            ),
+        )
+    ]
+
+
+def test_cfi_procedure_explicit():
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m, implicit_cfi_procedure=False)
+
+    assembler.assemble(
+        """
+        .cfi_startproc
+        nop
+        .cfi_undefined 15
+        .cfi_endproc
+        """
+    )
+
+    result = assembler.finalize()
+    (b1,) = result.text_section.blocks
+
+    assert result.text_section.cfi_procedures == [
+        gtirb_rewriting.Assembler.Result.CFIProcedure(
+            is_implicit=False,
+            start_offset=gtirb.Offset(b1, 0),
+            end_offset=gtirb.Offset(b1, 1),
+            instructions=gtirb_rewriting.OffsetMapping(
+                {
+                    gtirb.Offset(b1, 1): [
+                        gtirb_rewriting.dwarf.cfi.InstUndefined(register=15)
+                    ]
+                }
+            ),
+        )
+    ]
 
 
 @pytest.mark.parametrize("ignore", (True, False))
@@ -1247,9 +1361,17 @@ def test_line_numbers():
 def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
     asm = textwrap.dedent(
         """\
+        .cfi_startproc
+        .cfi_personality 0, personality
+        .cfi_lsda 0, lsda
+        .cfi_return_column 1
         ud2
+        .cfi_undefined 15
+        .cfi_endproc
 
         .data
+        lsda:
+        personality:
         .byte 42
         """
     )
@@ -1301,8 +1423,25 @@ def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
     assert len(text.byte_intervals) == 1
     (text_bi,) = text.byte_intervals
     assert text_bi.contents == b"\x0F\x0B"
+    (text_block,) = text_bi.blocks
 
     data = next(s for s in m.sections if s.name == ".data")
     assert len(data.byte_intervals) == 1
     (data_bi,) = data.byte_intervals
     assert data_bi.contents == b"\x2A"
+
+    (personality_sym,) = m.symbols_named("personality")
+    (lsda_sym,) = m.symbols_named("lsda")
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(text_block, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_lsda", [0], lsda_sym),
+            (".cfi_personality", [0], personality_sym),
+            (".cfi_return_column", [1], NULL_UUID),
+        ],
+        gtirb.Offset(text_block, 2): [
+            (".cfi_undefined", [15], NULL_UUID),
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
