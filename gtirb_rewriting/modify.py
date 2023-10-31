@@ -1024,6 +1024,9 @@ def _modify_block_insert(
     encodings_table = _auxdata.encodings.get_or_insert(module)
     encodings_table.update(text_section.block_types.items())
 
+    cfi_table = _auxdata_offsetmap.cfi_directives.get_or_insert(module)
+    cfi_table.update(code.create_cfi_directives())
+
     # Introducing new functions would introduce ambiguity and is more hassle
     # than it is worth.
     for attrs in code.elf_symbol_attributes.values():
