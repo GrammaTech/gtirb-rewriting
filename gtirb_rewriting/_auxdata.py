@@ -246,6 +246,9 @@ binary_type = define_table(
 
 CFIDirectiveType = Tuple[str, List[int], Union[gtirb.Symbol, uuid.UUID]]
 
+# This must be used instead of None for CFI directives that lack a symbol, due
+# to the encoding type being UUID. Attempting to put None in a CFI directive
+# will cause serialization to fail.
 NULL_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 cfi_directives = define_table(
