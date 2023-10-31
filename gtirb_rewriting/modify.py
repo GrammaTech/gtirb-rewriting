@@ -1056,9 +1056,6 @@ def _modify_block_insert(
             gtirb.Offset(bi, block.offset + offset + rel_offset)
         ] = size
 
-    cfi_data = _auxdata.cfi_directives.get_or_insert(module)
-    cfi_data.update(code.create_cfi_directives().items())
-
     for sect in code.sections.values():
         if sect is not code.text_section:
             _add_other_section_contents(code, sect, module, sym_expr_data)

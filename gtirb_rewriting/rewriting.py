@@ -394,6 +394,8 @@ class RewritingContext:
         :param actual_offset: The actual offset within the block to insert at.
                               May be different than what the context says.
         :param context: The InsertionContext to pass to the patch.
+        :param implicit_cfi_procedure: Should the patch implicitly be in a CFI
+                                       procedure?
         :returns: The result of assembling the patch.
         """
 
