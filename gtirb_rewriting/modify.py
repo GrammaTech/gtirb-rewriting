@@ -337,17 +337,18 @@ def _split_block(
             # insert at the end of a function and have the code stay in the
             # procedure.
             items_at_offset = displacement_map.get(offset, [])
-            keep, move = before_and_after(
-                lambda directive: directive[0] != ".cfi_endproc",
-                items_at_offset,
+            keep, move = map(
+                list,
+                before_and_after(
+                    lambda directive: directive[0] != ".cfi_endproc",
+                    items_at_offset,
+                ),
             )
-            keep_list = list(keep)
-            move_list = list(move)
 
-            if keep_list:
-                cfi_data[block][offset] = keep_list
-            if move_list:
-                cfi_data[new_block][0] = move_list
+            if keep:
+                cfi_data[block][offset] = keep
+            if move:
+                cfi_data[new_block][0] = move
 
     return block, new_block, added_fallthrough
 
