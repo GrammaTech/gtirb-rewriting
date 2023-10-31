@@ -21,8 +21,8 @@
 # endorsement should be inferred.
 
 import abc
-from dataclasses import dataclass, fields
-from typing import ClassVar, List, Optional, Set
+from dataclasses import Field, dataclass, fields
+from typing import ClassVar, List, Optional, Set, Tuple
 
 import leb128
 from typing_extensions import Literal, dataclass_transform, override
@@ -88,7 +88,7 @@ class _SimpleInstruction(Instruction):
                 raise AssertionError("instruction already registered")
             _SimpleInstruction._registered_opcodes.add(opcode)
 
-            if len(fields(cls)) != len(encoding):
+            if len(cls._fields()) != len(encoding):
                 raise AssertionError("wrong number of fields vs encoders")
 
         if directive != ".cfi_escape":
@@ -100,10 +100,14 @@ class _SimpleInstruction(Instruction):
         cls._opcode = opcode
         cls._encoding = encoding
 
+    @classmethod
+    def _fields(cls) -> Tuple[Field]:
+        return fields(cls)  # type: ignore
+
     def _operands(
         self, byteorder: Literal["big", "little"], ptr_size: int
     ) -> List[int]:
-        field_values = [getattr(self, field.name) for field in fields(self)]
+        field_values = [getattr(self, field.name) for field in self._fields()]
         if self._directive != ".cfi_escape":
             return field_values
 

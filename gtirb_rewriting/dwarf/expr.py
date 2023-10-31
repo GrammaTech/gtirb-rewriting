@@ -21,8 +21,8 @@
 # endorsement should be inferred.
 
 import abc
-from dataclasses import dataclass, fields
-from typing import ClassVar, List, Set
+from dataclasses import Field, dataclass, fields
+from typing import ClassVar, List, Set, Tuple
 
 import leb128
 from typing_extensions import Literal, dataclass_transform
@@ -68,17 +68,21 @@ class _BasicOperation(Operation):
             raise AssertionError("instruction already registered")
         _BasicOperation._registered_opcodes.add(opcode)
 
-        if len(fields(cls)) != len(encoding):
+        if len(cls._fields()) != len(encoding):
             raise AssertionError("wrong number of fields vs encoders")
 
         cls._opcode = opcode
         cls._encoding = encoding
 
+    @classmethod
+    def _fields(cls) -> Tuple[Field]:
+        return fields(cls)  # type: ignore
+
     def encode(
         self, byteorder: Literal["big", "little"], ptr_size: int
     ) -> bytes:
         result = self._opcode.to_bytes(1, byteorder)
-        for field, encoder in zip(fields(self), self._encoding):
+        for field, encoder in zip(self._fields(), self._encoding):
             value = getattr(self, field.name)
             result += encoder.encode(value, byteorder, ptr_size)
         return result
