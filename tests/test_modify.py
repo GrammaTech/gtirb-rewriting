@@ -23,6 +23,7 @@
 import gtirb
 import gtirb_rewriting
 import pytest
+from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
@@ -232,6 +233,14 @@ def test_split_block_begin():
 
     m.aux_data["alignment"].data[b1] = 4
 
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
+        (".cfi_startproc", [], NULL_UUID),
+        (".cfi_personality", [], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 2)] = [
+        (".cfi_endproc", [], NULL_UUID)
+    ]
+
     modify_cache = gtirb_rewriting.modify._ModifyCache(
         m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
     )
@@ -257,6 +266,16 @@ def test_split_block_begin():
     )
 
     assert m.aux_data["alignment"].data == {b1_start: 4}
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b1_start, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_personality", [], NULL_UUID),
+        ],
+        gtirb.Offset(b1_end, 2): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
 
 
 def test_split_block_end_with_call():
@@ -359,6 +378,206 @@ def test_split_block_end_with_jump():
     }
 
 
+def test_split_blocks_proc_begin():
+    """
+    Test that splitting a block at the beginning leaves the .cfi_start_proc
+    directive in the first block.
+    """
+
+    # This mimics:
+    #     .cfi_startproc
+    #     ret
+    #     .cfi_endproc
+
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"\xC3")
+
+    add_edge(ir.cfg, b1, add_proxy_block(m), gtirb.EdgeType.Return)
+    func = add_function_object(m, "func", b1, {b1})
+
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
+        (".cfi_startproc", [], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
+        (".cfi_endproc", [], NULL_UUID),
+    ]
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    split_start, split_end, fallthrough = gtirb_rewriting.modify._split_block(
+        modify_cache, b1, 0
+    )
+
+    assert split_start is b1
+    assert split_start.offset == 0
+    assert split_start.size == 0
+    assert split_end.offset == 0
+    assert split_end.size == 1
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(split_start, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(split_end, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+
+def test_split_blocks_proc_end():
+    """
+    Test that splitting a block at the end puts the .cfi_end_proc in the
+    second block.
+    """
+
+    # This mimics:
+    #     .cfi_startproc
+    #     ret
+    #     .cfi_undefined 0
+    #     .cfi_endproc
+
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"\xC3")
+
+    add_edge(ir.cfg, b1, add_proxy_block(m), gtirb.EdgeType.Return)
+    func = add_function_object(m, "func", b1, {b1})
+
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
+        (".cfi_startproc", [], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
+        (".cfi_undefined", [0], NULL_UUID),
+        (".cfi_endproc", [], NULL_UUID),
+    ]
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    split_start, split_end, fallthrough = gtirb_rewriting.modify._split_block(
+        modify_cache, b1, b1.size
+    )
+
+    assert split_start is b1
+    assert split_start.offset == 0
+    assert split_start.size == 1
+    assert split_end.offset == 1
+    assert split_end.size == 0
+    assert fallthrough is None
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(split_start, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(split_start, 1): [
+            (".cfi_undefined", [0], NULL_UUID),
+        ],
+        gtirb.Offset(split_end, 0): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+
+def test_join_blocks_procs_end():
+    """
+    Test that CFI directives are joined in the correct order when the first
+    block is empty.
+    """
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"")
+    b2 = add_code_block(bi, b"\xC3")
+
+    add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Fallthrough)
+    add_edge(ir.cfg, b2, add_proxy_block(m), gtirb.EdgeType.Return)
+    func = add_function_object(m, "func", b1, {b1, b2})
+
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
+        (".cfi_startproc", [], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 0)] = [
+        (".cfi_undefined", [0], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 1)] = [
+        (".cfi_endproc", [], NULL_UUID),
+    ]
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    assert gtirb_rewriting.modify._are_joinable(modify_cache, b1, b2)
+
+    joined_block = gtirb_rewriting.modify._join_blocks(modify_cache, b1, b2)
+    assert joined_block is b1
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_undefined", [0], NULL_UUID),
+        ],
+        gtirb.Offset(b1, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+
+def test_join_blocks_procs_begin():
+    """
+    Test that CFI directives are joined in the correct order when the second
+    block is empty.
+    """
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"\xC3")
+    b2 = add_code_block(bi, b"")
+
+    add_edge(ir.cfg, b1, add_proxy_block(m), gtirb.EdgeType.Return)
+    add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Fallthrough)
+    func = add_function_object(m, "func", b1, {b1, b2})
+
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
+        (".cfi_startproc", [], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
+        (".cfi_undefined", [0], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 0)] = [
+        (".cfi_endproc", [], NULL_UUID),
+    ]
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    assert gtirb_rewriting.modify._are_joinable(modify_cache, b1, b2)
+
+    joined_block = gtirb_rewriting.modify._join_blocks(modify_cache, b1, b2)
+    assert joined_block is b1
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b1, 1): [
+            (".cfi_undefined", [0], NULL_UUID),
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+
 def test_join_blocks_simple():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
@@ -375,6 +594,16 @@ def test_join_blocks_simple():
     m.aux_data["comments"].data[gtirb.Offset(b1, 0)] = "0"
     m.aux_data["comments"].data[gtirb.Offset(b2, 0)] = "1"
 
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 0)] = [
+        (".cfi_startproc", [], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b1, 1)] = [
+        (".cfi_undefined", [0], NULL_UUID),
+    ]
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b2, 0)] = [
+        (".cfi_undefined", [1], NULL_UUID),
+    ]
+
     modify_cache = gtirb_rewriting.modify._ModifyCache(
         m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
     )
@@ -390,6 +619,16 @@ def test_join_blocks_simple():
     assert m.aux_data["comments"].data == {
         gtirb.Offset(b1, 0): "0",
         gtirb.Offset(b1, 1): "1",
+    }
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b1, 1): [
+            (".cfi_undefined", [0], NULL_UUID),
+            (".cfi_undefined", [1], NULL_UUID),
+        ],
     }
 
     assert set(ir.cfg) == {
@@ -529,6 +768,22 @@ def test_remove_blocks_simple():
     m.aux_data["comments"].data[gtirb.Offset(b2, 0)] = "1"
     m.aux_data["comments"].data[gtirb.Offset(b3, 0)] = "2"
 
+    m.aux_data["cfiDirectives"].data = {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b1, 1): [
+            (".cfi_remember_state", [], NULL_UUID),
+        ],
+        gtirb.Offset(b2, 1): [
+            (".cfi_undef", [0], NULL_UUID),
+            (".cfi_restore_state", [], NULL_UUID),
+        ],
+        gtirb.Offset(b3, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
     modify_cache = gtirb_rewriting.modify._ModifyCache(
         m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
     )
@@ -549,12 +804,58 @@ def test_remove_blocks_simple():
         gtirb.Offset(b3, 0): "2",
     }
 
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b1, 1): [
+            (".cfi_remember_state", [], NULL_UUID),
+        ],
+        gtirb.Offset(b3, 0): [
+            (".cfi_restore_state", [], NULL_UUID),
+        ],
+        gtirb.Offset(b3, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
     assert set(ir.cfg) == {
         gtirb.Edge(b1, b3, gtirb.EdgeLabel(gtirb.EdgeType.Fallthrough)),
     }
 
     assert m.aux_data["functionEntries"].data == {func.uuid: {b1}}
     assert m.aux_data["functionBlocks"].data == {func.uuid: {b1, b3}}
+
+
+def test_remove_blocks_invalid():
+    """
+    Test that we reject deleting a block where the CFI directives would be
+    lost.
+    """
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+
+    b1 = add_code_block(bi, b"\x90")
+    b2 = add_code_block(bi, b"\xC3")
+    add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Fallthrough)
+    func = add_function_object(m, "func", b1, {b2})
+
+    m.aux_data["cfiDirectives"].data = {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b2, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+    modify_cache = gtirb_rewriting.modify._ModifyCache(
+        m, [func], gtirb_rewriting.modify._ReturnEdgeCache(ir.cfg)
+    )
+    with pytest.raises(gtirb_rewriting.AmbiguousIRError):
+        gtirb_rewriting.modify._remove_block(modify_cache, b2, None)
 
 
 def test_edit_byte_interval_simple():

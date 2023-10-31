@@ -1069,11 +1069,6 @@ class RewritingContext:
 
         self._clean_up_functions()
 
-        # Remove CFI directives, since we will most likely be invalidating
-        # most (or all) of them.
-        # TODO: can we not do this?
-        _auxdata.cfi_directives.remove(self._module)
-
     def _clean_up_functions(self) -> None:
         """
         Removes functions which no longer have any blocks, which can cause

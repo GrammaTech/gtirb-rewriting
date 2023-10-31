@@ -68,7 +68,6 @@ OFFSETMAP_AUX_DATA_TABLES = cast(
     Tuple[TableDefinition[gtirb.Module, OffsetMapping[Any]], ...],
     (
         comments,
-        cfi_directives,
         padding,
         symbolic_expression_sizes,
     ),

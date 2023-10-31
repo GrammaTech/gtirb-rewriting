@@ -45,7 +45,8 @@ from typing import (
 import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
-from more_itertools import triplewise
+import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
+from more_itertools import before_and_after, triplewise
 
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .assembler import Assembler, UnsupportedAssemblyError
@@ -60,7 +61,13 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
-class AmbiguousCFGError(RuntimeError):
+class AmbiguousIRError(RuntimeError):
+    """
+    The IR is ambiguous in terms of how it needs to be updated.
+    """
+
+
+class AmbiguousCFGError(AmbiguousIRError):
     pass
 
 
@@ -312,6 +319,37 @@ def _split_block(
                     if k >= offset
                 }
 
+    cfi_data = _auxdata_offsetmap.cfi_directives.get(block.module)
+    if cfi_data:
+        displacement_map = cfi_data.get(block)
+        if displacement_map:
+            cfi_data[block] = {
+                k: v for k, v in displacement_map.items() if k < offset
+            }
+            cfi_data[new_block] = {
+                k - offset: v
+                for k, v in displacement_map.items()
+                if k > offset
+            }
+            # For directives at the split offset, we want to put anything
+            # before a .cfi_endproc in the first block and anything after,
+            # including the endproc, into the second block. This allows us to
+            # insert at the end of a function and have the code stay in the
+            # procedure.
+            items_at_offset = displacement_map.get(offset, [])
+            keep, move = map(
+                list,
+                before_and_after(
+                    lambda directive: directive[0] != ".cfi_endproc",
+                    items_at_offset,
+                ),
+            )
+
+            if keep:
+                cfi_data[block][offset] = keep
+            if move:
+                cfi_data[new_block][0] = move
+
     return block, new_block, added_fallthrough
 
 
@@ -472,6 +510,15 @@ def _join_blocks(
                 new_displacement_map.update(
                     {block1.size + k: v for k, v in displacement_map.items()}
                 )
+
+    cfi_table_data = _auxdata_offsetmap.cfi_directives.get(module)
+    if cfi_table_data:
+        displacement_map = cfi_table_data.pop(block2, None)
+        if displacement_map:
+            new_displacement_map = cfi_table_data.setdefault(block1, {})
+            for k, v in displacement_map.items():
+                new_k = block1.size + k
+                new_displacement_map.setdefault(new_k, []).extend(v)
 
     alignment_data = _auxdata.alignment.get(module)
     if alignment_data:
@@ -797,6 +844,34 @@ def _remove_block(
         table = table_def.get(block.module)
         if table is not None and block in table:
             del table[block]
+
+    cfi_table = _auxdata_offsetmap.cfi_directives.get(block.module)
+    if cfi_table:
+        displacement_map = cfi_table.pop(block, None)
+        if displacement_map:
+            keep_directives = [
+                directive
+                for _, directives in sorted(displacement_map.items())
+                for directive in directives
+                if directive[0]
+                in (
+                    ".cfi_startproc",
+                    ".cfi_endproc",
+                    ".cfi_remember_state",
+                    ".cfi_restore_state",
+                )
+            ]
+
+            if keep_directives:
+                if next_block:
+                    next_directives = cfi_table.setdefault(
+                        next_block, {}
+                    ).setdefault(0, [])
+                    next_directives[:0] = keep_directives
+                else:
+                    raise AmbiguousIRError(
+                        "important CFI directives would be dropped"
+                    )
 
     aux_alignment = _auxdata.alignment.get(block.module)
     if aux_alignment:
@@ -1197,7 +1272,7 @@ def _edit_byte_interval(
         if k < offset or k >= offset + length
     }
 
-    # adjust aux data if present
+    # adjust aux data if present (specifically for byte interval keys)
     for table_def in OFFSETMAP_AUX_DATA_TABLES:
         table_data = table_def.get(bi.module)
         if table_data and bi in table_data:
