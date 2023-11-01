@@ -209,7 +209,7 @@ If your patch is intended to be portable across different ABIs, you can use
 ```python
 def get_asm(self, context):
     label = context.temporary_label("my_label")
-    return """
+    return f"""
         jmp {label}
         {label}:
         nop
