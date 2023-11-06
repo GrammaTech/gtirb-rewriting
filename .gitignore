@@ -16,3 +16,6 @@ core.*
 vgcore.*
 htmlcov
 .coverage
+
+tests/e2e
+tests/unwind
