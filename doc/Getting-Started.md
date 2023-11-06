@@ -63,9 +63,6 @@ Specifying the "complete" printing policy is necessary to be able to rewrite
 the code in `_start` (otherwise the pretty-printer will default to skipping it
 and letting the compiler regenerate it).
 
-Note that rewriting of binaries that rely on exception handling tables is not
-currently supported.
-
 
 # Common Tasks & Questions
 
