@@ -141,10 +141,12 @@ def make_tests():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
 def test_e2e(tmpdir, make_tests):
-    # Test that we can instrument GTIRB, reassemble it, and then run the
-    # binary. Our test binary just prints a string and then exits 0. Our
-    # modified binary will print out integers, the original string and then
-    # exit 42.
+    """
+    Test that we can instrument GTIRB, reassemble it, and then run the
+    binary. Our test binary just prints a string and then exits 0. Our
+    modified binary will print out integers, the original string and then
+    exit 42.
+    """
 
     ir = disassemble(tmpdir, TEST_DIR / "e2e")
 
@@ -163,7 +165,9 @@ def test_e2e(tmpdir, make_tests):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
 def test_e2e_unwind(tmpdir, make_tests):
-    # Test that modifying IR doesn't break C++ exception handling.
+    """
+    Test that modifying IR doesn't break C++ exception handling.
+    """
 
     ir = disassemble(tmpdir, TEST_DIR / "unwind")
 
