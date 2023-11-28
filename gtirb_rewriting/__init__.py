@@ -19,6 +19,7 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+from ._modify import AmbiguousCFGError, AmbiguousIRError, CFGModifiedError
 from .abi import ABI, CallingConventionDesc
 from .assembler import (
     Assembler,
@@ -33,7 +34,6 @@ from .intervalutils import (
     join_byte_intervals,
     split_byte_interval,
 )
-from .modify import AmbiguousCFGError, AmbiguousIRError, CFGModifiedError
 from .passes import Pass, PassManager
 from .patch import InsertionContext, Patch, patch_constraints
 from .rewriting import RewritingContext, UnresolvableScopeError

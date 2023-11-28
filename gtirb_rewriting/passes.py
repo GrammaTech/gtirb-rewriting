@@ -26,7 +26,7 @@ import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
 
-from .modify import _make_return_cache
+from ._modify import make_return_cache
 from .rewriting import RewritingContext
 
 
@@ -92,7 +92,7 @@ class PassManager:
         Runs the passes on the GTIRB IR.
         """
 
-        with _make_return_cache(ir):
+        with make_return_cache(ir):
             for mod in ir.modules:
                 has_functions = _auxdata.function_entries.exists(
                     mod
