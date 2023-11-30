@@ -21,13 +21,16 @@
 # endorsement should be inferred.
 import dataclasses
 import logging
+from enum import Enum, auto
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import gtirb
 import more_itertools
 from typing_extensions import Literal, Protocol
 
+from . import _auxdata
 from .assembly import Constraints, Register, _AsmSnippet
+from .utils import _is_elf_pie
 
 
 class ABIDescriptor(Protocol):
@@ -69,6 +72,54 @@ class CallingConventionDesc:
     the function. This space is essentially empty can be used by the called
     function.
     """
+
+
+@dataclasses.dataclass
+class _SymExprAttributeRule:
+    """
+    A rule that describes how to convert symbolic expression attributes when
+    a symbol goes from internal to external, or vice versa.
+    """
+
+    class AccessType(Enum):
+        CONTROL_FLOW = auto()
+        """
+        The access is caused by control flow like a jump or call.
+        """
+
+        CODE_REF = auto()
+        """
+        The access is caused by a data access in code like a load or taking
+        the address.
+        """
+
+        DATA = auto()
+        """
+        The access is caused by a reference in a data block.
+        """
+
+    internal_attrs: Set[gtirb.SymbolicExpression.Attribute]
+    """
+    The attributes for a symbolic expression targeting an internal symbol.
+    """
+
+    external_attrs: Set[gtirb.SymbolicExpression.Attribute]
+    """
+    The attributes for a symbolic expression targetting an external
+    (undefined) symbol.
+    """
+
+    access_types: Set["_SymExprAttributeRule.AccessType"] = dataclasses.field(
+        default_factory=lambda: set(_SymExprAttributeRule.AccessType)
+    )
+    """
+    The access types that this rule applies to.
+    """
+
+    def get_relevant_attrs(
+        self, internal: bool
+    ) -> Set[gtirb.SymbolicExpression.Attribute]:
+        return self.internal_attrs if internal else self.external_attrs
 
 
 @dataclasses.dataclass
@@ -243,6 +294,11 @@ class ABI:
         The prefix used to denote that a label is temporary.
         """
         raise NotImplementedError
+
+    def _sym_expr_rules(
+        self, module: gtirb.Module
+    ) -> Iterable[_SymExprAttributeRule]:
+        return ()
 
 
 class _IA32(ABI):
@@ -529,6 +585,41 @@ class _X86_64_ELF(_X86_64):
     def temporary_label_prefix(self) -> str:
         return ".L"
 
+    def _sym_expr_rules(
+        self, module: gtirb.Module
+    ) -> Iterable[_SymExprAttributeRule]:
+        if _is_elf_pie(
+            module.file_format, _auxdata.binary_type.get_or_insert(module)
+        ):
+            return (
+                _SymExprAttributeRule(
+                    internal_attrs=set(),
+                    external_attrs={
+                        gtirb.SymbolicExpression.Attribute.GOT,
+                        gtirb.SymbolicExpression.Attribute.PCREL,
+                    },
+                    access_types={_SymExprAttributeRule.AccessType.CODE_REF},
+                ),
+                _SymExprAttributeRule(
+                    internal_attrs=set(),
+                    external_attrs={gtirb.SymbolicExpression.Attribute.PLT},
+                    access_types={
+                        _SymExprAttributeRule.AccessType.CONTROL_FLOW,
+                    },
+                ),
+            )
+        else:
+            return (
+                _SymExprAttributeRule(
+                    internal_attrs=set(),
+                    external_attrs={gtirb.SymbolicExpression.Attribute.PLT},
+                    access_types={
+                        _SymExprAttributeRule.AccessType.CONTROL_FLOW,
+                        _SymExprAttributeRule.AccessType.CODE_REF,
+                    },
+                ),
+            )
+
 
 class _ARM64_ELF(ABI):
     def _create_prologue_and_epilogue(
@@ -647,6 +738,30 @@ class _ARM64_ELF(ABI):
 
     def temporary_label_prefix(self) -> str:
         return ".L"
+
+    def _sym_expr_rules(
+        self, module: gtirb.Module
+    ) -> Iterable[_SymExprAttributeRule]:
+        if _is_elf_pie(
+            module.file_format, _auxdata.binary_type.get_or_insert(module)
+        ):
+            return (
+                _SymExprAttributeRule(
+                    internal_attrs={gtirb.SymbolicExpression.Attribute.LO12},
+                    external_attrs={
+                        gtirb.SymbolicExpression.Attribute.LO12,
+                        gtirb.SymbolicExpression.Attribute.GOT,
+                    },
+                    access_types={_SymExprAttributeRule.AccessType.CODE_REF},
+                ),
+                _SymExprAttributeRule(
+                    internal_attrs=set(),
+                    external_attrs={gtirb.SymbolicExpression.Attribute.GOT},
+                    access_types={_SymExprAttributeRule.AccessType.CODE_REF},
+                ),
+            )
+        else:
+            return ()
 
 
 _ABIS: Dict[Tuple[gtirb.Module.ISA, gtirb.Module.FileFormat], ABI] = {

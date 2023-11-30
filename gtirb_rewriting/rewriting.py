@@ -48,7 +48,13 @@ import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 from intervaltree import IntervalTree
 
-from ._modify import ModifyCache, delete, insert, make_return_cache
+from ._modify import (
+    ModifyCache,
+    delete,
+    insert,
+    make_return_cache,
+    retarget_symbols,
+)
 from .abi import ABI
 from .assembler import AsmSyntaxError, Assembler
 from .patch import InsertionContext, Patch
@@ -249,6 +255,7 @@ class RewritingContext:
         self._modifications = _ModificationStore()
         self._modification_id = itertools.count()
         self._function_insertions: List[_FunctionInsertion] = []
+        self._symbol_retargets: Dict[gtirb.Symbol, gtirb.Symbol] = {}
         self._logger = logger
         self._patch_id = 0
         self._expensive_assertions = expensive_assertions
@@ -534,6 +541,28 @@ class RewritingContext:
             new_end,
             len(assembler_result.text_section.data),
         )
+
+    def retarget_symbol_uses(
+        self, old_symbol: gtirb.Symbol, new_symbol: gtirb.Symbol
+    ) -> None:
+        """
+        Updates symbolic expressions that refer to one symbol to refer to
+        another symbol and updates control flow accordingly.
+        """
+
+        if old_symbol.module is not self._module:
+            raise ValueError("old symbol is not part of this module")
+
+        if new_symbol.module is not self._module:
+            raise ValueError("new symbol is not part of this module")
+
+        if old_symbol in self._symbol_retargets:
+            raise ValueError("old symbol has already been retargeted")
+
+        if new_symbol.referent is None:
+            raise ValueError("new symbol must have a referent")
+
+        self._symbol_retargets[old_symbol] = new_symbol
 
     def get_or_insert_extern_symbol(
         self,
@@ -1076,6 +1105,11 @@ class RewritingContext:
             sorted_blocks = sorted(
                 self._module.byte_blocks, key=lambda b: b.address or 0
             )
+
+            if self._symbol_retargets:
+                retarget_symbols(
+                    self._module, self._symbol_retargets, self._decoder
+                )
 
             for func in self._function_insertions:
                 self._insert_function_stub(

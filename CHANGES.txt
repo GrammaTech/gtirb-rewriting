@@ -1,3 +1,8 @@
+0.3.0:
+- Added RewritingContext.retarget_symbol, which allows adjusting code/data
+  references of one symbol to use another synmbol instead. For example, you
+  could redirect all calls to specific internal symbol to a trap function.
+
 0.2.0:
 - CFI directives are now preserved, allowing rewriting of C++ programs with
   exception handling. Additionally, patches can specify CFI directives.
