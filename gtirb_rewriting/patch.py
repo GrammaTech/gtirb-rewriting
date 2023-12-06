@@ -90,7 +90,7 @@ def _unwrap_callable(func):
         if isinstance(func, partial):
             func = func.func
         elif hasattr(func, "__wrapper__"):
-            func = func.__wrapper__
+            func = getattr(func, "__wrapper__")
         else:
             break
 
