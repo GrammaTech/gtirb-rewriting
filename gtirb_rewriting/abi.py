@@ -164,7 +164,7 @@ class ABI:
     def _create_prologue_and_epilogue(
         self,
         constraints: Constraints,
-        registers: _PatchRegisterAllocation,
+        register_use: _PatchRegisterAllocation,
         is_leaf_function: bool,
     ) -> Tuple[Iterable[_AsmSnippet], Iterable[_AsmSnippet], Optional[int]]:
         """

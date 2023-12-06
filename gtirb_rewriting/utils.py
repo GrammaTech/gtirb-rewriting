@@ -219,7 +219,7 @@ class _IdentitySet(MutableSet[T]):
     def __iter__(self) -> Iterator[T]:
         yield from self._map.values()
 
-    def __contains__(self, x: T) -> bool:
+    def __contains__(self, x: object) -> bool:
         return id(x) in self._map
 
     def add(self, value: T) -> None:
