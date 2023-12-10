@@ -20,6 +20,11 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+"""
+Edit a single block's contents.
+"""
+
+
 import itertools
 import logging
 from typing import Iterator, List, MutableMapping, Optional, Set, Union

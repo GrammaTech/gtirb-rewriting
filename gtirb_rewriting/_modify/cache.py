@@ -20,6 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+"""
+Caches to make repeated modifications faster.
+"""
+
 import collections
 import contextlib
 import functools

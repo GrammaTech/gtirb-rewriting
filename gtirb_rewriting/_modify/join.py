@@ -20,6 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+"""
+Join two blocks, if possible.
+"""
+
 import logging
 from typing import NamedTuple, TypeVar
 

@@ -20,6 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+"""
+Utilities for manipulating the function-related aux data tables.
+"""
+
 import uuid
 
 import gtirb

@@ -20,6 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+"""
+Functions for manipulating edges in the CFG.
+"""
+
 import uuid
 from typing import Container
 
