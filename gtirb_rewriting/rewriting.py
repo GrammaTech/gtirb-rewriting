@@ -48,14 +48,9 @@ import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 from intervaltree import IntervalTree
 
+from ._modify import ModifyCache, delete, insert, make_return_cache
 from .abi import ABI
 from .assembler import AsmSyntaxError, Assembler
-from .modify import (
-    _delete,
-    _make_return_cache,
-    _modify_block_insert,
-    _ModifyCache,
-)
 from .patch import InsertionContext, Patch
 from .prepare import prepare_for_rewriting
 from .scopes import Scope, _SpecificLocationScope
@@ -502,7 +497,7 @@ class RewritingContext:
 
     def _insert_assembler_result(
         self,
-        modify_cache: _ModifyCache,
+        modify_cache: ModifyCache,
         block: gtirb.ByteBlock,
         offset: int,
         replacement_length: int,
@@ -526,7 +521,7 @@ class RewritingContext:
         """
 
         with self._log_patch_changes(patch, block, offset):
-            new_end = _modify_block_insert(
+            new_end = insert(
                 modify_cache,
                 block,
                 offset,
@@ -615,7 +610,7 @@ class RewritingContext:
 
     def _apply_modifications(
         self,
-        modify_cache: _ModifyCache,
+        modify_cache: ModifyCache,
         modifications: Sequence[_Modification],
         func: Optional[gtirb_functions.Function],
         block: gtirb.ByteBlock,
@@ -671,7 +666,7 @@ class RewritingContext:
                     insert_len - modification.scope._replacement_length()
                 )
             elif isinstance(modification, _Deletion):
-                actual_block = _delete(
+                actual_block = delete(
                     modify_cache,
                     actual_block,
                     actual_offset,
@@ -684,7 +679,7 @@ class RewritingContext:
 
     def _insert_function_stub(
         self,
-        modify_cache: _ModifyCache,
+        modify_cache: ModifyCache,
         sym: gtirb.Symbol,
         block: gtirb.CodeBlock,
     ) -> None:
@@ -749,7 +744,7 @@ class RewritingContext:
 
     def _apply_function_insertion(
         self,
-        modify_cache: _ModifyCache,
+        modify_cache: ModifyCache,
         sym: gtirb.Symbol,
         block: gtirb.CodeBlock,
         patch: Patch,
@@ -1072,8 +1067,8 @@ class RewritingContext:
 
         with prepare_for_rewriting(
             self._module, self._abi.nop()
-        ), _make_return_cache(self._module.ir) as return_cache:
-            modify_cache = _ModifyCache(
+        ), make_return_cache(self._module.ir) as return_cache:
+            modify_cache = ModifyCache(
                 self._module, self._functions, return_cache
             )
 
