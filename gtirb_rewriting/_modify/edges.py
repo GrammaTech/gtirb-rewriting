@@ -25,9 +25,10 @@ Functions for manipulating edges in the CFG.
 """
 
 import uuid
-from typing import Container
+from typing import Container, Optional, overload
 
 import gtirb
+from typing_extensions import NotRequired, TypedDict, Unpack
 
 from ..utils import (
     _block_fallthrough_targets,
@@ -38,11 +39,35 @@ from ..utils import (
 from .cache import ModifyCache
 
 
+class _EdgeKWArgs(TypedDict):
+    source: NotRequired[gtirb.CfgNode]
+    target: NotRequired[gtirb.CfgNode]
+
+
+@overload
 def update_edge(
     edge: gtirb.Edge,
-    old_cfg: gtirb.CFG,
     new_cfg: gtirb.CFG,
-    **kwargs: gtirb.CfgNode,
+    **kwargs: Unpack[_EdgeKWArgs],
+) -> None:
+    ...
+
+
+@overload
+def update_edge(
+    edge: gtirb.Edge,
+    new_cfg: gtirb.CFG,
+    old_cfg: gtirb.CFG,
+    **kwargs: Unpack[_EdgeKWArgs],
+) -> None:
+    ...
+
+
+def update_edge(
+    edge: gtirb.Edge,
+    new_cfg: gtirb.CFG,
+    old_cfg: Optional[gtirb.CFG] = None,
+    **kwargs: Unpack[_EdgeKWArgs],
 ) -> None:
     """
     Updates properties about an edge.
@@ -51,6 +76,9 @@ def update_edge(
     :param new_cfg: The CFG that the updated edge should be added to.
     :param kwargs: Properties of the edge to update.
     """
+
+    if old_cfg is None:
+        old_cfg = new_cfg
 
     old_cfg.discard(edge)
     new_cfg.add(edge._replace(**kwargs))

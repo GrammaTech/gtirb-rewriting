@@ -156,14 +156,14 @@ def join_blocks(
 
         if not block1.size:
             for in_edge in tuple(block2.incoming_edges):
-                update_edge(in_edge, ir.cfg, ir.cfg, target=block1)
+                update_edge(in_edge, ir.cfg, target=block1)
 
         else:
             for in_edge in tuple(block2.incoming_edges):
                 ir.cfg.discard(in_edge)
 
         for out_edge in tuple(block2.outgoing_edges):
-            update_edge(out_edge, ir.cfg, ir.cfg, source=block1)
+            update_edge(out_edge, ir.cfg, source=block1)
 
         remove_function_block_aux(cache, block2)
 

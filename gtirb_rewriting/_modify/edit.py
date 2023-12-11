@@ -188,7 +188,7 @@ def _remove_block(
     if isinstance(block, gtirb.CodeBlock):
         for edge in set(block.incoming_edges):
             assert isinstance(next_block, gtirb.CfgNode)
-            update_edge(edge, block.ir.cfg, block.ir.cfg, target=next_block)
+            update_edge(edge, block.ir.cfg, target=next_block)
 
         fallthrough_targets = _block_fallthrough_targets(block)
         for edge in set(block.outgoing_edges):

@@ -34,6 +34,7 @@ from .edit import (
     insert,
 )
 from .join import UnjoinableBlocksError, are_joinable, join_blocks
+from .retarget import retarget_symbols
 from .split import split_block
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "CFGModifiedError",
     "ReturnEdgeCache",
     "edit_byte_interval",
+    "retarget_symbols",
 ]

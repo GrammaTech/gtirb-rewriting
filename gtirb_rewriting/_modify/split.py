@@ -85,9 +85,7 @@ def split_block(
             # If we're splitting in the middle of the block, we are going to
             # move all of the edges to the new block.
             for out_edge in tuple(block.outgoing_edges):
-                update_edge(
-                    out_edge, block.ir.cfg, block.ir.cfg, source=new_block
-                )
+                update_edge(out_edge, block.ir.cfg, source=new_block)
             add_fallthrough = True
         else:
             # Otherwise we're splitting at the end of the block and all the
@@ -106,9 +104,7 @@ def split_block(
                         block.ir.cfg,
                     )
                 elif _is_fallthrough_edge(out_edge):
-                    update_edge(
-                        out_edge, block.ir.cfg, block.ir.cfg, source=new_block
-                    )
+                    update_edge(out_edge, block.ir.cfg, source=new_block)
 
         if add_fallthrough:
             added_fallthrough = gtirb.Edge(
