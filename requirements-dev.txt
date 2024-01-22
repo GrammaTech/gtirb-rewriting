@@ -1,4 +1,6 @@
+ddisasm
 flake8
+gtirb-pprinter
 gtirb-test-helpers >= 1.1.0
 isort
 pkginfo
