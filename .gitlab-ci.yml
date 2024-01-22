@@ -53,7 +53,7 @@ test-stable-20:
 test-unstable-20:
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
   variables:
-    EXTRA_PIP_ARGS: --pre --extra-index-url $EXTRA_INDEX_URL
+    EXTRA_PIP_ARGS: --pre --index-url $EXTRA_INDEX_URL
   <<: *test
 
 # This job ensures that:
