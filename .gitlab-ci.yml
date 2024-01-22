@@ -34,7 +34,6 @@ check-format:
 .test-template: &test
   stage: test
   script:
-    - wget -O - https://deb.nodesource.com/setup_current.x | bash - && apt-get install -y nodejs && npm install -g pyright
     - pip3 install --upgrade pip
     - pip3 install -r requirements-dev.txt $EXTRA_PIP_ARGS
     - pip3 install -e . $EXTRA_PIP_ARGS
