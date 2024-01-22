@@ -35,8 +35,7 @@ check-format:
   stage: test
   script:
     - pip3 install --upgrade pip
-    - pip3 install -r requirements-dev.txt $EXTRA_PIP_ARGS
-    - pip3 install -e . $EXTRA_PIP_ARGS
+    - pip3 install -r requirements-dev.txt -e . $EXTRA_PIP_ARGS
     - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --cov-report=term --junitxml=report.xml
     - pyright
   artifacts:
