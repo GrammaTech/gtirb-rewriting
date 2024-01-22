@@ -24,9 +24,6 @@
 # will not be defined and they will cause type checking errors.
 # Therefore, we deactivate type checking in this file.
 
-# pyright: basic,  reportGeneralTypeIssues=false
-
-
 from typing import Dict, Set
 
 import gtirb
