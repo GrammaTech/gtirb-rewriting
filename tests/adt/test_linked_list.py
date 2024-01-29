@@ -43,11 +43,8 @@ def test_linked_list():
     with pytest.raises(ValueError):
         root.insert_node_after(second)
 
-    with pytest.raises(ValueError):
-        root.insert_node_before(second)
-
     third = LinkedListNode(3)
-    second.insert_node_before(third)
+    root.insert_node_after(third)
     assert root.prev is None
     assert root.next is third
     assert root.value == 1

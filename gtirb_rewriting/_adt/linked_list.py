@@ -45,20 +45,6 @@ class LinkedListNode(Generic[ValueT]):
     def prev(self) -> Optional["LinkedListNode[ValueT]"]:
         return self.__prev
 
-    def insert_node_before(self, node: "LinkedListNode[ValueT]") -> None:
-        """
-        Inserts the requested node before self.
-        """
-        if node.__next or node.__prev:
-            raise ValueError("node is already part of a linked list")
-
-        if self.__prev:
-            self.__prev.__next = node
-            node.__prev = self.__prev
-
-        node.__next = self
-        self.__prev = node
-
     def insert_node_after(self, node: "LinkedListNode[ValueT]") -> None:
         """
         Inserts the requested node after self.

@@ -30,12 +30,13 @@ import functools
 import logging
 import operator
 import uuid
-from typing import Dict, Iterable, Iterator, Set
+from typing import Dict, Iterable, Iterator, Optional, Set, Tuple
 
 import gtirb
 import gtirb_functions
 import gtirb_rewriting._auxdata as _auxdata
 
+from .._adt import BlockOrdering
 from ..utils import _is_return_edge
 
 logger = logging.getLogger(__name__)
@@ -171,6 +172,27 @@ class ModifyCache:
             for func in functions
             for block in func.get_all_blocks()
         }
+
+        for block in module.byte_blocks:
+            if block.address is None:
+                raise ValueError("all blocks must have addresses")
+
+        self.block_ordering = {
+            sect: BlockOrdering(
+                sorted(sect.byte_blocks, key=lambda b: b.address or 0)
+            )
+            for sect in module.sections
+        }
+
+    def adjacent_blocks(
+        self, block: gtirb.ByteBlock
+    ) -> Tuple[Optional[gtirb.ByteBlock], Optional[gtirb.ByteBlock]]:
+        """
+        Get the blocks that come before and after the requested block in the
+        block's section.
+        """
+        assert block.section
+        return self.block_ordering[block.section].adjacent_blocks(block)
 
     def in_same_function(
         self, block1: gtirb.CodeBlock, block2: gtirb.CodeBlock

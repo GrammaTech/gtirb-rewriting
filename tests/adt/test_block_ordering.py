@@ -25,36 +25,36 @@ import pytest
 from gtirb_rewriting._adt import BlockOrdering
 
 
-def test_block_ordering():
+def test_adjacent_blocksing():
     block1 = gtirb.ByteBlock()
     block2 = gtirb.ByteBlock()
     block3 = gtirb.ByteBlock()
     block4 = gtirb.ByteBlock()
 
     ordering = BlockOrdering((block1, block2))
-    assert ordering.block_order(block1) == (None, block2)
-    assert ordering.block_order(block2) == (block1, None)
+    assert ordering.adjacent_blocks(block1) == (None, block2)
+    assert ordering.adjacent_blocks(block2) == (block1, None)
 
     ordering.insert_blocks_after(block1, (block3, block4))
-    assert ordering.block_order(block1) == (None, block3)
-    assert ordering.block_order(block3) == (block1, block4)
-    assert ordering.block_order(block4) == (block3, block2)
-    assert ordering.block_order(block2) == (block4, None)
+    assert ordering.adjacent_blocks(block1) == (None, block3)
+    assert ordering.adjacent_blocks(block3) == (block1, block4)
+    assert ordering.adjacent_blocks(block4) == (block3, block2)
+    assert ordering.adjacent_blocks(block2) == (block4, None)
 
     ordering.remove_block(block3)
-    assert ordering.block_order(block1) == (None, block4)
-    assert ordering.block_order(block4) == (block1, block2)
-    assert ordering.block_order(block2) == (block4, None)
+    assert ordering.adjacent_blocks(block1) == (None, block4)
+    assert ordering.adjacent_blocks(block4) == (block1, block2)
+    assert ordering.adjacent_blocks(block2) == (block4, None)
 
     ordering.remove_block(block4)
-    assert ordering.block_order(block1) == (None, block2)
-    assert ordering.block_order(block2) == (block1, None)
+    assert ordering.adjacent_blocks(block1) == (None, block2)
+    assert ordering.adjacent_blocks(block2) == (block1, None)
 
     ordering.add_detached_blocks((block3, block4))
-    assert ordering.block_order(block1) == (None, block2)
-    assert ordering.block_order(block2) == (block1, None)
-    assert ordering.block_order(block3) == (None, block4)
-    assert ordering.block_order(block4) == (block3, None)
+    assert ordering.adjacent_blocks(block1) == (None, block2)
+    assert ordering.adjacent_blocks(block2) == (block1, None)
+    assert ordering.adjacent_blocks(block3) == (None, block4)
+    assert ordering.adjacent_blocks(block4) == (block3, None)
 
     with pytest.raises(ValueError):
         ordering.insert_blocks_after(block1, (block2, block3))

@@ -39,7 +39,7 @@ class BlockOrdering:
         ] = {}
         self.add_detached_blocks(blocks)
 
-    def block_order(
+    def adjacent_blocks(
         self, block: gtirb.ByteBlock
     ) -> Tuple[Optional[gtirb.ByteBlock], Optional[gtirb.ByteBlock]]:
         """

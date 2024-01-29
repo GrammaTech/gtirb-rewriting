@@ -845,7 +845,7 @@ def test_assembler_errors(handler_behavior: DiagHandlerBehavior):
         gtirb.Module.FileFormat.ELF,
         gtirb.Module.ISA.X64,
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
     add_symbol(m, "blah", add_proxy_block(m))
     add_symbol(m, "data", add_data_block(bi, b"\xFF"))
 

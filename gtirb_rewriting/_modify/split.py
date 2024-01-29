@@ -63,7 +63,9 @@ def split_block(
     """
 
     assert 0 <= offset <= block.size
-    assert block.module and block.ir, "target block must be in a module"
+    assert (
+        block.module and block.ir and block.section
+    ), "target block must be in a module"
 
     end_split = offset == block.size
 
@@ -162,5 +164,9 @@ def split_block(
                 cfi_data[block][offset] = keep
             if move:
                 cfi_data[new_block][0] = move
+
+    cache.block_ordering[block.section].insert_blocks_after(
+        block, (new_block,)
+    )
 
     return block, new_block, added_fallthrough

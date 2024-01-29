@@ -20,6 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+"""
+Assorted Data Types for gtirb-rewriting's use.
+"""
+
 from .block_ordering import BlockOrdering
 from .identity_set import IdentitySet
 from .linked_list import LinkedListNode

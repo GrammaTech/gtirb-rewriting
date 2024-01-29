@@ -25,14 +25,13 @@ Edit a single block's contents.
 """
 
 
-import itertools
 import logging
-from typing import Iterator, List, MutableMapping, Optional, Set, Union
+from typing import List, MutableMapping, Optional, Set
 
 import gtirb
 import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
-from more_itertools import triplewise
+from more_itertools import pairwise
 
 from .._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from ..assembler import Assembler, UnsupportedAssemblyError
@@ -154,15 +153,23 @@ def _update_patch_return_edges_to_match(
 def _remove_block(
     cache: ModifyCache,
     block: gtirb.ByteBlock,
-    next_block: Union[gtirb.ByteBlock, gtirb.ProxyBlock, None],
+    retarget_to_proxy: bool = False,
 ) -> None:
     """
     Deletes a block and retargets any symbols or edges pointing at it to be
     to another block. This does not modify the byte interval; use
     _edit_byte_interval for that.
+
+    If retarget_to_proxy is specified, a newly created proxy block will be the
+    target of any symbols and edges instead of the next block.
     """
 
-    assert block.module and block.ir
+    assert block.section and block.module and block.ir
+
+    if not retarget_to_proxy:
+        _, next_block = cache.adjacent_blocks(block)
+    else:
+        next_block = gtirb.ProxyBlock(module=block.module)
 
     if next_block is None and (
         any(block.references)
@@ -252,6 +259,7 @@ def _remove_block(
     if aux_alignment:
         aux_alignment.pop(block, None)
 
+    cache.block_ordering[block.section].remove_block(block)
     block.byte_interval = None
 
 
@@ -260,8 +268,8 @@ def delete(
     block: gtirb.ByteBlock,
     offset: int,
     length: int,
-    next_block: Union[gtirb.ByteBlock, gtirb.ProxyBlock, None],
-) -> Union[gtirb.ByteBlock, gtirb.ProxyBlock, None]:
+    retarget_to_proxy: bool = False,
+) -> Optional[gtirb.ByteBlock]:
     """
     Deletes code from a block, potentially deleting the whole block.
     """
@@ -282,14 +290,16 @@ def delete(
         start, end, _ = split_block(cache, block, offset)
         mid, end, _ = split_block(cache, end, length)
 
-        _remove_block(cache, mid, end)
+        _remove_block(cache, mid)
         edit_byte_interval(bi, start.offset + offset, length, b"", {start})
-        return _cleanup_modified_blocks(cache, start, [], end, next_block)
+        return _cleanup_modified_blocks(cache, start, [], end)
 
     else:
-        _remove_block(cache, block, next_block)
+        _remove_block(cache, block, retarget_to_proxy=retarget_to_proxy)
         edit_byte_interval(bi, block.offset + offset, length, b"")
-        return next_block
+        # There is no block for subsequent insertions to be placed at, so just
+        # return None.
+        return None
 
 
 def insert(
@@ -298,7 +308,6 @@ def insert(
     offset: int,
     replacement_length: int,
     code: Assembler.Result,
-    next_block: Optional[gtirb.ByteBlock],
 ) -> gtirb.ByteBlock:
     """
     Insert bytes into a block and adjusts the IR as needed.
@@ -317,7 +326,7 @@ def insert(
     assert 0 <= offset <= block.size
     assert 0 <= offset + replacement_length <= block.size
     assert replacement_length >= 0
-    assert block.byte_interval and block.module and block.ir
+    assert block.byte_interval and block.section and block.module and block.ir
 
     text_section = code.text_section
     assert text_section.data
@@ -355,7 +364,7 @@ def insert(
         mid_block, end_block, _ = split_block(
             cache, end_block, replacement_length
         )
-        _remove_block(cache, mid_block, end_block)
+        _remove_block(cache, mid_block)
 
     # Stitch in the new blocks to the CFG
     if added_fallthrough:
@@ -388,6 +397,9 @@ def insert(
     for rel_offset, expr in text_section.symbolic_expressions.items():
         bi.symbolic_expressions[block.offset + offset + rel_offset] = expr
 
+    cache.block_ordering[block.section].insert_blocks_after(
+        block, text_section.blocks
+    )
     bi.blocks.update(text_section.blocks)
     cfg.update(code.cfg)
     module.symbols.update(code.symbols)
@@ -442,7 +454,6 @@ def insert(
         block,
         text_section.blocks,
         end_block,
-        next_block,
     )
 
 
@@ -451,7 +462,6 @@ def _cleanup_modified_blocks(
     start_block: gtirb.ByteBlock,
     patch_blocks: List[gtirb.ByteBlock],
     end_block: gtirb.ByteBlock,
-    next_block: Union[gtirb.ByteBlock, gtirb.ProxyBlock, None],
 ) -> gtirb.ByteBlock:
     """
     Cleans up any zero-sized blocks that might have been generated during
@@ -461,17 +471,10 @@ def _cleanup_modified_blocks(
     blocks = [start_block, *patch_blocks, end_block]
     assert any(b.size for b in blocks), "need at least one block with content"
 
-    def iter_blocks() -> (
-        Iterator[Union[gtirb.ByteBlock, gtirb.ProxyBlock, None]]
-    ):
-        return itertools.chain(blocks, (next_block,))
-
     # Clean up blocks until we reach a fixed point where there's no further
     # changes to be made.
     while True:
-        for (_, pred), (i, block), (_, succ) in triplewise(
-            enumerate(iter_blocks())
-        ):
+        for (_, pred), (i, block) in pairwise(enumerate(blocks)):
             assert isinstance(pred, gtirb.ByteBlock)
             assert isinstance(block, gtirb.ByteBlock)
 
@@ -483,7 +486,7 @@ def _cleanup_modified_blocks(
                 pass
 
             if not block.size:
-                _remove_block(cache, block, succ)
+                _remove_block(cache, block)
                 del blocks[i]
                 break
         else:
@@ -495,7 +498,7 @@ def _cleanup_modified_blocks(
         to_remove = blocks[0]
         del blocks[0]
 
-        _remove_block(cache, to_remove, next(iter_blocks()))
+        _remove_block(cache, to_remove)
 
     # It should be impossible that we leave behind a zero-sized block, but
     # it's a very important property of this function -- assert it.
