@@ -20,8 +20,22 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-from .identity_set import IdentitySet
-from .linked_list import LinkedListNode
-from .offset_mapping import OffsetMapping
+import gtirb_rewriting._adt
 
-__all__ = ["IdentitySet", "LinkedListNode", "OffsetMapping"]
+
+def test_identity_set():
+    x1 = {}
+    x2 = {}
+    x3 = {}
+    s = gtirb_rewriting._adt.IdentitySet[dict]()
+    s.add(x1)
+    s.add(x2)
+    assert len(s) == 2
+    assert x1 in s
+    assert x2 in s
+    assert x3 not in s
+    s.remove(x2)
+    assert len(s) == 1
+    assert x1 in s
+    assert x2 not in s
+    assert x3 not in s

@@ -26,8 +26,8 @@ import gtirb
 import gtirb_rewriting._auxdata as _auxdata
 from typing_extensions import get_args
 
+from ._adt import OffsetMapping
 from ._auxdata import ContainerT, DataT, TableDefinition
-from .utils import OffsetMapping
 
 
 def _make_offsetmap_table(

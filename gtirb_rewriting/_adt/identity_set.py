@@ -20,8 +20,36 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-from .identity_set import IdentitySet
-from .linked_list import LinkedListNode
-from .offset_mapping import OffsetMapping
+from typing import Dict, Iterator, MutableSet, TypeVar
 
-__all__ = ["IdentitySet", "LinkedListNode", "OffsetMapping"]
+T = TypeVar("T")
+
+
+class IdentitySet(MutableSet[T]):
+    """
+    A set that uses object identity instead of __hash__/__eq__.
+    """
+
+    def __init__(self, iterable=()):
+        self._map: Dict[int, T] = {}
+        self |= iterable
+
+    def __len__(self) -> int:
+        return len(self._map)
+
+    def __iter__(self) -> Iterator[T]:
+        yield from self._map.values()
+
+    def __contains__(self, x: object) -> bool:
+        return id(x) in self._map
+
+    def add(self, value: T) -> None:
+        self._map[id(value)] = value
+
+    def discard(self, value: T) -> None:
+        self._map.pop(id(value), None)
+
+    def __repr__(self) -> str:
+        if not self:
+            return "%s()" % (self.__class__.__name__,)
+        return "%s(%r)" % (self.__class__.__name__, list(self))
