@@ -20,8 +20,9 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+from .block_ordering import BlockOrdering
 from .identity_set import IdentitySet
 from .linked_list import LinkedListNode
 from .offset_mapping import OffsetMapping
 
-__all__ = ["IdentitySet", "LinkedListNode", "OffsetMapping"]
+__all__ = ["BlockOrdering", "IdentitySet", "LinkedListNode", "OffsetMapping"]
