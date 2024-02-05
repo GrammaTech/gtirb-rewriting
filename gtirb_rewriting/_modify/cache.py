@@ -30,7 +30,7 @@ import functools
 import logging
 import operator
 import uuid
-from typing import Dict, Iterable, Iterator, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, Optional, Set, Tuple, cast
 
 import gtirb
 import gtirb_functions
@@ -179,7 +179,7 @@ class ModifyCache:
 
         self.block_ordering = {
             sect: BlockOrdering(
-                sorted(sect.byte_blocks, key=lambda b: b.address or 0)
+                sorted(sect.byte_blocks, key=lambda b: cast(int, b.address))
             )
             for sect in module.sections
         }
