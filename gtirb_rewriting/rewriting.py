@@ -53,7 +53,7 @@ from ._modify import (
     delete,
     insert,
     make_return_cache,
-    retarget_symbols,
+    retarget_symbol_uses,
 )
 from .abi import ABI
 from .assembler import AsmSyntaxError, Assembler
@@ -1069,7 +1069,7 @@ class RewritingContext:
             )
 
             if self._symbol_retargets:
-                retarget_symbols(
+                retarget_symbol_uses(
                     self._module, self._symbol_retargets, self._decoder
                 )
 

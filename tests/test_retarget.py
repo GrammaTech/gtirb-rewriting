@@ -24,7 +24,8 @@ import gtirb
 import pytest
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 from gtirb_rewriting import RewritingContext
-from gtirb_rewriting._modify import retarget_symbols
+from gtirb_rewriting._auxdata import NULL_UUID
+from gtirb_rewriting._modify import retarget_symbol_uses
 from gtirb_test_helpers import (
     add_code_block,
     add_edge,
@@ -83,7 +84,7 @@ def test_retarget_intern_symbol_to_extern_symbol(use_rwc: bool):
         ctx.retarget_symbol_uses(local_func_sym, extern_sym)
         ctx.apply()
     else:
-        retarget_symbols(
+        retarget_symbol_uses(
             m, {local_func_sym: extern_sym}, GtirbInstructionDecoder(m.isa)
         )
 
@@ -155,7 +156,7 @@ def test_retarget_extern_symbol_to_intern_symbol(use_rwc: bool):
         ctx.retarget_symbol_uses(extern_func_sym, local_func_sym)
         ctx.apply()
     else:
-        retarget_symbols(
+        retarget_symbol_uses(
             m,
             {extern_func_sym: local_func_sym},
             GtirbInstructionDecoder(m.isa),
@@ -170,4 +171,51 @@ def test_retarget_extern_symbol_to_intern_symbol(use_rwc: bool):
     assert dict(bi.symbolic_expressions) == {
         4: gtirb.SymAddrConst(0, local_func_sym),
         9: gtirb.SymAddrConst(0, local_func_sym),
+    }
+
+
+def test_retarget_updates_cfi_directives():
+    # This mimics:
+    # .cfi_startproc
+    # .cfi_personality 0, __gxx_personality_v0
+    # ret
+    # .cfi_endproc
+    #
+
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    gcc_personality = add_symbol(m, "__gxx_personality_v0", add_proxy_block(m))
+    custom_personality = add_symbol(
+        m, "__custom_personality", add_proxy_block(m)
+    )
+
+    b1 = add_code_block(bi, b"\x90")
+
+    m.aux_data["cfiDirectives"].data = {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_personality", [0], gcc_personality),
+        ],
+        gtirb.Offset(b1, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
+
+    retarget_symbol_uses(
+        m,
+        {gcc_personality: custom_personality},
+        GtirbInstructionDecoder(m.isa),
+    )
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+            (".cfi_personality", [0], custom_personality),
+        ],
+        gtirb.Offset(b1, 1): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
     }
