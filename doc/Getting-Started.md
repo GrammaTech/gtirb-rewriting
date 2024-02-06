@@ -242,6 +242,8 @@ Deleting whole functions can be done using the `delete_function` function.
 Any references to the deleted blocks, e.g. symbols or control flow, will
 be retargetted to reference a proxy block.
 
+For more information, see [the detailed deletion documentation](Deletion.md).
+
 ## Inserting data with patches
 
 Patches can add data to non-text sections by switching section with the normal

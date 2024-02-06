@@ -1023,17 +1023,15 @@ class RewritingContext:
         """
         Deletes part or all of a block. If deleting a whole block, labels and
         control flow referring to the deleted block will be changed to refer
-        to the 'next' block.
-
-        The next block is calculated from a combination of the CFG and block
-        addresses. If the block has an outgoing fallthrough edge, the edge's
-        target is used. Otherwise the code block with the next address after
-        the end of this block is used. If no block can be found, an exception
-        is raised.
+        to the 'next' block, which is the subsequent block in the section by
+        address.
 
         Alternatively, specifying retarget_to_proxy when deleting a whole
-        block will make the 'next' block just be a proxy block. Specifying
-        retarget_to_proxy in other situations will raise a ValueError.
+        block will attach the block's symbols to a newly created proxy block
+        and redirect the incoming control flow to the proxy.
+
+        Specifying retarget_to_proxy in other situations will raise a
+        ValueError.
         """
 
         self._validate_offset_and_length(block, offset, length)
@@ -1106,27 +1104,3 @@ class RewritingContext:
                     block,
                     lambda offset: cfi_tracker.in_procedure(idx, offset),
                 )
-
-        self._clean_up_functions()
-
-    def _clean_up_functions(self) -> None:
-        """
-        Removes functions which no longer have any blocks, which can cause
-        gtirb-pprinter to print an empty assembly file.
-        """
-
-        function_blocks = _auxdata.function_blocks.get_or_insert(self._module)
-        function_entries = _auxdata.function_entries.get_or_insert(
-            self._module
-        )
-        function_names = _auxdata.function_names.get_or_insert(self._module)
-
-        to_remove = [
-            func_uuid
-            for func_uuid, blocks in function_blocks.items()
-            if not blocks
-        ]
-        for func_uuid in to_remove:
-            function_blocks.pop(func_uuid, None)
-            function_entries.pop(func_uuid, None)
-            function_names.pop(func_uuid, None)

@@ -33,11 +33,10 @@ class BlockOrdering:
     block's predecessor and successor.
     """
 
-    def __init__(self, blocks: Iterable[gtirb.ByteBlock]):
+    def __init__(self):
         self.__order: Dict[
             gtirb.ByteBlock, LinkedListNode[gtirb.ByteBlock]
         ] = {}
-        self.add_detached_blocks(blocks)
 
     def adjacent_blocks(
         self, block: gtirb.ByteBlock

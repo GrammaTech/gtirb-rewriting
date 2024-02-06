@@ -36,21 +36,16 @@ from more_itertools import pairwise
 from .._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from ..assembler import Assembler, UnsupportedAssemblyError
 from ..utils import (
-    _block_fallthrough_targets,
     _get_function_blocks,
     _is_call_edge,
     _is_fallthrough_edge,
     _is_return_edge,
 )
 from .cache import ModifyCache
-from .edges import (
-    add_return_edges_to_callee,
-    remove_return_edges_from_callee,
-    update_edge,
-    update_fallthrough_target,
-)
+from .edges import add_return_edges_to_callee, update_fallthrough_target
 from .functions import add_function_block_aux
 from .join import UnjoinableBlocksError, join_blocks
+from .remove import remove_block
 from .split import split_block
 
 
@@ -150,119 +145,6 @@ def _update_patch_return_edges_to_match(
             )
 
 
-def _remove_block(
-    cache: ModifyCache,
-    block: gtirb.ByteBlock,
-    retarget_to_proxy: bool = False,
-) -> None:
-    """
-    Deletes a block and retargets any symbols or edges pointing at it to be
-    to another block. This does not modify the byte interval; use
-    _edit_byte_interval for that.
-
-    If retarget_to_proxy is specified, a newly created proxy block will be the
-    target of any symbols and edges instead of the next block.
-    """
-
-    assert block.section and block.module and block.ir
-
-    if not retarget_to_proxy:
-        _, next_block = cache.adjacent_blocks(block)
-    else:
-        next_block = gtirb.ProxyBlock(module=block.module)
-
-    if next_block is None and (
-        any(block.references)
-        or (isinstance(block, gtirb.CodeBlock) and any(block.incoming_edges))
-    ):
-        raise AmbiguousCFGError(
-            "removing a block without knowing how to update control flow"
-        )
-
-    if (
-        isinstance(block, gtirb.CodeBlock)
-        and any(block.incoming_edges)
-        and not isinstance(next_block, gtirb.CfgNode)
-    ):
-        raise AmbiguousCFGError(
-            "removing a block would cause control to flow into data"
-        )
-
-    for sym in set(block.references):
-        sym.referent = next_block
-        sym.at_end = False
-
-    if isinstance(block, gtirb.CodeBlock):
-        for edge in set(block.incoming_edges):
-            assert isinstance(next_block, gtirb.CfgNode)
-            update_edge(edge, block.ir.cfg, target=next_block)
-
-        fallthrough_targets = _block_fallthrough_targets(block)
-        for edge in set(block.outgoing_edges):
-            if _is_call_edge(edge):
-                remove_return_edges_from_callee(
-                    cache, edge, fallthrough_targets, block.ir.cfg
-                )
-            block.ir.cfg.discard(edge)
-
-        function_uuid = cache.functions_by_block.get(block, None)
-        if function_uuid:
-            # If it was previously a function entry block, the next block gets
-            # promoted into that role.
-            aux_function_entries = _auxdata.function_entries.get(block.module)
-            if (
-                aux_function_entries
-                and block in aux_function_entries[function_uuid]
-            ):
-                if isinstance(next_block, gtirb.CodeBlock):
-                    aux_function_entries[function_uuid].add(next_block)
-                aux_function_entries[function_uuid].discard(block)
-
-            aux_function_blocks = _auxdata.function_blocks.get(block.module)
-            if aux_function_blocks:
-                aux_function_blocks[function_uuid].discard(block)
-
-    for table_def in OFFSETMAP_AUX_DATA_TABLES:
-        table = table_def.get(block.module)
-        if table is not None and block in table:
-            del table[block]
-
-    cfi_table = _auxdata_offsetmap.cfi_directives.get(block.module)
-    if cfi_table:
-        displacement_map = cfi_table.pop(block, None)
-        if displacement_map:
-            keep_directives = [
-                directive
-                for _, directives in sorted(displacement_map.items())
-                for directive in directives
-                if directive[0]
-                in (
-                    ".cfi_startproc",
-                    ".cfi_endproc",
-                    ".cfi_remember_state",
-                    ".cfi_restore_state",
-                )
-            ]
-
-            if keep_directives:
-                if next_block:
-                    next_directives = cfi_table.setdefault(
-                        next_block, {}
-                    ).setdefault(0, [])
-                    next_directives[:0] = keep_directives
-                else:
-                    raise AmbiguousIRError(
-                        "important CFI directives would be dropped"
-                    )
-
-    aux_alignment = _auxdata.alignment.get(block.module)
-    if aux_alignment:
-        aux_alignment.pop(block, None)
-
-    cache.block_ordering[block.section].remove_block(block)
-    block.byte_interval = None
-
-
 def delete(
     cache: ModifyCache,
     block: gtirb.ByteBlock,
@@ -290,13 +172,28 @@ def delete(
         start, end, _ = split_block(cache, block, offset)
         mid, end, _ = split_block(cache, end, length)
 
-        _remove_block(cache, mid)
+        remove_block(cache, mid)
         edit_byte_interval(bi, start.offset + offset, length, b"", {start})
-        return _cleanup_modified_blocks(cache, start, [], end)
+        return _cleanup_modified_blocks(cache, [start, end])
 
     else:
-        _remove_block(cache, block, retarget_to_proxy=retarget_to_proxy)
-        edit_byte_interval(bi, block.offset + offset, length, b"")
+        prev_block, next_block = cache.adjacent_blocks(block)
+        deleted = remove_block(
+            cache, block, retarget_to_proxy=retarget_to_proxy
+        )
+        edit_byte_interval(bi, block.offset + offset, length, b"", {block})
+        if (
+            deleted
+            and prev_block
+            and next_block
+            and prev_block.size == 0
+            and not retarget_to_proxy
+        ):
+            # If we were able to delete a block, see if that opens up an
+            # opportunity to delete a previous zero-sized block. For example,
+            # if we just deleted a data block between two code blocks.
+            remove_block(cache, prev_block)
+
         # There is no block for subsequent insertions to be placed at, so just
         # return None.
         return None
@@ -364,7 +261,7 @@ def insert(
         mid_block, end_block, _ = split_block(
             cache, end_block, replacement_length
         )
-        _remove_block(cache, mid_block)
+        remove_block(cache, mid_block)
 
     # Stitch in the new blocks to the CFG
     if added_fallthrough:
@@ -445,30 +342,27 @@ def insert(
 
     for sect in code.sections.values():
         if sect is not code.text_section:
-            _add_other_section_contents(code, sect, module, sym_expr_data)
+            _add_other_section_contents(
+                cache, code, sect, module, sym_expr_data
+            )
 
     # The block splitting from earlier might have left zero-sized blocks that
     # need to be dealt with.
     return _cleanup_modified_blocks(
         cache,
-        block,
-        text_section.blocks,
-        end_block,
+        [block, *text_section.blocks, end_block],
     )
 
 
 def _cleanup_modified_blocks(
     cache: ModifyCache,
-    start_block: gtirb.ByteBlock,
-    patch_blocks: List[gtirb.ByteBlock],
-    end_block: gtirb.ByteBlock,
+    blocks: List[gtirb.ByteBlock],
 ) -> gtirb.ByteBlock:
     """
     Cleans up any zero-sized blocks that might have been generated during
     modification.
     """
 
-    blocks = [start_block, *patch_blocks, end_block]
     assert any(b.size for b in blocks), "need at least one block with content"
 
     # Clean up blocks until we reach a fixed point where there's no further
@@ -485,8 +379,7 @@ def _cleanup_modified_blocks(
             except UnjoinableBlocksError:
                 pass
 
-            if not block.size:
-                _remove_block(cache, block)
+            if not block.size and remove_block(cache, block):
                 del blocks[i]
                 break
         else:
@@ -494,11 +387,8 @@ def _cleanup_modified_blocks(
             break
 
     # This allows inserting a code block at offset 0 of a data block.
-    if blocks[0].size == 0:
-        to_remove = blocks[0]
+    if blocks[0].size == 0 and remove_block(cache, blocks[0]):
         del blocks[0]
-
-        _remove_block(cache, to_remove)
 
     # It should be impossible that we leave behind a zero-sized block, but
     # it's a very important property of this function -- assert it.
@@ -547,6 +437,7 @@ def _check_compatible_sections(
 
 
 def _add_other_section_contents(
+    cache: ModifyCache,
     code: Assembler.Result,
     sect: Assembler.Result.Section,
     module: gtirb.Module,
@@ -602,6 +493,7 @@ def _add_other_section_contents(
 
         del sect.blocks[-1]
 
+    cache.block_ordering[gtirb_sect].add_detached_blocks(sect.blocks)
     bi.blocks.update(sect.blocks)
     gtirb_sect.byte_intervals.add(bi)
     for rel_offset, size in sect.symbolic_expression_sizes.items():

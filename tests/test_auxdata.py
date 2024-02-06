@@ -27,11 +27,20 @@ import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 import pytest
 from gtirb_rewriting import OffsetMapping
+from gtirb_test_helpers import (
+    add_code_block,
+    add_text_section,
+    create_test_module,
+)
 
 
 def test_auxdata_simple():
-    ir = gtirb.IR()
-    m = gtirb.Module(name="test", ir=ir)
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+    b = add_code_block(bi, b"\x90")
+    m.aux_data.clear()
 
     assert _auxdata.comments.container_type is gtirb.Module
     assert _auxdata.comments.name == "comments"
@@ -59,6 +68,11 @@ def test_auxdata_simple():
 
     _auxdata.comments.remove(m)
     assert "comments" not in m.aux_data
+
+    assert not _auxdata.elf_dynamic_init.exists(m)
+    _auxdata.elf_dynamic_init.set(m, b)
+    assert _auxdata.elf_dynamic_init.get(m) is b
+    _auxdata.elf_dynamic_init.remove(m)
 
 
 def test_auxdata_offsetmap():

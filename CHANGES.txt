@@ -4,6 +4,8 @@
   could redirect all calls to specific internal symbol to a trap function.
 - Changed the type hints for replace_at and insert_at to allow a ByteBlock
   to be passed instead of just CodeBlock/DataBlock.
+- Made deletion support more robust, removing the need to raise
+  AmbiguousCFGErrors.
 
 0.2.0:
 - CFI directives are now preserved, allowing rewriting of C++ programs with

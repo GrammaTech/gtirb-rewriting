@@ -50,11 +50,34 @@ def remove_function_block_aux(
     cache: ModifyCache, block: gtirb.CodeBlock
 ) -> None:
     """
-    Removes a block from the functionBlocks aux data table.
+    Removes a block from the functionBlocks aux data table. If no blocks are
+    left, it will also clean up the related aux data table entries.
     """
     assert block.module, "block must be in a module"
 
     func_uuid = cache.functions_by_block.pop(block, None)
-    function_blocks_data = _auxdata.function_blocks.get(block.module)
-    if func_uuid and function_blocks_data:
-        function_blocks_data[func_uuid].discard(block)
+    if func_uuid is None:
+        return
+
+    blocks_left = False
+    for table_def in (_auxdata.function_entries, _auxdata.function_blocks):
+        table = table_def.get(block.module)
+        if not table:
+            continue
+
+        blocks = table.get(func_uuid, None)
+        if not blocks:
+            continue
+
+        blocks.discard(block)
+        blocks_left = blocks_left or bool(blocks)
+
+    if not blocks_left:
+        for table_def in (
+            _auxdata.function_blocks,
+            _auxdata.function_entries,
+            _auxdata.function_names,
+        ):
+            table = table_def.get(block.module)
+            if table:
+                table.pop(func_uuid, None)

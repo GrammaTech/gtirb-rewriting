@@ -177,12 +177,14 @@ class ModifyCache:
             if block.address is None:
                 raise ValueError("all blocks must have addresses")
 
-        self.block_ordering = {
-            sect: BlockOrdering(
-                sorted(sect.byte_blocks, key=lambda b: cast(int, b.address))
+        self.block_ordering = collections.defaultdict(BlockOrdering)
+        for sect in module.sections:
+            self.block_ordering[sect].add_detached_blocks(
+                sorted(
+                    sect.byte_blocks,
+                    key=lambda b: (cast(int, b.address), b.size != 0),
+                )
             )
-            for sect in module.sections
-        }
 
     def adjacent_blocks(
         self, block: gtirb.ByteBlock

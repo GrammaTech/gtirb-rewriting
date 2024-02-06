@@ -37,7 +37,7 @@ from typing import (
 )
 
 import gtirb
-from typing_extensions import Literal, get_origin
+from typing_extensions import get_origin
 
 DataT = TypeVar("DataT")
 ContainerT = TypeVar("ContainerT", bound=gtirb.AuxDataContainer)
@@ -68,24 +68,18 @@ class TableDefinition(Generic[ContainerT, DataT]):
 
     @overload
     def _get_or_insert_table(
-        self,
-        container: ContainerT,
-        create: Literal[True],
+        self, container: ContainerT, create: Callable[[], DataT]
     ) -> gtirb.AuxData:
         ...
 
     @overload
     def _get_or_insert_table(
-        self,
-        container: ContainerT,
-        create: bool = False,
+        self, container: ContainerT, create: Optional[Callable[[], DataT]]
     ) -> Optional[gtirb.AuxData]:
         ...
 
     def _get_or_insert_table(
-        self,
-        container: ContainerT,
-        create: bool = False,
+        self, container: ContainerT, create: Optional[Callable[[], DataT]]
     ) -> Optional[gtirb.AuxData]:
         """
         Gets an aux data table from a container, potentially creating it if it
@@ -93,11 +87,12 @@ class TableDefinition(Generic[ContainerT, DataT]):
         """
 
         table = container.aux_data.get(self.name)
-        if table is None and not create:
-            return None
 
         if table is None:
-            table = gtirb.AuxData(self.initializer(), self.type_name)
+            if not create:
+                return None
+
+            table = gtirb.AuxData(create(), self.type_name)
             container.aux_data[self.name] = table
         elif table.type_name != self.type_name:
             raise TypeError(
@@ -120,14 +115,20 @@ class TableDefinition(Generic[ContainerT, DataT]):
         """
         Gets the aux data table's data, if it exists.
         """
-        table = self._get_or_insert_table(container, False)
+        table = self._get_or_insert_table(container, None)
         return table.data if table else None
 
     def get_or_insert(self, container: ContainerT) -> DataT:
         """
         Gets the aux data table's data, creating it if needed.
         """
-        return self._get_or_insert_table(container, True).data
+        return self._get_or_insert_table(container, self.initializer).data
+
+    def set(self, container: ContainerT, data: DataT) -> None:
+        """
+        Sets the value of the aux data table.
+        """
+        self._get_or_insert_table(container, lambda: data).data = data
 
     def remove(self, container: ContainerT) -> None:
         """
@@ -171,6 +172,20 @@ comments = define_table(
     "comments",
     "mapping<Offset,string>",
     Dict[gtirb.Offset, str],
+)
+
+elf_dynamic_fini = define_table(
+    gtirb.Module,
+    "elfDynamicFini",
+    "UUID",
+    gtirb.CodeBlock,
+)
+
+elf_dynamic_init = define_table(
+    gtirb.Module,
+    "elfDynamicInit",
+    "UUID",
+    gtirb.CodeBlock,
 )
 
 function_entries = define_table(
@@ -301,6 +316,27 @@ pe_resource = define_table(
     "peResource",
     "sequence<tuple<sequence<uint8>,gtirb.Offset,uint64_t>>",
     List[Tuple[List[int], gtirb.Offset, int]],
+)
+
+pe_safe_exception_handlers = define_table(
+    gtirb.Module,
+    "peSafeExceptionHandlers",
+    "set<UUID>",
+    Set[gtirb.CodeBlock],
+)
+
+profile = define_table(
+    gtirb.Module,
+    "profile",
+    "mapping<UUID,uint64_t>",
+    Dict[gtirb.CodeBlock, int],
+)
+
+sccs = define_table(
+    gtirb.Module,
+    "SCCs",
+    "mapping<UUID,int64_t>",
+    Dict[gtirb.CodeBlock, int],
 )
 
 symbolic_expression_sizes = define_table(
