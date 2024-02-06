@@ -787,7 +787,7 @@ def test_remove_blocks_simple():
     modify_cache = gtirb_rewriting._modify.ModifyCache(
         m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
     )
-    gtirb_rewriting._modify.edit._remove_block(modify_cache, b2, False)
+    gtirb_rewriting._modify.remove_block(modify_cache, b2, False)
 
     # _remove_block doesn't actually update the byte interval contents
     assert bi.blocks == {b1, b3}
@@ -827,7 +827,7 @@ def test_remove_blocks_simple():
     assert m.aux_data["functionBlocks"].data == {func.uuid: {b1, b3}}
 
 
-def test_remove_blocks_invalid():
+def test_remove_blocks_with_important_cfi_directives():
     """
     Test that we reject deleting a block where the CFI directives would be
     lost.
@@ -838,15 +838,15 @@ def test_remove_blocks_invalid():
     _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x90")
-    b2 = add_code_block(bi, b"\xC3")
-    add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Fallthrough)
-    func = add_function_object(m, "func", b1, {b2})
+    b2 = add_data_block(bi, b"\x90")
+    b3 = add_code_block(bi, b"\xC3")
+    func = add_function_object(m, "func", b1, {b3})
 
     m.aux_data["cfiDirectives"].data = {
         gtirb.Offset(b1, 0): [
             (".cfi_startproc", [], NULL_UUID),
         ],
-        gtirb.Offset(b2, 1): [
+        gtirb.Offset(b3, 1): [
             (".cfi_endproc", [], NULL_UUID),
         ],
     }
@@ -854,8 +854,19 @@ def test_remove_blocks_invalid():
     modify_cache = gtirb_rewriting._modify.ModifyCache(
         m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
     )
-    with pytest.raises(gtirb_rewriting.AmbiguousIRError):
-        gtirb_rewriting._modify.edit._remove_block(modify_cache, b2, False)
+    gtirb_rewriting._modify.remove_block(modify_cache, b3, False)
+
+    assert bi.blocks == {b1, b2, b3}
+    assert b3.size == 0
+
+    assert m.aux_data["cfiDirectives"].data == {
+        gtirb.Offset(b1, 0): [
+            (".cfi_startproc", [], NULL_UUID),
+        ],
+        gtirb.Offset(b3, 0): [
+            (".cfi_endproc", [], NULL_UUID),
+        ],
+    }
 
 
 def test_edit_byte_interval_simple():

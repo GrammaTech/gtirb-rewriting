@@ -25,13 +25,14 @@ import pytest
 from gtirb_rewriting._adt import BlockOrdering
 
 
-def test_adjacent_blocksing():
+def test_adjacent_blocks():
     block1 = gtirb.ByteBlock()
     block2 = gtirb.ByteBlock()
     block3 = gtirb.ByteBlock()
     block4 = gtirb.ByteBlock()
 
-    ordering = BlockOrdering((block1, block2))
+    ordering = BlockOrdering()
+    ordering.add_detached_blocks((block1, block2))
     assert ordering.adjacent_blocks(block1) == (None, block2)
     assert ordering.adjacent_blocks(block2) == (block1, None)
 
