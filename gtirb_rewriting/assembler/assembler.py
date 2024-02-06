@@ -47,16 +47,11 @@ import gtirb_rewriting._auxdata as _auxdata
 import mcasm
 from typing_extensions import Concatenate, ParamSpec, Self, override
 
+from .._adt import IdentitySet, OffsetMapping
 from .._auxdata import CFIDirectiveType
 from ..assembly import X86Syntax
 from ..dwarf import cfi
-from ..utils import (
-    OffsetMapping,
-    _IdentitySet,
-    _is_elf_pie,
-    _is_fallthrough_edge,
-    _target_triple,
-)
+from ..utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 from ._create_gtirb import create_cfi_directives as _create_cfi_directives
 from ._create_gtirb import create_gtirb as _create_gtirb
 from ._mc_utils import is_indirect_call as _is_indirect_call
@@ -353,10 +348,10 @@ class Assembler:
 
     def _make_cfi_index(
         self,
-    ) -> Dict[gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]]:
+    ) -> Dict[gtirb.Block, IdentitySet["Assembler.Result.CFIProcedure"]]:
         result: Dict[
-            gtirb.Block, _IdentitySet[Assembler.Result.CFIProcedure]
-        ] = defaultdict(_IdentitySet[Assembler.Result.CFIProcedure])
+            gtirb.Block, IdentitySet[Assembler.Result.CFIProcedure]
+        ] = defaultdict(IdentitySet[Assembler.Result.CFIProcedure])
         for sect in self._state.sections.values():
             for proc in sect.cfi_procedures:
                 for block in proc._referenced_nodes():
@@ -384,9 +379,7 @@ class Assembler:
 
     def _replace_cfi_referents(
         self,
-        index: Dict[
-            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
-        ],
+        index: Dict[gtirb.Block, IdentitySet["Assembler.Result.CFIProcedure"]],
         old_block: gtirb.Block,
         new_block: gtirb.Block,
     ) -> None:
@@ -406,7 +399,7 @@ class Assembler:
         section: "Assembler.Result.Section",
         symbol_index: Dict[gtirb.Block, Set[gtirb.Symbol]],
         cfi_index: Dict[
-            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
+            gtirb.Block, IdentitySet["Assembler.Result.CFIProcedure"]
         ],
     ) -> None:
         """
@@ -475,7 +468,7 @@ class Assembler:
         section: "Assembler.Result.Section",
         symbol_index: Dict[gtirb.Block, Set[gtirb.Symbol]],
         cfi_index: Dict[
-            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
+            gtirb.Block, IdentitySet["Assembler.Result.CFIProcedure"]
         ],
     ) -> None:
         """
@@ -545,7 +538,7 @@ class Assembler:
         section: "Assembler.Result.Section",
         symbol_index: Dict[gtirb.Block, Set[gtirb.Symbol]],
         cfi_index: Dict[
-            gtirb.Block, _IdentitySet["Assembler.Result.CFIProcedure"]
+            gtirb.Block, IdentitySet["Assembler.Result.CFIProcedure"]
         ],
     ) -> None:
         """

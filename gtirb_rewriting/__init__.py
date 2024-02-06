@@ -19,6 +19,7 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
+from ._adt import OffsetMapping
 from ._modify import AmbiguousCFGError, AmbiguousIRError, CFGModifiedError
 from .abi import ABI, CallingConventionDesc
 from .assembler import (
@@ -48,7 +49,7 @@ from .scopes import (
     SingleBlockScope,
     pattern_match,
 )
-from .utils import OffsetMapping, decorate_extern_symbol, show_block_asm
+from .utils import decorate_extern_symbol, show_block_asm
 from .version import __version__
 
 __all__ = [

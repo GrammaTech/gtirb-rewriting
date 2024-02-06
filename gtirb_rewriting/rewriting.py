@@ -349,36 +349,6 @@ class RewritingContext:
         else:
             yield
 
-    def _successor_for_block(
-        self, sorted_blocks: Sequence[gtirb.ByteBlock], idx: int
-    ) -> Iterator[gtirb.ByteBlock]:
-        """
-        Gets the successor(s) for a block.
-        :param sorted_blocks: A sequence of blocks that has been sorted by
-                              address.
-        :param idx: The index of the block in question.
-        :yields: The successor, or multiple if it is ambiguous.
-        """
-
-        block = sorted_blocks[idx]
-        idx += 1
-
-        if isinstance(block, gtirb.CodeBlock):
-            fallthrough_targets = _block_fallthrough_targets(block)
-            if fallthrough_targets:
-                yield from fallthrough_targets
-                return
-
-        has_last_address = False
-        last_address = None
-        while idx < len(sorted_blocks) and (
-            not has_last_address or sorted_blocks[idx].address == last_address
-        ):
-            yield sorted_blocks[idx]
-            last_address = sorted_blocks[idx].address
-            has_last_address = True
-            idx += 1
-
     def _invoke_patch(
         self,
         patch: Patch,
@@ -511,7 +481,6 @@ class RewritingContext:
         patch: Union[Patch, bytes],
         context: InsertionContext,
         assembler_result: Assembler.Result,
-        next_block: Optional[gtirb.ByteBlock],
     ) -> Tuple[gtirb.ByteBlock, int]:
         """
         Invokes a patch at a concrete location and applies its results to the
@@ -534,7 +503,6 @@ class RewritingContext:
                 offset,
                 replacement_length,
                 assembler_result,
-                next_block,
             )
 
         return (
@@ -643,7 +611,6 @@ class RewritingContext:
         modifications: Sequence[_Modification],
         func: Optional[gtirb_functions.Function],
         block: gtirb.ByteBlock,
-        next_block: Optional[gtirb.ByteBlock],
         in_cfi_procedure: Callable[[int], bool],
     ) -> None:
         """
@@ -689,7 +656,6 @@ class RewritingContext:
                     modification.patch,
                     context,
                     assembler_result,
-                    next_block,
                 )
                 total_insert_len += (
                     insert_len - modification.scope._replacement_length()
@@ -700,9 +666,7 @@ class RewritingContext:
                     actual_block,
                     actual_offset,
                     modification.scope._replacement_length(),
-                    next_block
-                    if not modification.retarget_to_proxy
-                    else gtirb.ProxyBlock(module=self._module),
+                    modification.retarget_to_proxy,
                 )
                 total_insert_len -= modification.scope._replacement_length()
 
@@ -770,6 +734,7 @@ class RewritingContext:
         function_names[func_uuid] = sym
 
         modify_cache.functions_by_block[block] = func_uuid
+        modify_cache.block_ordering[sect].add_detached_blocks((block,))
 
     def _apply_function_insertion(
         self,
@@ -822,7 +787,6 @@ class RewritingContext:
             patch,
             context,
             assembler_result,
-            None,
         )
 
     def _validate_offset_and_length(
@@ -1135,18 +1099,11 @@ class RewritingContext:
                 if not modifications:
                     continue
 
-                next_blocks = tuple(
-                    self._successor_for_block(sorted_blocks, idx)
-                )
-                if len(next_blocks) > 1:
-                    self._logger.warning("successor to %s is ambiguous", block)
-
                 self._apply_modifications(
                     modify_cache,
                     modifications,
                     func,
                     block,
-                    next(iter(next_blocks), None),
                     lambda offset: cfi_tracker.in_procedure(idx, offset),
                 )
 

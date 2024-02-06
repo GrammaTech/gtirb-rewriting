@@ -137,7 +137,7 @@ def join_blocks(
 
     ir = block1.ir
     module = block1.module
-    assert ir and module
+    assert ir and module and block2.section
 
     for sym in tuple(block2.references):
         if not block1.size:
@@ -196,6 +196,7 @@ def join_blocks(
             alignment_data[block1] = block2_align
 
     block1.size = block1.size + block2.size
+    cache.block_ordering[block2.section].remove_block(block2)
     block2.byte_interval = None
 
     return block1

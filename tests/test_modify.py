@@ -41,7 +41,7 @@ def test_return_cache():
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #  func1:
@@ -89,7 +89,7 @@ def test_return_cache_decorator():
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
     orig_cfg = ir.cfg
 
     b1 = add_code_block(bi, b"\x90")
@@ -134,7 +134,7 @@ def test_modify_cache():
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     # This mimics:
     #  ret
@@ -160,7 +160,7 @@ def test_split_block_simple():
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x90\xC3")
     b2 = add_code_block(bi, b"\x90")
@@ -226,7 +226,7 @@ def test_split_block_begin():
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x90\xC3")
     func = add_function_object(m, "b1", b1)
@@ -295,7 +295,7 @@ def test_split_block_end_with_call():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     func1_b1 = add_code_block(bi, b"\xC3")
     func2_b1 = add_code_block(bi, b"\xE8\x00\x00\x00\x00")
@@ -350,7 +350,7 @@ def test_split_block_end_with_jump():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\xEB\x00")
     b2 = add_code_block(bi, b"\x90")
@@ -392,7 +392,7 @@ def test_split_blocks_proc_begin():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\xC3")
 
@@ -444,7 +444,7 @@ def test_split_blocks_proc_end():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\xC3")
 
@@ -494,7 +494,7 @@ def test_join_blocks_procs_end():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"")
     b2 = add_code_block(bi, b"\xC3")
@@ -540,7 +540,7 @@ def test_join_blocks_procs_begin():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\xC3")
     b2 = add_code_block(bi, b"")
@@ -582,7 +582,7 @@ def test_join_blocks_simple():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x57")
     b2 = add_code_block(bi, b"\x58")
@@ -647,7 +647,7 @@ def test_join_blocks_zero_sized():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b0 = add_code_block(bi, b"\xE8\x00")
     b1 = add_code_block(bi, b"")
@@ -686,7 +686,7 @@ def test_unjoinable_due_to_symbol():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x57")
     b2 = add_code_block(bi, b"\x58")
@@ -703,7 +703,7 @@ def test_unjoinable_due_to_edges():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x57")
     b2 = add_code_block(bi, b"\x58")
@@ -720,7 +720,7 @@ def test_unjoinable_due_to_different_type():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x57")
     b2 = add_data_block(bi, b"\x58")
@@ -736,7 +736,7 @@ def test_unjoinable_due_to_alignment():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x57")
     b2 = add_code_block(bi, b"\x58")
@@ -754,7 +754,7 @@ def test_remove_blocks_simple():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x57")
     b2 = add_code_block(bi, b"\x58")
@@ -787,7 +787,7 @@ def test_remove_blocks_simple():
     modify_cache = gtirb_rewriting._modify.ModifyCache(
         m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
     )
-    gtirb_rewriting._modify.edit._remove_block(modify_cache, b2, b3)
+    gtirb_rewriting._modify.edit._remove_block(modify_cache, b2, False)
 
     # _remove_block doesn't actually update the byte interval contents
     assert bi.blocks == {b1, b3}
@@ -835,7 +835,7 @@ def test_remove_blocks_invalid():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     b1 = add_code_block(bi, b"\x90")
     b2 = add_code_block(bi, b"\xC3")
@@ -855,14 +855,14 @@ def test_remove_blocks_invalid():
         m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
     )
     with pytest.raises(gtirb_rewriting.AmbiguousIRError):
-        gtirb_rewriting._modify.edit._remove_block(modify_cache, b2, None)
+        gtirb_rewriting._modify.edit._remove_block(modify_cache, b2, False)
 
 
 def test_edit_byte_interval_simple():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     sym = add_symbol(m, "sym")
 
@@ -902,7 +902,7 @@ def test_edit_byte_interval_replace():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
-    _, bi = add_text_section(m)
+    _, bi = add_text_section(m, address=0x1000)
 
     sym1 = add_symbol(m, "sym1")
     sym2 = add_symbol(m, "sym2")

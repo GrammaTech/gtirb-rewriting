@@ -26,9 +26,10 @@ from typing import Iterable, List, Mapping, MutableMapping, Optional
 import gtirb
 import gtirb_rewriting._auxdata as _auxdata
 
+from ._adt import OffsetMapping
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .abi import ABI
-from .utils import OffsetMapping, align_address, effective_alignment
+from .utils import align_address, effective_alignment
 
 
 class PaddingError(Exception):
