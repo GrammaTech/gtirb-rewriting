@@ -2,6 +2,8 @@
 - Added RewritingContext.retarget_symbol, which allows adjusting code/data
   references of one symbol to use another synmbol instead. For example, you
   could redirect all calls to specific internal symbol to a trap function.
+- Changed the type hints for replace_at and insert_at to allow a ByteBlock
+  to be passed instead of just CodeBlock/DataBlock.
 
 0.2.0:
 - CFI directives are now preserved, allowing rewriting of C++ programs with

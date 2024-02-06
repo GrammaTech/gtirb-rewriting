@@ -855,25 +855,25 @@ class RewritingContext:
     @overload
     def insert_at(
         self,
-        block: gtirb.CodeBlock,
-        offset: int,
-        patch: Patch,
-    ) -> None:
-        """
-        Inserts a patch at a specific location in the binary. This is not
-        subject to bubbling.
-        """
-        ...
-
-    @overload
-    def insert_at(
-        self,
         block: gtirb.DataBlock,
         offset: int,
         patch: Union[Patch, bytes],
     ) -> None:
         """
         Inserts a patch at a specific location in the binary.
+        """
+        ...
+
+    @overload
+    def insert_at(
+        self,
+        block: gtirb.ByteBlock,
+        offset: int,
+        patch: Patch,
+    ) -> None:
+        """
+        Inserts a patch at a specific location in the binary. This is not
+        subject to bubbling.
         """
         ...
 
@@ -920,20 +920,6 @@ class RewritingContext:
     @overload
     def replace_at(
         self,
-        block: gtirb.CodeBlock,
-        offset: int,
-        length: int,
-        patch: Patch,
-    ) -> None:
-        """
-        Inserts a patch at a specific code block in the binary, replacing the
-        instructions as specified. This is not subject to bubbling.
-        """
-        ...
-
-    @overload
-    def replace_at(
-        self,
         block: gtirb.DataBlock,
         offset: int,
         length: int,
@@ -942,6 +928,20 @@ class RewritingContext:
         """
         Inserts a patch or bytes at a specific data block in the binary,
         replacing the instructions as specified.
+        """
+        ...
+
+    @overload
+    def replace_at(
+        self,
+        block: gtirb.ByteBlock,
+        offset: int,
+        length: int,
+        patch: Patch,
+    ) -> None:
+        """
+        Inserts a patch at a specific code block in the binary, replacing the
+        instructions as specified. This is not subject to bubbling.
         """
         ...
 
