@@ -38,6 +38,7 @@ from gtirb_test_helpers import (
     set_all_blocks_alignment,
 )
 from helpers import add_function_object, literal_patch
+from intervaltree import Interval, IntervalTree
 
 
 @gtirb_rewriting.patch_constraints()
@@ -1489,3 +1490,27 @@ def test_retarget_and_delete():
 
     assert bi.blocks == {b1}
     assert bi.symbolic_expressions == {}
+
+
+def test_layout():
+    """
+    Test that layout is performed before and after rewriting.
+    """
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m)
+    add_code_block(bi, b"\x90")
+
+    rwc = gtirb_rewriting.RewritingContext(m, [])
+    rwc.register_insert_function("foo", literal_patch("nop"))
+    rwc.apply()
+
+    # Verify that the blocks have addresses and don't overlap
+    intervals = IntervalTree()
+    for block in m.byte_blocks:
+        assert block.address is not None
+        interval = Interval(block.address, block.address + block.size)
+
+        assert interval not in intervals
+        intervals.add(interval)
