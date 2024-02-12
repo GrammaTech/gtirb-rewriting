@@ -20,6 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+import string
 import uuid
 from typing import (
     Callable,
@@ -230,6 +231,24 @@ types = define_table(
     Dict[gtirb.DataBlock, str],
 )
 
+elf_symbol_versions = define_table(
+    gtirb.Module,
+    "elfSymbolVersions",
+    """
+        tuple<
+            mapping<uint16_t, tuple<sequence<string>, uint16_t>>,
+            mapping<string, mapping<uint16_t, string>>,
+            mapping<UUID, tuple<uint16_t, bool>>
+        >
+    """.translate(
+        str.maketrans("", "", string.whitespace)
+    ),
+    Tuple[
+        Dict[int, Tuple[List[str], int]],
+        Dict[str, Dict[int, str]],
+        Dict[gtirb.Symbol, Tuple[int, bool]],
+    ],
+)
 
 # Provisional AuxData tables
 
@@ -259,6 +278,13 @@ elf_symbol_info = define_table(
     "elfSymbolInfo",
     "mapping<UUID,tuple<uint64_t,string,string,string,uint64_t>>",
     Dict[gtirb.Symbol, Tuple[int, str, str, str, int]],
+)
+
+elf_symbol_tab_idx_info = define_table(
+    gtirb.Module,
+    "elfSymbolTabIdxInfo",
+    "mapping<UUID,sequence<tuple<string,uint64_t>>>",
+    Dict[gtirb.Symbol, List[Tuple[str, int]]],
 )
 
 # Legacy table that's been renamed to sectionProperties
@@ -295,6 +321,13 @@ library_paths = define_table(
     "libraryPaths",
     "sequence<string>",
     List[str],
+)
+
+pe_exported_symbols = define_table(
+    gtirb.Module,
+    "peExportedSymbols",
+    "sequence<UUID>",
+    List[gtirb.Symbol],
 )
 
 pe_import_entries = define_table(

@@ -26,6 +26,11 @@ from .cache import (
     ReturnEdgeCache,
     make_return_cache,
 )
+from .delete_symbols import (
+    SymbolDeletionOptions,
+    SymbolUsesRemainingError,
+    delete_symbols,
+)
 from .edit import (
     AmbiguousCFGError,
     AmbiguousIRError,
@@ -54,4 +59,7 @@ __all__ = [
     "edit_byte_interval",
     "retarget_symbols",
     "remove_block",
+    "delete_symbols",
+    "SymbolDeletionOptions",
+    "SymbolUsesRemainingError",
 ]

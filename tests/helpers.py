@@ -20,12 +20,157 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-from typing import Set, Union
+import itertools
+from typing import Dict, List, Sequence, Set, Tuple, Union
 
 import gtirb
 import gtirb_functions
 import gtirb_rewriting
 from gtirb_test_helpers import add_function
+
+_VER_FLG_BASE = 1
+
+
+def _get_or_insert_elf_symbol_versions(
+    module: gtirb.Module,
+) -> Tuple[
+    Dict[int, Tuple[List[str], int]],
+    Dict[str, Dict[int, str]],
+    Dict[gtirb.Symbol, Tuple[int, bool]],
+]:
+    table = module.aux_data.get("elfSymbolVersions")
+    if not table:
+        table = module.aux_data["elfSymbolVersions"] = gtirb.AuxData(
+            ({}, {}, {}),
+            "tuple<mapping<uint16_t,tuple<sequence<string>,uint16_t>>,"
+            "mapping<string,mapping<uint16_t,string>>,"
+            "mapping<UUID,tuple<uint16_t,bool>>>",
+        )
+    return table.data
+
+
+def _next_symbol_id(
+    symver_defs: Dict[int, Tuple[List[str], int]],
+    symver_needed: Dict[str, Dict[int, str]],
+) -> int:
+    """
+    Determines the next unused version id for an elfSymbolVersions aux data
+    table.
+    """
+    return (
+        max(itertools.chain(symver_defs, *symver_needed.values()), default=0)
+        + 1
+    )
+
+
+def add_elf_base_symbol_version(
+    module: gtirb.Module,
+    version: str,
+) -> int:
+    """
+    Add or update the ELF symbol version of the module itself (i.e., the
+    version definition marked as VER_FLG_BASE).
+
+    The string value of this version is typically the name of the library,
+    e.g., `libc.so.6` is used for libc.
+    """
+    (
+        symver_defs,
+        symver_needed,
+        _,
+    ) = _get_or_insert_elf_symbol_versions(module)
+
+    for version_id, (_, flags) in symver_defs.items():
+        if flags == _VER_FLG_BASE:
+            break
+    else:
+        version_id = _next_symbol_id(symver_defs, symver_needed)
+    symver_defs[version_id] = ([version], _VER_FLG_BASE)
+
+    return version_id
+
+
+def add_defined_elf_symbol_version(
+    module: gtirb.Module,
+    symbol: gtirb.Symbol,
+    version: str,
+    *,
+    previous_versions: Sequence[str] = (),
+    hidden: bool = False,
+) -> int:
+    """
+    Adds ELF symbol versioning for a symbol defined in the module.
+
+    :param module: The module to update aux data in.
+    :param symbol: The symbol to add a version for.
+    :param version: The symbol version string, e.g. "GLIBC_2.2.5".
+    :param previous_versions: Older versions that this function was known by.
+    :param hidden: Causes the symbol to be ignored by the static linker.
+    :return: The version ID that was added to the aux data.
+    """
+
+    (
+        symver_defs,
+        symver_needed,
+        symbol_versions,
+    ) = _get_or_insert_elf_symbol_versions(module)
+
+    if symbol in symbol_versions:
+        raise ValueError(f"symbol {symbol.name} has already been versioned")
+
+    for version_id, (versions, flags) in symver_defs.items():
+        if (
+            versions[0] == version
+            and versions[1:] == previous_versions
+            and flags != _VER_FLG_BASE
+        ):
+            break
+    else:
+        version_id = _next_symbol_id(symver_defs, symver_needed)
+        symver_defs[version_id] = ([version, *previous_versions], 0)
+
+    symbol_versions[symbol] = (version_id, hidden)
+    return version_id
+
+
+def add_needed_elf_symbol_version(
+    module: gtirb.Module,
+    symbol: gtirb.Symbol,
+    library: str,
+    version: str,
+    *,
+    hidden: bool = False,
+) -> int:
+    """
+    Adds ELF symbol versioning for a symbol needed by the module.
+
+    :param module: The module to update aux data in.
+    :param symbol: The symbol to add a version for.
+    :param library: The name of the library defining the symbol.
+    :param version: The symbol version string, e.g. "GLIBC_2.2.5".
+    :param hidden: Causes the symbol to be ignored by the static linker.
+    :return: The version ID that was added to the aux data.
+    """
+
+    (
+        symver_defs,
+        symver_needed,
+        symbol_versions,
+    ) = _get_or_insert_elf_symbol_versions(module)
+
+    if symbol in symbol_versions:
+        raise ValueError(f"symbol {symbol.name} has already been versioned")
+
+    library_versions = symver_needed.setdefault(library, {})
+    for version_id, lib_version in library_versions.items():
+        if version == lib_version:
+            break
+    else:
+        version_id = _next_symbol_id(symver_defs, symver_needed)
+        library_versions[version_id] = version
+
+    symbol_versions[symbol] = (version_id, hidden)
+    return version_id
 
 
 def add_function_object(

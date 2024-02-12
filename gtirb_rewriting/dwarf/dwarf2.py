@@ -26,6 +26,30 @@
 from enum import Enum
 
 
+class PointerEncodings(int, Enum):
+    """
+    A description of how a pointer is encoded. The low 4 bits indicate the
+    format of the data and the upper 4 bits indicate how the value is applied.
+    """
+    omit    = 0xFF
+    # Format of the pointer
+    absptr  = 0x00
+    uleb128 = 0x01
+    udata2  = 0x02
+    udata4  = 0x03
+    udata8  = 0x04
+    sleb128 = 0x09
+    sdata2  = 0x0A
+    sdata4  = 0x0B
+    sdata8  = 0x0C
+    # How the value is applied
+    pcrel   = 0x10
+    textrel = 0x20
+    datarel = 0x30
+    funcrel = 0x40
+    aligned = 0x50
+
+
 class CallFrameInstructions(int, Enum):
     nop                 = 0x00
     set_loc             = 0x01
