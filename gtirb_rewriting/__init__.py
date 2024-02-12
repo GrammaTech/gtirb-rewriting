@@ -20,7 +20,12 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 from ._adt import OffsetMapping
-from ._modify import AmbiguousCFGError, AmbiguousIRError, CFGModifiedError
+from ._modify import (
+    AmbiguousCFGError,
+    AmbiguousIRError,
+    CFGModifiedError,
+    SymbolUsesRemainingError,
+)
 from .abi import ABI, CallingConventionDesc
 from .assembler import (
     Assembler,
@@ -85,6 +90,7 @@ __all__ = [
     "SingleBlockScope",
     "show_block_asm",
     "split_byte_interval",
+    "SymbolUsesRemainingError",
     "UndefSymbolError",
     "UnresolvableScopeError",
     "UnsupportedAssemblyError",

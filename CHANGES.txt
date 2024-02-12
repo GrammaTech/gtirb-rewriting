@@ -6,6 +6,8 @@
   to be passed instead of just CodeBlock/DataBlock.
 - Made deletion support more robust, removing the need to raise
   AmbiguousCFGErrors.
+- Added RewritingContext.delete_symbol, which allows deleting a symbol
+  entirely.
 
 0.2.0:
 - CFI directives are now preserved, allowing rewriting of C++ programs with

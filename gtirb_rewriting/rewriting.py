@@ -50,7 +50,9 @@ from intervaltree import IntervalTree
 
 from ._modify import (
     ModifyCache,
+    SymbolDeletionOptions,
     delete,
+    delete_symbols,
     insert,
     make_return_cache,
     retarget_symbols,
@@ -256,6 +258,7 @@ class RewritingContext:
         self._modification_id = itertools.count()
         self._function_insertions: List[_FunctionInsertion] = []
         self._symbol_retargets: Dict[gtirb.Symbol, gtirb.Symbol] = {}
+        self._symbol_deletions: Dict[gtirb.Symbol, SymbolDeletionOptions] = {}
         self._logger = logger
         self._patch_id = 0
         self._expensive_assertions = expensive_assertions
@@ -531,6 +534,24 @@ class RewritingContext:
             raise ValueError("new symbol must have a referent")
 
         self._symbol_retargets[old_symbol] = new_symbol
+
+    def delete_symbol(
+        self, symbol: gtirb.Symbol, *, force: bool = False
+    ) -> None:
+        """
+        Deletes a symbol from a module. If symbolic expressions still refer
+        to the symbol at the end of rewriting an exception will be raised
+        unless the force parameter is set.
+        """
+        if symbol.module is not self._module:
+            raise ValueError("symbol is not part of this module")
+
+        opts = self._symbol_deletions.setdefault(
+            symbol, SymbolDeletionOptions(force)
+        )
+        # If a symbol has been requested as force but is now requested as not
+        # force, the latter takes priority.
+        opts.force = force and opts.force
 
     def get_or_insert_extern_symbol(
         self,
@@ -1104,3 +1125,6 @@ class RewritingContext:
                     block,
                     lambda offset: cfi_tracker.in_procedure(idx, offset),
                 )
+
+            if self._symbol_deletions:
+                delete_symbols(self._module, self._symbol_deletions)
