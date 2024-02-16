@@ -27,11 +27,12 @@ import gtirb
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 from gtirb_rewriting._modify.edges import update_edge
 
+from .. import _auxdata
 from ..abi import ABI, _SymExprAttributeRule
 from .edit import AmbiguousIRError
 
 
-def retarget_symbols(
+def retarget_symbol_uses(
     module: gtirb.Module,
     retargeted_symbols: Dict[gtirb.Symbol, gtirb.Symbol],
     decoder: GtirbInstructionDecoder,
@@ -49,6 +50,15 @@ def retarget_symbols(
     assert module.ir
 
     expr_attr_rules = ABI.get(module)._sym_expr_rules(module)
+
+    cfi_auxdata = _auxdata.cfi_directives.get(module)
+    if cfi_auxdata:
+        for offset, directives in cfi_auxdata.items():
+            for i, (directive, args, symbol) in enumerate(directives):
+                if isinstance(symbol, gtirb.Symbol):
+                    retarget = retargeted_symbols.get(symbol)
+                    if retarget:
+                        directives[i] = (directive, args, retarget)
 
     for byte_interval in module.byte_intervals:
         for offset, expr in byte_interval.symbolic_expressions.items():
