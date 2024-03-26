@@ -800,3 +800,38 @@ def test_empty_delete():
     assert set(ir.cfg) == orig_cfg
     assert b1.contents == b"\xEB\x00"
     assert b2.contents == b"\x90"
+
+
+def test_delete_zero_sized_block():
+    """
+    Test that deleting a zero-sized block deletes the block when it is
+    possible.
+    """
+    # This mimics:
+    # b1:
+    # b2:
+    #   nop
+    #
+
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b1 = add_code_block(bi, b"")
+    b2 = add_code_block(bi, b"\x90")
+    b1_sym = add_symbol(m, "b1", b1)
+    b2_sym = add_symbol(m, "b2", b2)
+
+    add_edge(ir.cfg, b1, b2, gtirb.cfg.EdgeType.Fallthrough)
+    func = add_function_object(m, "func", b1, {b2})
+
+    # Test a zero-sized deletion when the block is zero-sized
+    ctx = gtirb_rewriting.RewritingContext(m, [func])
+    ctx.delete_at(b1, b1.size, 0)
+    ctx.apply()
+
+    assert b1_sym.referent is b2
+    assert b2_sym.referent is b2
+    assert bi.blocks == {b2}
+    assert set(ir.cfg) == set()

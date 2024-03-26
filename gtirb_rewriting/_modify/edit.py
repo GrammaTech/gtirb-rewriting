@@ -157,7 +157,6 @@ def delete(
     """
 
     assert cache.module is block.module
-    assert block.size
     assert 0 <= offset <= block.size
     assert 0 <= offset + length <= block.size
     assert length >= 0
@@ -165,7 +164,9 @@ def delete(
     bi = block.byte_interval
     assert bi
 
-    if not length:
+    # Specifying an empty deletion range is functionally a no-op, unless that
+    # happens to be the entire block length.
+    if length == 0 and block.size != 0:
         return block
 
     if length != block.size:
