@@ -1455,3 +1455,37 @@ def test_data_with_symbolic_expressions():
     assert bi.contents == b"\x00" * 8
     assert bi.symbolic_expressions[0] == gtirb.SymAddrConst(0, test_sym)
     assert m.aux_data["symbolicExpressionSizes"].data[gtirb.Offset(bi, 0)] == 8
+
+
+def test_retarget_and_delete():
+    """
+    Test that we don't raise exceptions if we can't retarget an expression
+    that is scheduled to be deleted.
+    """
+
+    # This mimics:
+    #   foo:
+    #   nop
+    #
+    #   .quad foo - foo
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b1 = add_code_block(bi, b"\x90")
+    foo_sym = add_symbol(m, "foo", b1)
+    undef_sym = add_symbol(m, "undef", add_proxy_block(m))
+    b2 = add_data_block(
+        bi, b"\x00\x00\x00\x00", {0: gtirb.SymAddrAddr(1, 0, foo_sym, foo_sym)}
+    )
+
+    rwc = gtirb_rewriting.RewritingContext(m, [])
+    # This will force the SymAddrAddr to be retargeted, which we don't support
+    rwc.retarget_symbol_uses(foo_sym, undef_sym)
+    # But this will cause the block containing it to be deleted, so it's okay
+    rwc.delete_at(b2, 0, b2.size)
+    rwc.apply()
+
+    assert bi.blocks == {b1}
+    assert bi.symbolic_expressions == {}
