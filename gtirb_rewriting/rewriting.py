@@ -822,7 +822,11 @@ class RewritingContext:
         assert length >= 0
         assert offset + length <= block.size
 
-        if self._expensive_assertions and isinstance(block, gtirb.CodeBlock):
+        if (
+            self._expensive_assertions
+            and isinstance(block, gtirb.CodeBlock)
+            and block.size
+        ):
             disassembly = tuple(self._decoder.get_instructions(block))
             if not _is_partial_disassembly(block, disassembly):
                 legal_offsets = {
