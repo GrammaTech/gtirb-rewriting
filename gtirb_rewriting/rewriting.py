@@ -1089,11 +1089,6 @@ class RewritingContext:
                 self._module.byte_blocks, key=lambda b: b.address or 0
             )
 
-            if self._symbol_retargets:
-                retarget_symbol_uses(
-                    self._module, self._symbol_retargets, self._decoder
-                )
-
             for func in self._function_insertions:
                 self._insert_function_stub(
                     modify_cache, func.symbol, func.block
@@ -1124,6 +1119,11 @@ class RewritingContext:
                     func,
                     block,
                     lambda offset: cfi_tracker.in_procedure(idx, offset),
+                )
+
+            if self._symbol_retargets:
+                retarget_symbol_uses(
+                    self._module, self._symbol_retargets, self._decoder
                 )
 
             if self._symbol_deletions:
