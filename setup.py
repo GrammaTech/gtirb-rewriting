@@ -37,10 +37,10 @@ setuptools.setup(
     install_requires=[
         "capstone-gt",
         "gtirb-capstone >= 1.0.1",
-        "gtirb-functions",
+        "gtirb-functions >= 1.0.8",
         "gtirb >= 1.10.6",
         "mcasm ~= 0.3.0",
-        "more-itertools",
+        "more-itertools >= 8.11",
         "entrypoints",
         "typing-extensions ~= 4.4",
         "leb128 ~= 1.0",
