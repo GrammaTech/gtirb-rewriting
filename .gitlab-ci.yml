@@ -34,8 +34,7 @@ check-format:
 .test-template: &test
   stage: test
   script:
-    - pip3 install --upgrade pip
-    - pip3 install -r requirements-dev.txt -e . $EXTRA_PIP_ARGS
+    - $PIP_WRAPPER pip install -r requirements-dev.txt -e . $EXTRA_PIP_ARGS
     - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --cov-report=term --junitxml=report.xml
     - pyright
   artifacts:
@@ -48,8 +47,19 @@ test-stable-20:
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
   <<: *test
 
+test-minver-20:
+  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  before_script:
+  - pip install uv
+  variables:
+    PIP_WRAPPER: uv
+    EXTRA_PIP_ARGS: --resolution=lowest-direct --system
+  <<: *test
+
 test-unstable-20:
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  before_script:
+  - pip install --upgrade pip
   variables:
     EXTRA_PIP_ARGS: --pre --index-url $EXTRA_INDEX_URL
   <<: *test
