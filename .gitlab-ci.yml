@@ -37,11 +37,14 @@ check-format:
     - $PIP_WRAPPER pip install -r requirements-dev.txt -e . $EXTRA_PIP_ARGS
     - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --cov-report=term --junitxml=report.xml
     - pyright
+  coverage: /TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/
   artifacts:
     when: always
     reports:
       junit: report.xml
-      cobertura: coverage.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
 
 test-stable-20:
   image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
