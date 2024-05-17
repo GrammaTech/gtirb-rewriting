@@ -23,6 +23,7 @@ import logging
 
 import gtirb
 import gtirb_functions
+import gtirb_layout
 import gtirb_rewriting
 import pytest
 from gtirb_rewriting._auxdata import NULL_UUID
@@ -38,7 +39,6 @@ from gtirb_test_helpers import (
     set_all_blocks_alignment,
 )
 from helpers import add_function_object, literal_patch
-from intervaltree import Interval, IntervalTree
 
 
 @gtirb_rewriting.patch_constraints()
@@ -1492,25 +1492,41 @@ def test_retarget_and_delete():
     assert bi.symbolic_expressions == {}
 
 
-def test_layout():
+def test_layout_before():
     """
-    Test that layout is performed before and after rewriting.
+    Test that rewriting can handle inputs that need layout.
     """
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
     )
     _, bi = add_text_section(m)
-    add_code_block(bi, b"\x90")
+    b1 = add_code_block(bi, b"\x90")
+    assert b1.address is None
+    assert gtirb_layout.is_module_layout_required(m)
 
     rwc = gtirb_rewriting.RewritingContext(m, [])
-    rwc.register_insert_function("foo", literal_patch("nop"))
+    rwc.insert_at(b1, b1.size, literal_patch("nop"))
     rwc.apply()
 
-    # Verify that the blocks have addresses and don't overlap
-    intervals = IntervalTree()
-    for block in m.byte_blocks:
-        assert block.address is not None
-        interval = Interval(block.address, block.address + block.size)
+    assert bi.contents == b"\x90\x90"
 
-        assert interval not in intervals
-        intervals.add(interval)
+
+def test_layout_after():
+    """
+    Test that the output of gtirb-rewriting does not need further layout.
+    """
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+    b1 = add_code_block(bi, b"\x90")
+    add_code_block(bi, b"\x90")
+
+    # Generate changes that result in blocks with no addresses or overlapping
+    # addresses.
+    rwc = gtirb_rewriting.RewritingContext(m, [])
+    rwc.register_insert_function("foo", literal_patch("nop"))
+    rwc.insert_at(b1, b1.size, literal_patch("nop"))
+    rwc.apply()
+
+    assert not gtirb_layout.is_module_layout_required(m)
