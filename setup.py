@@ -38,6 +38,7 @@ setuptools.setup(
         "capstone-gt",
         "gtirb-capstone >= 1.0.1",
         "gtirb-functions >= 1.0.8",
+        "gtirb-layout ~= 1.0",
         "gtirb >= 1.10.6",
         "mcasm ~= 0.3.0",
         "more-itertools >= 8.11",

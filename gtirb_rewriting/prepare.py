@@ -24,6 +24,11 @@ from typing import Iterator
 
 import gtirb
 import gtirb_rewriting._auxdata as _auxdata
+from gtirb_layout import (
+    assign_integral_symbols,
+    is_module_layout_required,
+    layout_module,
+)
 
 from .intervalutils import join_byte_intervals, split_byte_interval
 
@@ -31,6 +36,11 @@ from .intervalutils import join_byte_intervals, split_byte_interval
 @contextlib.contextmanager
 def prepare_for_rewriting(module: gtirb.Module, nop: bytes) -> Iterator[None]:
     """Pre-compute data structure to accelerate rewriting."""
+
+    if is_module_layout_required(module):
+        layout_module(module)
+    else:
+        assign_integral_symbols(module)
 
     alignment = (
         {} if module.file_format == gtirb.Module.FileFormat.ELF else None
@@ -49,3 +59,6 @@ def prepare_for_rewriting(module: gtirb.Module, nop: bytes) -> Iterator[None]:
         join_byte_intervals(partition, nop, alignment)
         for interval in partition[1:]:
             interval.section = None
+
+    if is_module_layout_required(module):
+        layout_module(module)

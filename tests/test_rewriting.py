@@ -23,6 +23,7 @@ import logging
 
 import gtirb
 import gtirb_functions
+import gtirb_layout
 import gtirb_rewriting
 import pytest
 from gtirb_rewriting._auxdata import NULL_UUID
@@ -1489,3 +1490,96 @@ def test_retarget_and_delete():
 
     assert bi.blocks == {b1}
     assert bi.symbolic_expressions == {}
+
+
+@pytest.mark.parametrize("place_b1_before_b2", (True, False))
+def test_layout_before_no_addr(place_b1_before_b2: bool):
+    """
+    Test that rewriting can handle inputs that lack addresses.
+    """
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+
+    # Create one block with an address and a second block that lacks an
+    # address.
+    text_section, bi1 = add_text_section(m, address=0x1000)
+    b1 = add_code_block(bi1, b"\x90")
+    bi2 = gtirb.ByteInterval(section=text_section)
+    b2 = add_code_block(bi2, b"\x90")
+
+    # Add a fallthrough edge so that there is a deterministic layout
+    if place_b1_before_b2:
+        add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Fallthrough)
+    else:
+        add_edge(ir.cfg, b2, b1, gtirb.EdgeType.Fallthrough)
+
+    # And add a symbol, which we'll use to track that gtirb-rewriting
+    # understood the relative order between blocks correctly.
+    b1_sym = add_symbol(m, "b1", b1)
+    assert gtirb_layout.is_module_layout_required(m)
+
+    # Delete b1, which will cause the symbol attached to it to move.
+    rwc = gtirb_rewriting.RewritingContext(m, [])
+    rwc.delete_at(b1, 0, b1.size)
+    rwc.apply()
+
+    assert b1_sym.referent is b2
+    if place_b1_before_b2:
+        # b1 was deleted and b2 is after it, so the symbol should not be an
+        # at-end symbol since it points to the start of b2.
+        assert not b1_sym.at_end
+    else:
+        # b1 was deleted and b2 is before it, so the symbol should be an
+        # at-end symbol.
+        assert b1_sym.at_end
+
+    assert bi1.contents == b""
+    assert bi2.contents == b"\x90"
+
+
+def test_layout_before_integral_symbol():
+    """
+    Test that rewriting assigns integral symbols before rewriting.
+    """
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+
+    # Create an integral symbol that needs to be resolved to stay attached
+    # to the block it points at.
+    _, bi = add_text_section(m, address=0x1000)
+    b1 = add_code_block(bi, b"\x90")
+    b2 = add_code_block(bi, b"\x90")
+    integral_sym = gtirb.Symbol("integral", payload=b2.address, module=m)
+
+    # Cause b1 to grow, which would leave the integral address pointing to the
+    # middle of a block.
+    rwc = gtirb_rewriting.RewritingContext(m, [])
+    rwc.insert_at(b1, 0, literal_patch("nop"))
+    rwc.apply()
+
+    assert integral_sym.referent is b2
+    assert not integral_sym.at_end
+    assert bi.contents == b"\x90\x90\x90"
+
+
+def test_layout_after():
+    """
+    Test that the output of gtirb-rewriting does not need further layout.
+    """
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+    b1 = add_code_block(bi, b"\x90")
+    add_code_block(bi, b"\x90")
+
+    # Generate changes that result in blocks with no addresses or overlapping
+    # addresses.
+    rwc = gtirb_rewriting.RewritingContext(m, [])
+    rwc.register_insert_function("foo", literal_patch("nop"))
+    rwc.insert_at(b1, b1.size, literal_patch("nop"))
+    rwc.apply()
+
+    assert not gtirb_layout.is_module_layout_required(m)

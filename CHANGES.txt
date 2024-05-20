@@ -8,6 +8,9 @@
   AmbiguousCFGErrors.
 - Added RewritingContext.delete_symbol, which allows deleting a symbol
   entirely.
+- Layout is now performed before and after rewriting, allowing for rewriting
+  of modules without addresses and ensuring that the output has addresses.
+  Layout is implemented with the gtirb-layout package.
 
 0.2.0:
 - CFI directives are now preserved, allowing rewriting of C++ programs with
