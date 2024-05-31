@@ -258,16 +258,21 @@ def _update_functions_aux_data(
         return
 
     # If it was previously a function entry block, the next block gets
-    # promoted into that role.
+    # promoted into that role -- but only if it's in the same function.
     aux_function_entries = _auxdata.function_entries.get(block.module)
     if (
         aux_function_entries
         and block in aux_function_entries[function_uuid]
         and isinstance(next_block, gtirb.CodeBlock)
+        and cache.in_same_function(block, next_block)
     ):
-        # TODO: If we have a next block and it's a data block, we might want
-        # to record that somewhere so that when we delete the data block we
-        # can promote the next block to an entry.
+        # TODO: If we are deleting code block B1 that is a function entry,
+        #        then data block B2 that follows it, and there is a code block
+        #        B3 following that, we won't promote B3 to be a function
+        #        entry because we lose track of that property after the first
+        #        deletion because B2 is a data block. If we want to be less
+        #        lossy in this specific case we'd have to keep track of data
+        #        blocks that should be considered entry blocks.
         aux_function_entries[function_uuid].add(next_block)
 
     remove_function_block_aux(cache, block)

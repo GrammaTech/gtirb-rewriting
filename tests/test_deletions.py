@@ -835,3 +835,42 @@ def test_delete_zero_sized_block():
     assert b2_sym.referent is b2
     assert bi.blocks == {b2}
     assert set(ir.cfg) == set()
+
+
+def test_delete_function_entry():
+    """
+    Test that deleting a function entry block does not promote an unrelated
+    block to be the function entry.
+    """
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b1 = add_code_block(bi, b"\x90")
+    b2 = add_code_block(bi, b"\x90")
+
+    func1 = add_function_object(m, "func1", b1)
+    func2 = add_function_object(m, "func2", b2)
+
+    assert m.aux_data["functionEntries"].data == {
+        func1.uuid: {b1},
+        func2.uuid: {b2},
+    }
+    assert m.aux_data["functionBlocks"].data == {
+        func1.uuid: {b1},
+        func2.uuid: {b2},
+    }
+
+    # Test that deleting a function entry block does not promote another
+    # function's block into that role.
+    ctx = gtirb_rewriting.RewritingContext(m, [func1, func2])
+    ctx.delete_at(b1, 0, b1.size)
+    ctx.apply()
+
+    assert m.aux_data["functionEntries"].data == {
+        func2.uuid: {b2},
+    }
+    assert m.aux_data["functionBlocks"].data == {
+        func2.uuid: {b2},
+    }
