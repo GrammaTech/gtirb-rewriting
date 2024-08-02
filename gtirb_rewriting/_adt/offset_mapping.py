@@ -166,6 +166,10 @@ class OffsetMapping(MutableMapping[gtirb.Offset, T]):
         ...
 
     @overload
+    def pop(self, key: gtirb.Offset, default: T) -> T:
+        ...
+
+    @overload
     def pop(self, key: gtirb.Offset, default: T2) -> Union[T, T2]:
         ...
 
