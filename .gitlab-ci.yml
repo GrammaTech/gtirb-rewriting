@@ -47,11 +47,11 @@ check-format:
         path: coverage.xml
 
 test-stable-20:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:1
   <<: *test
 
 test-minver-20:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:1
   before_script:
   - pip install uv
   variables:
@@ -60,7 +60,7 @@ test-minver-20:
   <<: *test
 
 test-unstable-20:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:1
   before_script:
   - pip install --upgrade pip
   variables:
