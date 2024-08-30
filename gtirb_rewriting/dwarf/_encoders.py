@@ -20,7 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, Union
 
 import leb128
 from typing_extensions import Literal
@@ -31,21 +31,21 @@ _T = TypeVar("_T")
 class _Encoder(Generic[_T]):
     def encode(
         self, value: _T, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> bytes:
+    ) -> Union[bytes, bytearray]:
         ...
 
 
 class _ULEB128Encoder(_Encoder[int]):
     def encode(
         self, value: int, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> bytes:
+    ) -> bytearray:
         return leb128.u.encode(value)
 
 
 class _SLEB128Encoder(_Encoder[int]):
     def encode(
         self, value: int, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> bytes:
+    ) -> bytearray:
         return leb128.i.encode(value)
 
 
