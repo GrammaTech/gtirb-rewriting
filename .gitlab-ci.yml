@@ -1,7 +1,13 @@
 variables:
   COVERAGE_FAIL_BELOW: 80
+  # The IMAGE_TAG is derived from the branch name so that if a branch modifies
+  # the CI images, it builds and runs using the new images without conflicting
+  # with main.
+  IMAGE_TAG: "$CI_COMMIT_REF_SLUG"
+
 
 stages:
+    - build-images
     - check-format
     - test
     - export
@@ -9,6 +15,40 @@ stages:
 default:
   image: python:3.7-slim
   tags: ['shared']
+
+.build-ci-image: &build-ci-image
+  stage: build-images
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    # Configure authentication credentials for GitLab
+    - >-
+      echo "{\"auths\":{
+        \"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"},
+        \"https://index.docker.io/v1/\":{\"username\":\"$DOCKERHUB_USERNAME\",\"password\":\"$DOCKERHUB_PASSWORD\"}
+      }}" > /kaniko/.docker/config.json
+    # Run the kaniko executor, which will build our image (using a cache if available)
+    # Push to our internal registry
+    # If we're on the main branch, also push the latest tag.
+    - >-
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        export EXTRA_DEST="--destination=${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
+      fi
+    - >-
+      /kaniko/executor
+      --cache=true
+      --cache-copy-layers=true
+      --context=$CI_PROJECT_DIR
+      --dockerfile=$CI_PROJECT_DIR/$DOCKERFILE_PATH
+      --destination=${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:$IMAGE_TAG
+      $EXTRA_DEST
+
+build-image-ubuntu20:
+  <<: *build-ci-image
+  variables:
+    DOCKERFILE_PATH: Dockerfile.ci
+    IMAGE_NAME: ci-ubuntu20
 
 check-format:
   stage: check-format
@@ -47,11 +87,11 @@ check-format:
         path: coverage.xml
 
 test-stable-20:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:$IMAGE_TAG
   <<: *test
 
 test-minver-20:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:$IMAGE_TAG
   before_script:
   - pip install uv
   variables:
@@ -60,7 +100,7 @@ test-minver-20:
   <<: *test
 
 test-unstable-20:
-  image: $CI_REGISTRY/rewriting/ddisasm/ubuntu20
+  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:$IMAGE_TAG
   before_script:
   - pip install --upgrade pip
   variables:
