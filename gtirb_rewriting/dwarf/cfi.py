@@ -39,7 +39,7 @@ class _ExprEncoder(_Encoder[List[Operation]]):
         value: List[Operation],
         byteorder: Literal["big", "little"],
         ptr_size: int,
-    ) -> bytes:
+    ) -> bytearray:
         encoded_expr = b"".join(op.encode(byteorder, ptr_size) for op in value)
         return leb128.u.encode(len(encoded_expr)) + encoded_expr
 
