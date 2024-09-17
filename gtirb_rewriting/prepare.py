@@ -50,8 +50,11 @@ def prepare_for_rewriting(module: gtirb.Module, nop: bytes) -> Iterator[None]:
 
     partitions = []
     for interval in tuple(module.byte_intervals):
-        if any(isinstance(b, gtirb.CodeBlock) for b in interval.blocks):
-            partitions.append(split_byte_interval(interval, alignment))
+        # TODO: Only split byte intervals that will receive modifications.
+        # Consider computing the cost of the modifications. It is possible that
+        # a small set of modifications could be faster on the unsplit interval
+        # than the time it takes to split and rejoin it.
+        partitions.append(split_byte_interval(interval, alignment))
 
     yield
 
