@@ -25,8 +25,9 @@ from typing import Iterable, Iterator, List, Optional, Sequence, Set
 
 import capstone_gt
 import gtirb
-import gtirb_rewriting._auxdata as _auxdata
 from gtirb_capstone.instructions import GtirbInstructionDecoder
+
+import gtirb_rewriting._auxdata as _auxdata
 
 
 def _target_triple(

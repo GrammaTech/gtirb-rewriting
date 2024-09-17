@@ -27,6 +27,7 @@ Remove a block from a byte interval.
 from typing import List, Optional
 
 import gtirb
+
 import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from gtirb_rewriting._modify.functions import remove_function_block_aux

@@ -25,6 +25,7 @@ import sys
 from typing import List
 
 import gtirb
+
 from gtirb_rewriting import Assembler, AssemblerError, X86Syntax, __version__
 
 

@@ -23,6 +23,7 @@
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
 import gtirb
+
 import gtirb_rewriting._auxdata as auxdata
 from gtirb_rewriting._adt import OffsetMapping
 from gtirb_rewriting.abi import ABI

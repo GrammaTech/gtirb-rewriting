@@ -23,9 +23,6 @@
 import gtirb
 import pytest
 from gtirb_capstone.instructions import GtirbInstructionDecoder
-from gtirb_rewriting import RewritingContext
-from gtirb_rewriting._auxdata import NULL_UUID
-from gtirb_rewriting._modify import retarget_symbol_uses
 from gtirb_test_helpers import (
     add_code_block,
     add_edge,
@@ -34,6 +31,10 @@ from gtirb_test_helpers import (
     add_text_section,
     create_test_module,
 )
+
+from gtirb_rewriting import RewritingContext
+from gtirb_rewriting._auxdata import NULL_UUID
+from gtirb_rewriting._modify import retarget_symbol_uses
 
 
 @pytest.mark.parametrize("use_rwc", (True, False))

@@ -29,9 +29,10 @@ import logging
 from typing import List, MutableMapping, Optional, Set
 
 import gtirb
+from more_itertools import pairwise
+
 import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
-from more_itertools import pairwise
 
 from .._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from ..assembler import Assembler, UnsupportedAssemblyError

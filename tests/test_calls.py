@@ -23,11 +23,12 @@
 import unittest
 
 import gtirb
-import gtirb_rewriting
 import pytest
-from gtirb_rewriting.patches import CallPatch
 from gtirb_test_helpers import add_proxy_block, add_symbol, create_test_module
 from helpers import remove_indentation
+
+import gtirb_rewriting
+from gtirb_rewriting.patches import CallPatch
 
 
 def create_mock_context(m, stack_adjustment=None):

@@ -24,7 +24,6 @@ import unittest.mock
 
 import capstone_gt
 import gtirb
-import gtirb_rewriting.utils
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
@@ -33,6 +32,8 @@ from gtirb_test_helpers import (
     add_text_section,
     create_test_module,
 )
+
+import gtirb_rewriting.utils
 
 
 def test_triples():

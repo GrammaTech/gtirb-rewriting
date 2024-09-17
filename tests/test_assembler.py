@@ -28,10 +28,7 @@ from typing import Iterator, Tuple, Type
 from unittest.mock import Mock
 
 import gtirb
-import gtirb_rewriting
 import pytest
-from gtirb_rewriting._auxdata import NULL_UUID
-from gtirb_rewriting.assembler.__main__ import main as gtirb_as
 from gtirb_test_helpers import (
     add_data_block,
     add_proxy_block,
@@ -39,6 +36,10 @@ from gtirb_test_helpers import (
     add_text_section,
     create_test_module,
 )
+
+import gtirb_rewriting
+from gtirb_rewriting._auxdata import NULL_UUID
+from gtirb_rewriting.assembler.__main__ import main as gtirb_as
 
 if gtirb.version.PROTOBUF_VERSION < 4:
     import gtirb_rewriting.gtirb_protobuf_compat.proto_3 as compat_proto

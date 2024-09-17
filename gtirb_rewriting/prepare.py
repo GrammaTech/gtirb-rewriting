@@ -23,12 +23,13 @@ import contextlib
 from typing import Iterator
 
 import gtirb
-import gtirb_rewriting._auxdata as _auxdata
 from gtirb_layout import (
     assign_integral_symbols,
     is_module_layout_required,
     layout_module,
 )
+
+import gtirb_rewriting._auxdata as _auxdata
 
 from .intervalutils import join_byte_intervals, split_byte_interval
 

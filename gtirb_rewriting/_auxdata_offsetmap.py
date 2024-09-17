@@ -23,8 +23,9 @@
 from typing import Any, Dict, Tuple, cast
 
 import gtirb
-import gtirb_rewriting._auxdata as _auxdata
 from typing_extensions import get_args
+
+import gtirb_rewriting._auxdata as _auxdata
 
 from ._adt import OffsetMapping
 from ._auxdata import ContainerT, DataT, TableDefinition

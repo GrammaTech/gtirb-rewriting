@@ -25,6 +25,7 @@ from typing import Dict, Iterable
 import capstone_gt
 import gtirb
 from gtirb_capstone.instructions import GtirbInstructionDecoder
+
 from gtirb_rewriting._modify.edges import update_edge
 
 from .. import _auxdata

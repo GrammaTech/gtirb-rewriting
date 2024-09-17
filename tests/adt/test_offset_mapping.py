@@ -23,8 +23,9 @@
 import uuid
 
 import gtirb
-import gtirb_rewriting
 import pytest
+
+import gtirb_rewriting
 
 
 def test_offset_mapping():

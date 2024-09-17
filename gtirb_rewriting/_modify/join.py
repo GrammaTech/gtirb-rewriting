@@ -28,6 +28,7 @@ import logging
 from typing import NamedTuple, TypeVar
 
 import gtirb
+
 import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 

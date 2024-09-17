@@ -22,12 +22,9 @@
 
 from typing import Dict, List, Set, Tuple
 
-import more_itertools as mi
-
 import gtirb
-import gtirb_rewriting
+import more_itertools as mi
 import pytest
-from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
@@ -38,6 +35,9 @@ from gtirb_test_helpers import (
     create_test_module,
 )
 from helpers import add_function_object
+
+import gtirb_rewriting
+from gtirb_rewriting._auxdata import NULL_UUID
 
 
 def test_return_cache():

@@ -25,7 +25,6 @@ import unittest.mock
 import capstone_gt
 import gtirb
 import gtirb_functions
-import gtirb_rewriting
 from gtirb_test_helpers import (
     add_code_block,
     add_data_section,
@@ -33,6 +32,8 @@ from gtirb_test_helpers import (
     create_test_module,
 )
 from helpers import add_function_object
+
+import gtirb_rewriting
 
 
 def test_all_block_scope_entry():

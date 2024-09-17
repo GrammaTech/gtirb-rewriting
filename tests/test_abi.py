@@ -20,9 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-import gtirb_rewriting
 import pytest
 from helpers import remove_indentation
+
+import gtirb_rewriting
 
 
 def stringify_snippets(snippets):

@@ -28,9 +28,9 @@ Split one block into two.
 import logging
 from typing import Optional, Tuple, TypeVar
 
+import gtirb
 from more_itertools import before_and_after
 
-import gtirb
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 
 from .._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES

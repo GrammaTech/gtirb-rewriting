@@ -43,10 +43,11 @@ from typing import (
 
 import gtirb
 import gtirb_functions
-import gtirb_rewriting._auxdata as _auxdata
-import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 from intervaltree import IntervalTree
+
+import gtirb_rewriting._auxdata as _auxdata
+import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 
 from ._modify import (
     ModifyCache,

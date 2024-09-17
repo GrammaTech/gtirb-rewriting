@@ -24,6 +24,7 @@ import itertools
 from typing import Iterable, List, Mapping, MutableMapping, Optional
 
 import gtirb
+
 import gtirb_rewriting._auxdata as _auxdata
 
 from ._adt import OffsetMapping
