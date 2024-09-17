@@ -28,9 +28,10 @@ Split one block into two.
 import logging
 from typing import Optional, Tuple, TypeVar
 
+from more_itertools import before_and_after
+
 import gtirb
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
-from more_itertools import before_and_after
 
 from .._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from ..utils import (
@@ -75,7 +76,7 @@ def split_block(
     new_block.byte_interval = block.byte_interval
     block.size = offset
 
-    for sym in tuple(block.references):
+    for sym in tuple(cache.reference_cache.get_references(block)):
         if sym.at_end:
             sym.referent = new_block
 

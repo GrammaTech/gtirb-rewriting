@@ -20,6 +20,10 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+from typing import Dict, List, Set, Tuple
+
+import more_itertools as mi
+
 import gtirb
 import gtirb_rewriting
 import pytest
@@ -129,6 +133,180 @@ def test_return_cache_decorator():
     assert ir.cfg is orig_cfg
 
 
+@pytest.mark.parametrize("apply_first", [True, False])
+@pytest.mark.parametrize(
+    "names, targets, expected",
+    [
+        (
+            # Retarget b1 -> start of b2, then b2 -> start of b3
+            {"b1", "b2", "b3"},
+            [("b1", "b2", False), ("b2", "b3", False)],
+            {"b3": ({"b1", "b2", "b3"}, set())},
+        ),
+        (
+            # Retarget b1 -> start of b2, then b1 -> start of b3
+            {"b1", "b2", "b3"},
+            [("b1", "b2", False), ("b1", "b2", False)],
+            {
+                "b2": ({"b1", "b2"}, set()),
+                "b3": ({"b3"}, set()),
+            },
+        ),
+        (
+            # Retarget b1 -> end of b2, then b2 -> start of b3
+            {"b1", "b2", "b3"},
+            [("b1", "b2", True), ("b2", "b3", False)],
+            {"b3": ({"b1", "b2", "b3"}, set())},
+        ),
+        (
+            # Retarget b1 -> start of b2, then b2 -> end of b3
+            {"b1", "b2", "b3"},
+            [("b1", "b2", False), ("b2", "b3", True)],
+            {"b3": ({"b3"}, {"b1", "b2"})},
+        ),
+        (
+            # Retarget b2 -> end of b3, then b1 -> start of b2
+            {"b1", "b2", "b3"},
+            [("b2", "b3", True), ("b1", "b2", False)],
+            {"b2": ({"b1"}, set()), "b3": ({"b3"}, {"b2"})},
+        ),
+        (
+            # Retarget b1 and b2 -> start of b3, then b3 -> start of b4
+            {"b1", "b2", "b3", "b4"},
+            [("b1", "b3", False), ("b2", "b3", False), ("b3", "b4", False)],
+            {"b4": ({"b1", "b2", "b3", "b4"}, set())},
+        ),
+    ],
+)
+def test_reference_cache(
+    names: Set[str],
+    targets: List[Tuple[str, str, bool]],
+    expected: Dict[str, Tuple[Set[str], Set[str]]],
+    apply_first: bool,
+):
+    _, m = create_test_module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    blocks = {}
+    for name in names:
+        blocks[name] = add_data_block(bi, b"\x00")
+        add_symbol(m, name, blocks[name])
+
+    cache = gtirb_rewriting._modify.ReferenceCache()
+    for from_name, to_name, at_end in targets:
+        cache.retarget_references(blocks[from_name], blocks[to_name], at_end)
+
+    if apply_first:
+        # Check that applying the cache updates block references.
+        cache.apply()
+        # E731: use a def instead of a lambda expression
+        references = lambda block: block.references  # noqa: E731
+    else:
+        # Check that we retrieve the correct references from the cache.
+        references = cache.get_references
+
+    for block_name, block in blocks.items():
+        at_start_names, at_end_names = expected.get(block_name, (set(), set()))
+        at_start, at_end = mi.partition(lambda s: s.at_end, references(block))
+        assert {sym.name for sym in at_start} == at_start_names, block_name
+        assert {sym.name for sym in at_end} == at_end_names, block_name
+
+
+def test_reference_cache_get_referent():
+    _, m = create_test_module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b1 = add_data_block(bi, b"\x00")
+    b2 = add_data_block(bi, b"\x00")
+    b3 = add_data_block(bi, b"\x00")
+    b4 = add_data_block(bi, b"\x00")
+    s1 = add_symbol(m, "b1", b1)
+    s2 = add_symbol(m, "b2", b2)
+    s3 = add_symbol(m, "b3", b3)
+    add_symbol(m, "b4", b4)
+
+    cache = gtirb_rewriting._modify.ReferenceCache()
+
+    cache.retarget_references(b1, b2, False)
+
+    for sym in [s1, s2]:
+        assert cache.get_referent(sym) == b2
+        assert sym.referent == b2
+        assert not sym.at_end
+
+    cache.retarget_references(b2, b3, False)
+    cache.retarget_references(b3, b4, True)
+
+    for sym in [s1, s2, s3]:
+        assert cache.get_referent(sym) == b4
+        assert sym.referent == b4
+        assert sym.at_end
+
+
+def test_reference_cache_set_referent():
+    _, m = create_test_module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b1 = add_data_block(bi, b"\x00")
+    b2 = add_data_block(bi, b"\x00")
+    b3 = add_data_block(bi, b"\x00")
+    s1 = add_symbol(m, "b1", b1)
+    add_symbol(m, "b2", b2)
+    add_symbol(m, "b3", b3)
+
+    cache = gtirb_rewriting._modify.ReferenceCache()
+
+    cache.retarget_references(b1, b2, False)
+    cache.set_referent(s1, b3, True)
+
+    assert s1.referent == b3
+    assert s1.at_end
+
+    cache.retarget_references(b2, b1, False)
+
+    assert s1.referent == b3
+    assert s1.at_end
+
+    cache.set_referent(s1, b1, False)
+
+    assert s1.referent == b1
+    assert not s1.at_end
+
+
+def test_reference_cache_contextmanager():
+    _, m = create_test_module(
+        isa=gtirb.Module.ISA.X64,
+        file_format=gtirb.Module.FileFormat.ELF,
+    )
+    _, bi = add_text_section(m, address=0x1000)
+
+    b1 = add_data_block(bi, b"\x00")
+    b2 = add_data_block(bi, b"\x00")
+    b3 = add_data_block(bi, b"\x00")
+    add_symbol(m, "b1", b1)
+    add_symbol(m, "b2", b2)
+    add_symbol(m, "b3", b3)
+
+    with gtirb_rewriting._modify.ReferenceCache() as cache:
+        cache.retarget_references(b1, b2, False)
+    assert {sym.name for sym in b2.references} == {"b1", "b2"}
+
+    with pytest.raises(ZeroDivisionError):
+        with gtirb_rewriting._modify.ReferenceCache() as cache:
+            cache.retarget_references(b2, b3, False)
+            raise ZeroDivisionError()
+    assert {sym.name for sym in b3.references} == {"b1", "b2", "b3"}
+
+
 def test_modify_cache():
     ir, m = create_test_module(
         isa=gtirb.Module.ISA.X64,
@@ -143,12 +321,9 @@ def test_modify_cache():
     b2 = add_code_block(bi, b"\x0F\x0B")
     func = add_function_object(m, "func", b1)
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-
-    assert modify_cache.functions_by_block[b1] == func.uuid
-    assert b2 not in modify_cache.functions_by_block
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert modify_cache.functions_by_block[b1] == func.uuid
+        assert b2 not in modify_cache.functions_by_block
 
 
 def test_split_block_simple():
@@ -173,12 +348,10 @@ def test_split_block_simple():
     m.aux_data["comments"].data[gtirb.Offset(b1, 0)] = "0"
     m.aux_data["comments"].data[gtirb.Offset(b1, 1)] = "1"
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    b1_start, b1_end, fallthrough = gtirb_rewriting._modify.split_block(
-        modify_cache, b1, 1
-    )
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        b1_start, b1_end, fallthrough = gtirb_rewriting._modify.split_block(
+            modify_cache, b1, 1
+        )
 
     assert b1_start is b1
     assert b1.offset == 0
@@ -241,12 +414,10 @@ def test_split_block_begin():
         (".cfi_endproc", [], NULL_UUID)
     ]
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    b1_start, b1_end, fallthrough = gtirb_rewriting._modify.split_block(
-        modify_cache, b1, 0
-    )
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        b1_start, b1_end, fallthrough = gtirb_rewriting._modify.split_block(
+            modify_cache, b1, 0
+        )
 
     assert b1_start is b1
     assert b1_start.offset == 0
@@ -307,12 +478,16 @@ def test_split_block_end_with_call():
     add_edge(ir.cfg, func2_b1, func1_b1, gtirb.EdgeType.Call)
     add_edge(ir.cfg, func2_b1, func2_b2, gtirb.EdgeType.Fallthrough)
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func1, func2], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    split_start, split_end, fallthrough = gtirb_rewriting._modify.split_block(
-        modify_cache, func2_b1, func2_b1.size
-    )
+    with gtirb_rewriting._modify.make_modify_cache(
+        m, [func1, func2]
+    ) as modify_cache:
+        (
+            split_start,
+            split_end,
+            fallthrough,
+        ) = gtirb_rewriting._modify.split_block(
+            modify_cache, func2_b1, func2_b1.size
+        )
 
     assert split_start is func2_b1
     assert split_start.offset == 1
@@ -359,12 +534,12 @@ def test_split_block_end_with_jump():
     add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Branch)
     func = add_function_object(m, "func", b1, {b2})
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    split_start, split_end, fallthrough = gtirb_rewriting._modify.split_block(
-        modify_cache, b1, b1.size
-    )
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        (
+            split_start,
+            split_end,
+            fallthrough,
+        ) = gtirb_rewriting._modify.split_block(modify_cache, b1, b1.size)
 
     assert split_start is b1
     assert split_start.offset == 0
@@ -406,12 +581,12 @@ def test_split_blocks_proc_begin():
         (".cfi_endproc", [], NULL_UUID),
     ]
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    split_start, split_end, fallthrough = gtirb_rewriting._modify.split_block(
-        modify_cache, b1, 0
-    )
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        (
+            split_start,
+            split_end,
+            fallthrough,
+        ) = gtirb_rewriting._modify.split_block(modify_cache, b1, 0)
 
     assert split_start is b1
     assert split_start.offset == 0
@@ -459,12 +634,12 @@ def test_split_blocks_proc_end():
         (".cfi_endproc", [], NULL_UUID),
     ]
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    split_start, split_end, fallthrough = gtirb_rewriting._modify.split_block(
-        modify_cache, b1, b1.size
-    )
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        (
+            split_start,
+            split_end,
+            fallthrough,
+        ) = gtirb_rewriting._modify.split_block(modify_cache, b1, b1.size)
 
     assert split_start is b1
     assert split_start.offset == 0
@@ -513,12 +688,12 @@ def test_join_blocks_procs_end():
         (".cfi_endproc", [], NULL_UUID),
     ]
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
 
-    joined_block = gtirb_rewriting._modify.join_blocks(modify_cache, b1, b2)
+        joined_block = gtirb_rewriting._modify.join_blocks(
+            modify_cache, b1, b2
+        )
     assert joined_block is b1
 
     assert m.aux_data["cfiDirectives"].data == {
@@ -559,12 +734,12 @@ def test_join_blocks_procs_begin():
         (".cfi_endproc", [], NULL_UUID),
     ]
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
 
-    joined_block = gtirb_rewriting._modify.join_blocks(modify_cache, b1, b2)
+        joined_block = gtirb_rewriting._modify.join_blocks(
+            modify_cache, b1, b2
+        )
     assert joined_block is b1
 
     assert m.aux_data["cfiDirectives"].data == {
@@ -604,12 +779,12 @@ def test_join_blocks_simple():
         (".cfi_undefined", [1], NULL_UUID),
     ]
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
 
-    joined_block = gtirb_rewriting._modify.join_blocks(modify_cache, b1, b2)
+        joined_block = gtirb_rewriting._modify.join_blocks(
+            modify_cache, b1, b2
+        )
 
     assert bi.blocks == {b1, b3}
     assert joined_block is b1
@@ -661,11 +836,11 @@ def test_join_blocks_zero_sized():
 
     m.aux_data["alignment"].data[b2] = 4
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
-    joined_block = gtirb_rewriting._modify.join_blocks(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+        joined_block = gtirb_rewriting._modify.join_blocks(
+            modify_cache, b1, b2
+        )
 
     assert joined_block is b1
     assert joined_block.offset == 2
@@ -693,10 +868,8 @@ def test_unjoinable_due_to_symbol():
     add_symbol(m, "b2", b2)
     func = add_function_object(m, "func", b1, {b2})
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
 
 
 def test_unjoinable_due_to_edges():
@@ -710,10 +883,8 @@ def test_unjoinable_due_to_edges():
     add_edge(ir.cfg, b1, b2, gtirb.EdgeType.Return)
     func = add_function_object(m, "func", b1, {b2})
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
 
 
 def test_unjoinable_due_to_different_type():
@@ -726,10 +897,8 @@ def test_unjoinable_due_to_different_type():
     b2 = add_data_block(bi, b"\x58")
     func = add_function_object(m, "func", b1)
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
 
 
 def test_unjoinable_due_to_alignment():
@@ -744,10 +913,8 @@ def test_unjoinable_due_to_alignment():
 
     m.aux_data["alignment"].data[b2] = 8
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        assert not gtirb_rewriting._modify.are_joinable(modify_cache, b1, b2)
 
 
 def test_remove_blocks_simple():
@@ -784,10 +951,8 @@ def test_remove_blocks_simple():
         ],
     }
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    gtirb_rewriting._modify.remove_block(modify_cache, b2, False)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        gtirb_rewriting._modify.remove_block(modify_cache, b2, False)
 
     # _remove_block doesn't actually update the byte interval contents
     assert bi.blocks == {b1, b3}
@@ -851,10 +1016,8 @@ def test_remove_blocks_with_important_cfi_directives():
         ],
     }
 
-    modify_cache = gtirb_rewriting._modify.ModifyCache(
-        m, [func], gtirb_rewriting._modify.ReturnEdgeCache(ir.cfg)
-    )
-    gtirb_rewriting._modify.remove_block(modify_cache, b3, False)
+    with gtirb_rewriting._modify.make_modify_cache(m, [func]) as modify_cache:
+        gtirb_rewriting._modify.remove_block(modify_cache, b3, False)
 
     assert bi.blocks == {b1, b2, b3}
     assert b3.size == 0
