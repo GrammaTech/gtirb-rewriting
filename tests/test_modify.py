@@ -184,17 +184,22 @@ def test_reference_cache(
     expected: Dict[str, Tuple[Set[str], Set[str]]],
     apply_first: bool,
 ):
+    """
+    Test that the reference cache retargets references correctly.
+    """
     _, m = create_test_module(
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
     )
     _, bi = add_text_section(m, address=0x1000)
 
+    # Create the named blocks and assign each a symbol with the same name.
     blocks = {}
     for name in names:
         blocks[name] = add_data_block(bi, b"\x00")
         add_symbol(m, name, blocks[name])
 
+    # Retarget the block references.
     cache = gtirb_rewriting._modify.ReferenceCache()
     for from_name, to_name, at_end in targets:
         cache.retarget_references(blocks[from_name], blocks[to_name], at_end)
@@ -208,6 +213,7 @@ def test_reference_cache(
         # Check that we retrieve the correct references from the cache.
         references = cache.get_references
 
+    # Check that the final references are what we expect.
     for block_name, block in blocks.items():
         at_start_names, at_end_names = expected.get(block_name, (set(), set()))
         at_start, at_end = mi.partition(lambda s: s.at_end, references(block))
@@ -216,6 +222,9 @@ def test_reference_cache(
 
 
 def test_reference_cache_get_referent():
+    """
+    Test that get_referent works on both direct and indirect references.
+    """
     _, m = create_test_module(
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
@@ -233,12 +242,17 @@ def test_reference_cache_get_referent():
 
     cache = gtirb_rewriting._modify.ReferenceCache()
 
+    # Make s1 an indirect reference to b2; s2 remains a direct reference to b2.
+
     cache.retarget_references(b1, b2, False)
 
     for sym in [s1, s2]:
         assert cache.get_referent(sym) == b2
         assert sym.referent == b2
         assert not sym.at_end
+
+    # Make s1, s2, and s3 indirect reference to b4. Check that s1 and s2 point
+    # to the correct end of b4 after indirectly pointing to the other end of b3
 
     cache.retarget_references(b2, b3, False)
     cache.retarget_references(b3, b4, True)
@@ -250,6 +264,9 @@ def test_reference_cache_get_referent():
 
 
 def test_reference_cache_set_referent():
+    """
+    Test that set_referent reassigns in/direct references correctly.
+    """
     _, m = create_test_module(
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
@@ -265,16 +282,25 @@ def test_reference_cache_set_referent():
 
     cache = gtirb_rewriting._modify.ReferenceCache()
 
+    # Make s1 an indirect reference to b2.
+
     cache.retarget_references(b1, b2, False)
+
+    # Reassign s1 an indirect reference to b3.
+
     cache.set_referent(s1, b3, True)
 
     assert s1.referent == b3
     assert s1.at_end
 
+    # Reassigning b2's references (just s2 now) to b1 does not affect s1.
+
     cache.retarget_references(b2, b1, False)
 
     assert s1.referent == b3
     assert s1.at_end
+
+    # Reassign s1 (currently a direct reference) to b1.
 
     cache.set_referent(s1, b1, False)
 
@@ -283,6 +309,9 @@ def test_reference_cache_set_referent():
 
 
 def test_reference_cache_contextmanager():
+    """
+    Test that exiting the ReferenceCache context restores direct references.
+    """
     _, m = create_test_module(
         isa=gtirb.Module.ISA.X64,
         file_format=gtirb.Module.FileFormat.ELF,
@@ -296,9 +325,13 @@ def test_reference_cache_contextmanager():
     add_symbol(m, "b2", b2)
     add_symbol(m, "b3", b3)
 
+    # Check direct references are updated after exiting normally.
+
     with gtirb_rewriting._modify.ReferenceCache() as cache:
         cache.retarget_references(b1, b2, False)
     assert {sym.name for sym in b2.references} == {"b1", "b2"}
+
+    # Check direct references are updated after exiting via exception.
 
     with pytest.raises(ZeroDivisionError):
         with gtirb_rewriting._modify.ReferenceCache() as cache:

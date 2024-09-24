@@ -203,8 +203,7 @@ def test_split_byte_interval_overlapping_blocks():
     assert b6.offset == 0
     assert b7.offset == 1
 
-    assert alignment[b3] == 4
-    assert alignment[b4] == 4
+    assert alignment == {b3: 4, b4: 4}
 
 
 def test_join_byte_intervals_no_tables():

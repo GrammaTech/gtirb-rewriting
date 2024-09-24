@@ -226,6 +226,11 @@ class ReferenceCache:
 
         Performance is proportional to the number of direct references to the
         block.
+
+        :param block: block to move references from
+        :param to_block: block to move references to
+        :param at_end: whether to move references to the start or end of
+             to_block
         """
         if not any(block.references) and block not in self._references:
             # No direct or indirect references, so nothing to retarget.
@@ -240,7 +245,15 @@ class ReferenceCache:
 
         # Convert any direct references into indirect references.
         for symbol in tuple(block.references):
-            assert symbol not in self._referents, "symbol reassigned"
+            # The only way for a symbol to be in self._referents is to call
+            # this method. For it to be in block.references as well means that
+            # the client set `symbol.referent = block` afterwards without using
+            # set_referent, get_referent, get_references, or apply to make the
+            # reference direct first.
+            assert (
+                symbol not in self._referents
+            ), "symbol has both direct and indirect references"
+
             if symbol.at_end:
                 end_refs.symbols.add(symbol)
                 self._referents[symbol] = end_refs
@@ -279,7 +292,7 @@ class ReferenceCache:
         yield from self._make_direct_refs(block, start_refs, False)
         yield from self._make_direct_refs(block, end_refs, True)
 
-        # _update_references() converts indirect into direct references. If we
+        # _make_direct_refs() converts indirect into direct references. If we
         # got here, this block has no indirect references left.
         del self._references[block]
 
@@ -304,7 +317,10 @@ class ReferenceCache:
                 symbol.at_end = at_end
                 yield symbol
             if node.parent is root:
-                assert not node.children
+                # The node.children loop above removes children from this node
+                # and reassigns them to the root. That means this node should
+                # not have any children unless it's also the root.
+                assert not node.children, "cycle in reference tree"
                 root.children.remove(node)
 
     def apply(self) -> None:
@@ -314,7 +330,7 @@ class ReferenceCache:
         for block, (start_refs, end_refs) in self._references.items():
             mi.consume(self._make_direct_refs(block, start_refs, False))
             mi.consume(self._make_direct_refs(block, end_refs, True))
-        # _update_references() will have cleared the referents table already
+        # _make_direct_refs() will have cleared the referents table already
         assert not self._referents
         self._references.clear()
 
