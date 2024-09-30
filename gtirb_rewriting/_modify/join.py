@@ -28,6 +28,7 @@ import logging
 from typing import NamedTuple, TypeVar
 
 import gtirb
+
 import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 
@@ -88,7 +89,9 @@ def are_joinable(
         if alignment != 1:
             return JoinableResult(False, "block2 has a required aligment")
 
-    any_symbols = any(not sym.at_end for sym in block2.references)
+    any_symbols = any(
+        not sym.at_end for sym in cache.reference_cache.get_references(block2)
+    )
     if any_symbols:
         return JoinableResult(False, "block2 has symbols referring to it")
 
@@ -139,13 +142,9 @@ def join_blocks(
     module = block1.module
     assert ir and module and block2.section
 
-    for sym in tuple(block2.references):
-        if not block1.size:
-            sym.referent = block1
-            sym.at_end = False
-        else:
-            assert sym.at_end, "cannot join blocks if the second has symbols"
-            sym.referent = block1
+    cache.reference_cache.retarget_references(
+        block2, block1, bool(block1.size)
+    )
 
     if isinstance(block2, gtirb.CodeBlock):
         assert isinstance(block1, gtirb.CodeBlock)

@@ -27,6 +27,7 @@ Utilities for manipulating the function-related aux data tables.
 import uuid
 
 import gtirb
+
 import gtirb_rewriting._auxdata as _auxdata
 
 from .cache import ModifyCache

@@ -26,14 +26,18 @@ Caches to make repeated modifications faster.
 
 import collections
 import contextlib
+import dataclasses
 import functools
 import logging
 import operator
 import uuid
-from typing import Dict, Iterable, Iterator, Optional, Set, Tuple, cast
+from typing import Dict, Iterable, Iterator, Optional, Set, Tuple, Union, cast
 
 import gtirb
 import gtirb_functions
+import more_itertools as mi
+from typing_extensions import Self
+
 import gtirb_rewriting._auxdata as _auxdata
 
 from .._adt import BlockOrdering
@@ -153,6 +157,237 @@ def make_return_cache(ir: gtirb.IR) -> Iterator[ReturnEdgeCache]:
             ir.cfg = old_cfg
 
 
+@dataclasses.dataclass(eq=False)
+class RefNode:
+    """A node in a ReferenceCache tree."""
+
+    parent: Union[gtirb.Block, "RefNode"]
+    """The parent of this node, or the referent block if this is the root."""
+
+    symbols: Set[gtirb.Symbol] = dataclasses.field(default_factory=set)
+    """The indirect symbols assigned to this node."""
+
+    children: Set["RefNode"] = dataclasses.field(default_factory=set)
+    """The subtrees of this node."""
+
+
+class ReferenceCache:
+    """
+    A data structure for efficiently updating many symbol referents.
+
+    The cache introduces a distinction between "direct" and "indirect" symbol
+    references. "Direct" references are the references provided by GTIRB,
+    accessed using symbol.referent and block.references. "Indirect" references
+    are managed by this cache and enable efficient bulk retargeting. Although
+    the cache operations should be preferred in most cases to account for
+    indirect references, it is safe to assign a referent when creating a
+    symbol since that symbol cannot yet have an indirect reference.
+
+    The get_referent() and get_references() methods convert indirect references
+    to direct references. This ensures the referent and at_end properties are
+    consistent for the affected symbol after calling one of these methods.
+
+    Note that converting between direct and indirect references limits how
+    efficiently bulk retargeting can be performed. Iterating over references
+    should therefore be avoided when possible. To make this easier,
+    get_references() converts symbols lazily, converting each immediately
+    before yielding.
+    """
+
+    def __init__(self):
+        # Indirect references are implemented using two trees of RefNodes, one
+        # for references to the start of the referent and another for
+        # references to the end.
+
+        self._referents: Dict[gtirb.Symbol, RefNode] = {}
+
+        # By convention, the first tree points to the start.
+        self._references: Dict[gtirb.Block, Tuple[RefNode, RefNode]] = {}
+
+    def __enter__(self) -> Self:
+        """
+        Enter the cache's context.
+
+        ReferenceCache is not currently reentrant.
+        """
+        return self
+
+    def __exit__(self, typ, value, trace) -> None:
+        """Leave the cache context and apply changes."""
+        self.apply()
+
+    def retarget_references(
+        self,
+        block: gtirb.Block,
+        to_block: Optional[gtirb.Block],
+        at_end: bool,
+    ) -> None:
+        """Retarget all block references to point to to_block instead.
+
+        Performance is proportional to the number of direct references to the
+        block.
+
+        :param block: block to move references from
+        :param to_block: block to move references to
+        :param at_end: whether to move references to the start or end of
+             to_block
+        """
+        if not any(block.references) and block not in self._references:
+            # No direct or indirect references, so nothing to retarget.
+            return
+        assert to_block
+
+        # Get indirect references and detach them from the block.
+        if block in self._references:
+            start_refs, end_refs = self._references.pop(block)
+        else:
+            start_refs, end_refs = RefNode(block), RefNode(block)
+
+        # Convert any direct references into indirect references.
+        for symbol in tuple(block.references):
+            # The only way for a symbol to be in self._referents is to call
+            # this method. For it to be in block.references as well means that
+            # the client set `symbol.referent = block` afterwards without using
+            # set_referent, get_referent, get_references, or apply to make the
+            # reference direct first.
+            assert (
+                symbol not in self._referents
+            ), "symbol has both direct and indirect references"
+
+            if symbol.at_end:
+                end_refs.symbols.add(symbol)
+                self._referents[symbol] = end_refs
+            else:
+                start_refs.symbols.add(symbol)
+                self._referents[symbol] = start_refs
+            symbol.referent = None
+
+        # Get indirect references to the target block.
+        if to_block not in self._references:
+            self._references[to_block] = RefNode(to_block), RefNode(to_block)
+        if at_end:
+            target_ref = self._references[to_block][1]
+        else:
+            target_ref = self._references[to_block][0]
+
+        # Point source-block references to the target block.
+        target_ref.children.add(start_refs)
+        target_ref.children.add(end_refs)
+        start_refs.parent = target_ref
+        end_refs.parent = target_ref
+
+    def get_references(self, block: gtirb.Block) -> Iterator[gtirb.Symbol]:
+        """
+        Get all symbols referring to the block.
+
+        This includes both direct and indirect references, which will be
+        converted to direct references when each is yielded.
+        """
+        yield from block.references
+
+        if block not in self._references:
+            return
+
+        start_refs, end_refs = self._references[block]
+        yield from self._make_direct_refs(block, start_refs, False)
+        yield from self._make_direct_refs(block, end_refs, True)
+
+        # _make_direct_refs() converts indirect into direct references. If we
+        # got here, this block has no indirect references left.
+        del self._references[block]
+
+    def _make_direct_refs(
+        self, referent: gtirb.Block, root: RefNode, at_end: bool
+    ) -> Iterator[gtirb.Symbol]:
+        """
+        Convert indirect references to direct references pointing to block.
+        """
+        worklist = [root]
+        while worklist:
+            node = worklist.pop()
+            for child in tuple(node.children):
+                node.children.remove(child)
+                child.parent = root
+                root.children.add(child)
+                worklist.append(child)
+            for symbol in tuple(node.symbols):
+                node.symbols.remove(symbol)
+                del self._referents[symbol]
+                symbol.referent = referent
+                symbol.at_end = at_end
+                yield symbol
+            if node.parent is root:
+                # The node.children loop above removes children from this node
+                # and reassigns them to the root. That means this node should
+                # not have any children unless it's also the root.
+                assert not node.children, "cycle in reference tree"
+                root.children.remove(node)
+
+    def apply(self) -> None:
+        """
+        Convert all indirect references to direct, clearing the cache.
+        """
+        for block, (start_refs, end_refs) in self._references.items():
+            mi.consume(self._make_direct_refs(block, start_refs, False))
+            mi.consume(self._make_direct_refs(block, end_refs, True))
+        # _make_direct_refs() will have cleared the referents table already
+        assert not self._referents
+        self._references.clear()
+
+    def set_referent(
+        self,
+        symbol: gtirb.Symbol,
+        referent: Optional[gtirb.Block],
+        at_end: bool,
+    ) -> None:
+        """
+        Set the referent for a symbol.
+
+        After this call, the symbol will have a direct referent.
+        """
+        if symbol in self._referents:
+            ref = self._referents.pop(symbol)
+            ref.symbols.remove(symbol)
+        symbol.referent = referent
+        symbol.at_end = at_end
+
+    def get_referent(self, symbol: gtirb.Symbol) -> Optional[gtirb.Block]:
+        """
+        Get the referent for a symbol.
+
+        After this call, the symbol will have a direct referent.
+        """
+        if symbol not in self._referents:
+            return symbol.referent
+
+        # We will make symbol into a direct reference, so we can remove it from
+        # the referents table and from its RefNode's children.
+
+        ref = self._referents.pop(symbol)
+        ref.symbols.remove(symbol)
+
+        # As we walk up to the root, we move the intermediate nodes closer so
+        # future lookups have don't have to walk as far. Along the way, we can
+        # also remove any nodes without children.
+
+        parent = ref.parent
+        while isinstance(parent, RefNode):
+            grandparent = parent.parent
+            if not ref.children and not ref.symbols:
+                parent.children.remove(ref)
+            elif isinstance(grandparent, RefNode):
+                parent.children.remove(ref)
+                grandparent.children.add(ref)
+                ref.parent = grandparent
+            ref, parent = parent, grandparent
+
+        # Update the symbol and return the referent.
+
+        symbol.referent = parent
+        symbol.at_end = ref is self._references[parent][1]
+        return parent
+
+
 class ModifyCache:
     """
     State that should be preserved across calls to _modify_block_insert to
@@ -164,9 +399,11 @@ class ModifyCache:
         module: gtirb.Module,
         functions: Iterable[gtirb_functions.Function],
         return_cache: ReturnEdgeCache,
+        reference_cache: ReferenceCache,
     ) -> None:
         self.module = module
         self.return_cache = return_cache
+        self.reference_cache = reference_cache
         self.functions_by_block: Dict[gtirb.CodeBlock, uuid.UUID] = {
             block: func.uuid
             for func in functions
@@ -219,3 +456,14 @@ class ModifyCache:
             return False
 
         return block in table[func_uuid]
+
+
+@contextlib.contextmanager
+def make_modify_cache(
+    module: gtirb.Module, functions: Iterable[gtirb_functions.Function]
+) -> Iterator[ModifyCache]:
+    """Make a ModifyCache with a temporary ReturnCache and ReferenceCahe."""
+    assert module.ir
+    with make_return_cache(module.ir) as return_cache:
+        with ReferenceCache() as reference_cache:
+            yield ModifyCache(module, functions, return_cache, reference_cache)

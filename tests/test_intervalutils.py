@@ -20,8 +20,9 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import gtirb
-import gtirb_rewriting
 import pytest
+
+import gtirb_rewriting
 
 
 def test_split_byte_interval_no_tables():
@@ -202,13 +203,7 @@ def test_split_byte_interval_overlapping_blocks():
     assert b6.offset == 0
     assert b7.offset == 1
 
-    assert alignment[b1] == 1
-    assert alignment[b2] == 1
-    assert alignment[b3] == 4
-    assert alignment[b4] == 4
-    assert alignment[b5] == 2
-    assert alignment[b6] == 8
-    assert alignment[b7] == 1
+    assert alignment == {b3: 4, b4: 4}
 
 
 def test_join_byte_intervals_no_tables():

@@ -21,9 +21,7 @@
 # endorsement should be inferred.
 
 import gtirb
-import gtirb_rewriting
 import pytest
-from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_test_helpers import (
     add_code_block,
     add_edge,
@@ -39,6 +37,9 @@ from helpers import (
     add_elf_base_symbol_version,
     add_needed_elf_symbol_version,
 )
+
+import gtirb_rewriting
+from gtirb_rewriting._auxdata import NULL_UUID
 
 
 @pytest.mark.parametrize(

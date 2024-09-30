@@ -23,15 +23,16 @@
 from typing import Dict
 
 import gtirb
-import gtirb_rewriting._auxdata as _auxdata
-import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 import pytest
-from gtirb_rewriting import OffsetMapping
 from gtirb_test_helpers import (
     add_code_block,
     add_text_section,
     create_test_module,
 )
+
+import gtirb_rewriting._auxdata as _auxdata
+import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
+from gtirb_rewriting import OffsetMapping
 
 
 def test_auxdata_simple():

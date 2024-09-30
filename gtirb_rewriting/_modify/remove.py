@@ -27,6 +27,7 @@ Remove a block from a byte interval.
 from typing import List, Optional
 
 import gtirb
+
 import gtirb_rewriting._auxdata as _auxdata
 import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from gtirb_rewriting._modify.functions import remove_function_block_aux
@@ -102,20 +103,6 @@ def _can_remove_block(
         return False
 
     return True
-
-
-def _retarget_symbol_references(
-    block: gtirb.ByteBlock, to_block: Optional[gtirb.Block], at_end: bool
-) -> None:
-    """
-    Update all the symbols that refer to this block to point to another block.
-    """
-    block_references = set(block.references)
-    assert to_block or not block_references
-
-    for sym in block_references:
-        sym.referent = to_block
-        sym.at_end = at_end
 
 
 def _retarget_incoming_edges(
@@ -406,7 +393,7 @@ def remove_block(
 
     if can_remove:
         sym_target = proxy_block or next_block or prev_block
-        _retarget_symbol_references(
+        cache.reference_cache.retarget_references(
             block, sym_target, sym_target is prev_block
         )
 

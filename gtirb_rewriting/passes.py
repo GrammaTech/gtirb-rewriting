@@ -24,6 +24,7 @@ from typing import Sequence
 
 import gtirb
 import gtirb_functions
+
 import gtirb_rewriting._auxdata as _auxdata
 
 from ._modify import make_return_cache

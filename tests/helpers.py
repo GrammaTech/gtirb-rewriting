@@ -25,8 +25,9 @@ from typing import Dict, List, Sequence, Set, Tuple, Union
 
 import gtirb
 import gtirb_functions
-import gtirb_rewriting
 from gtirb_test_helpers import add_function
+
+import gtirb_rewriting
 
 _VER_FLG_BASE = 1
 

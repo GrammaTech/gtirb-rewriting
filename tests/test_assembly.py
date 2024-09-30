@@ -24,8 +24,9 @@ import unittest.mock
 
 import gtirb
 import gtirb_functions
-import gtirb_rewriting
 from gtirb_test_helpers import create_test_module
+
+import gtirb_rewriting
 
 
 def test_register_fmt():

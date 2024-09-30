@@ -22,6 +22,7 @@
 
 import gtirb
 import pytest
+
 from gtirb_rewriting._adt import BlockOrdering
 
 

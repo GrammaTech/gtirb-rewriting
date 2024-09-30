@@ -43,9 +43,10 @@ from typing import (
 )
 
 import gtirb
-import gtirb_rewriting._auxdata as _auxdata
 import mcasm
 from typing_extensions import Concatenate, ParamSpec, Self, override
+
+import gtirb_rewriting._auxdata as _auxdata
 
 from .._adt import IdentitySet, OffsetMapping
 from .._auxdata import CFIDirectiveType

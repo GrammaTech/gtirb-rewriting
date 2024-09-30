@@ -25,9 +25,10 @@ import sys
 import warnings
 
 import gtirb
+import pytest
+
 import gtirb_rewriting
 import gtirb_rewriting.patches
-import pytest
 
 TEST_DIR = pathlib.Path(__file__).parent
 

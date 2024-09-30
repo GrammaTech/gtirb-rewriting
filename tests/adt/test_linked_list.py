@@ -21,6 +21,7 @@
 # endorsement should be inferred.
 
 import pytest
+
 from gtirb_rewriting._adt import LinkedListNode
 
 

@@ -43,10 +43,11 @@ from typing import (
 
 import gtirb
 import gtirb_functions
-import gtirb_rewriting._auxdata as _auxdata
-import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 from intervaltree import IntervalTree
+
+import gtirb_rewriting._auxdata as _auxdata
+import gtirb_rewriting._auxdata_offsetmap as _auxdata_offsetmap
 
 from ._modify import (
     ModifyCache,
@@ -54,7 +55,7 @@ from ._modify import (
     delete,
     delete_symbols,
     insert,
-    make_return_cache,
+    make_modify_cache,
     retarget_symbol_uses,
 )
 from .abi import ABI
@@ -1083,11 +1084,7 @@ class RewritingContext:
 
         with prepare_for_rewriting(
             self._module, self._abi.nop()
-        ), make_return_cache(self._module.ir) as return_cache:
-            modify_cache = ModifyCache(
-                self._module, self._functions, return_cache
-            )
-
+        ), make_modify_cache(self._module, self._functions) as modify_cache:
             functions_by_uuid = {func.uuid: func for func in self._functions}
             sorted_blocks = sorted(
                 self._module.byte_blocks, key=lambda b: b.address or 0
@@ -1125,10 +1122,10 @@ class RewritingContext:
                     lambda offset: cfi_tracker.in_procedure(idx, offset),
                 )
 
-            if self._symbol_retargets:
-                retarget_symbol_uses(
-                    self._module, self._symbol_retargets, self._decoder
-                )
+        if self._symbol_retargets:
+            retarget_symbol_uses(
+                self._module, self._symbol_retargets, self._decoder
+            )
 
-            if self._symbol_deletions:
-                delete_symbols(self._module, self._symbol_deletions)
+        if self._symbol_deletions:
+            delete_symbols(self._module, self._symbol_deletions)

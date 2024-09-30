@@ -23,12 +23,13 @@ import contextlib
 from typing import Iterator
 
 import gtirb
-import gtirb_rewriting._auxdata as _auxdata
 from gtirb_layout import (
     assign_integral_symbols,
     is_module_layout_required,
     layout_module,
 )
+
+import gtirb_rewriting._auxdata as _auxdata
 
 from .intervalutils import join_byte_intervals, split_byte_interval
 
@@ -50,8 +51,7 @@ def prepare_for_rewriting(module: gtirb.Module, nop: bytes) -> Iterator[None]:
 
     partitions = []
     for interval in tuple(module.byte_intervals):
-        if any(isinstance(b, gtirb.CodeBlock) for b in interval.blocks):
-            partitions.append(split_byte_interval(interval, alignment))
+        partitions.append(split_byte_interval(interval, alignment))
 
     yield
 

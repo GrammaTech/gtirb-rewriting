@@ -23,7 +23,9 @@
 from .cache import (
     CFGModifiedError,
     ModifyCache,
+    ReferenceCache,
     ReturnEdgeCache,
+    make_modify_cache,
     make_return_cache,
 )
 from .delete_symbols import (
@@ -45,6 +47,7 @@ from .split import split_block
 
 __all__ = [
     "ModifyCache",
+    "make_modify_cache",
     "make_return_cache",
     "insert",
     "delete",
@@ -55,6 +58,7 @@ __all__ = [
     "AmbiguousIRError",
     "UnjoinableBlocksError",
     "CFGModifiedError",
+    "ReferenceCache",
     "ReturnEdgeCache",
     "edit_byte_interval",
     "retarget_symbol_uses",

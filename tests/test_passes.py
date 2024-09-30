@@ -20,6 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 import gtirb
+
 import gtirb_rewriting
 
 

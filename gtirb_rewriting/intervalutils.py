@@ -24,12 +24,13 @@ import itertools
 from typing import Iterable, List, Mapping, MutableMapping, Optional
 
 import gtirb
+
 import gtirb_rewriting._auxdata as _auxdata
 
 from ._adt import OffsetMapping
 from ._auxdata_offsetmap import OFFSETMAP_AUX_DATA_TABLES
 from .abi import ABI
-from .utils import align_address, effective_alignment
+from .utils import align_address
 
 
 class PaddingError(Exception):
@@ -90,12 +91,6 @@ def split_byte_interval(
         else:
             groups[-1].end = max(groups[-1].end, block_end)
             groups[-1].blocks.append(block)
-        if alignment is not None and block not in alignment:
-            if block.address is None:
-                # Align the offset, since we don't know the actual address
-                alignment[block] = effective_alignment(block.offset)
-            else:
-                alignment[block] = effective_alignment(block.address)
 
     # Process groups in decreasing offset order, but skip the first group
     # because it will stay in the original interval.

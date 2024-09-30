@@ -27,10 +27,11 @@ import textwrap
 
 import entrypoints
 import gtirb
-import gtirb_rewriting
-import gtirb_rewriting.driver
 import gtirb_test_helpers
 import mock_entrypoints
+
+import gtirb_rewriting
+import gtirb_rewriting.driver
 
 TEST_DIR = pathlib.Path(__file__).parent.resolve()
 

@@ -24,9 +24,7 @@ import logging
 import gtirb
 import gtirb_functions
 import gtirb_layout
-import gtirb_rewriting
 import pytest
-from gtirb_rewriting._auxdata import NULL_UUID
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
@@ -39,6 +37,9 @@ from gtirb_test_helpers import (
     set_all_blocks_alignment,
 )
 from helpers import add_function_object, literal_patch
+
+import gtirb_rewriting
+from gtirb_rewriting._auxdata import NULL_UUID
 
 
 @gtirb_rewriting.patch_constraints()
