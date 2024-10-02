@@ -43,6 +43,7 @@ from .edges import remove_return_edges_from_callee, update_edge
 
 
 def _can_remove_block(
+    cache: ModifyCache,
     block: gtirb.ByteBlock,
     retarget_to_proxy: bool,
     prev_block: Optional[gtirb.ByteBlock],
@@ -59,7 +60,7 @@ def _can_remove_block(
     # keep the block. This can arise when trying to get rid of the last block
     # in a section.
     if (
-        any(block.references)
+        any(cache.reference_cache.get_references(block))
         and prev_block is None
         and next_block is None
         and not retarget_to_proxy
@@ -384,6 +385,7 @@ def remove_block(
     cfi_directives = _required_cfi_directives(block)
 
     can_remove = _can_remove_block(
+        cache,
         block,
         retarget_to_proxy,
         prev_block,

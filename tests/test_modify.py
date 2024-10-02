@@ -28,6 +28,7 @@ import pytest
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
+    add_data_section,
     add_edge,
     add_proxy_block,
     add_symbol,
@@ -1063,6 +1064,56 @@ def test_remove_blocks_with_important_cfi_directives():
             (".cfi_endproc", [], NULL_UUID),
         ],
     }
+
+
+def test_remove_all_blocks_in_section():
+    """
+    Test removing all blocks in a section.
+    """
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+    s, bi = add_data_section(m, address=0x1000)
+
+    # If no blocks have references, they are all removed.
+
+    b1 = add_data_block(bi, b"\x01")
+
+    with gtirb_rewriting._modify.make_modify_cache(m, []) as modify_cache:
+        gtirb_rewriting._modify.delete(modify_cache, b1, 0, b1.size)
+
+    assert s.size == 0
+    assert sum(1 for _ in s.byte_blocks) == 0
+
+    # If one of the blocks has a reference, we leave an empty block to server
+    # as the referent.
+
+    b1 = add_data_block(bi, b"\x02")
+    foo = add_symbol(m, "foo", b1)
+
+    with gtirb_rewriting._modify.make_modify_cache(m, []) as modify_cache:
+        gtirb_rewriting._modify.delete(modify_cache, b1, 0, b1.size)
+
+    assert s.size == 0
+    assert sum(1 for _ in s.byte_blocks) == 1
+    assert isinstance(foo.referent, gtirb.DataBlock)
+    assert foo.referent.section is s
+
+    # We leave an empty block even if the referent is transferred to the final
+    # block as an indirect referent.
+
+    b2 = add_data_block(bi, b"\x03")
+    b3 = add_data_block(bi, b"\x04")
+
+    with gtirb_rewriting._modify.make_modify_cache(m, []) as modify_cache:
+        gtirb_rewriting._modify.delete(modify_cache, b1, 0, b1.size)
+        gtirb_rewriting._modify.delete(modify_cache, b2, 0, b2.size)
+        gtirb_rewriting._modify.delete(modify_cache, b3, 0, b3.size)
+
+    assert s.size == 0
+    assert sum(1 for _ in s.byte_blocks) == 1
+    assert isinstance(foo.referent, gtirb.DataBlock)
+    assert foo.referent.section is s
 
 
 def test_edit_byte_interval_simple():
