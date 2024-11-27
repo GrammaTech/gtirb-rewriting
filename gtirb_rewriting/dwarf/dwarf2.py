@@ -23,10 +23,10 @@
 # flake8: noqa
 # fmt: off
 
-from enum import Enum
+from enum import Enum, IntFlag
 
 
-class PointerEncodings(int, Enum):
+class PointerEncodings(IntFlag):
     """
     A description of how a pointer is encoded. The low 4 bits indicate the
     format of the data and the upper 4 bits indicate how the value is applied.
@@ -48,6 +48,7 @@ class PointerEncodings(int, Enum):
     datarel = 0x30
     funcrel = 0x40
     aligned = 0x50
+    indirect = 0x80
 
 
 class CallFrameInstructions(int, Enum):
