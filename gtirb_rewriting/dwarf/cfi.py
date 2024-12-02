@@ -21,19 +21,30 @@
 # endorsement should be inferred.
 
 import abc
-from dataclasses import Field, dataclass, fields
-from typing import ClassVar, List, Optional, Set, Tuple
+import io
+from dataclasses import dataclass, fields
+from typing import BinaryIO, ClassVar, Dict, Iterator, List, Tuple, Type
 
 import leb128
-from typing_extensions import Literal, dataclass_transform, override
+from typing_extensions import Literal, override
 
 from .._auxdata import NULL_UUID, CFIDirectiveType
-from ._encoders import _Encoder, _SLEB128Encoder, _ULEB128Encoder
+from ._encodable import _encoded_field, _OpcodeEncodable
+from ._encoders import (
+    _Low6BitsEncoder,
+    _SLEB128Encoder,
+    _StandaloneEncoder,
+    _ULEB128Encoder,
+)
 from .dwarf2 import CallFrameInstructions
 from .expr import Operation
 
 
-class _ExprEncoder(_Encoder[List[Operation]]):
+class _ExprEncoder(_StandaloneEncoder[List[Operation]]):
+    """
+    Encode a sequence of DWARF operations.
+    """
+
     def encode(
         self,
         value: List[Operation],
@@ -43,8 +54,17 @@ class _ExprEncoder(_Encoder[List[Operation]]):
         encoded_expr = b"".join(op.encode(byteorder, ptr_size) for op in value)
         return leb128.u.encode(len(encoded_expr)) + encoded_expr
 
-
-_Low6Bits = _Encoder()
+    def decode(
+        self, io: BinaryIO, byteorder: Literal["big", "little"], ptr_size: int
+    ) -> Tuple[List[Operation], int]:
+        length, len_read = leb128.u.decode_reader(io)
+        ops = []
+        op_bytes_read = 0
+        while op_bytes_read < length:
+            op, op_read = Operation.decode(io, byteorder, ptr_size)
+            ops.append(op)
+            op_bytes_read += op_read
+        return ops, len_read + op_bytes_read
 
 
 class Instruction:
@@ -65,61 +85,47 @@ class Instruction:
         ...
 
 
-@dataclass_transform()
-class _SimpleInstruction(Instruction):
-    _registered_opcodes: ClassVar[Set[CallFrameInstructions]] = set()
-    _registered_directives: ClassVar[Set[str]] = set()
+class _EncodableInstruction(
+    Instruction,
+    _OpcodeEncodable[CallFrameInstructions],
+    opcode_type=CallFrameInstructions,
+):
+    """
+    An encodable instruction is an instruction that can be represented in
+    the binary as an instruction in the FDE.
+    """
 
-    _directive: ClassVar[str]  # type: ignore
-    _opcode: ClassVar[Optional[CallFrameInstructions]]  # type: ignore
-    _encoding: ClassVar[List[_Encoder]]  # type: ignore
+    _registered_directives: ClassVar[
+        Dict[str, Type["_EncodableInstruction"]]
+    ] = {}
+    _directive: ClassVar[str] = ""
 
     def __init_subclass__(
         cls,
         *,
         directive: str,
-        opcode: Optional[CallFrameInstructions],
-        encoding: List[_Encoder],
+        opcode: CallFrameInstructions,
     ):
-        dataclass(cls)
-
-        if opcode is not None:
-            if opcode in _SimpleInstruction._registered_opcodes:
-                raise AssertionError("instruction already registered")
-            _SimpleInstruction._registered_opcodes.add(opcode)
-
-            if len(cls._fields()) != len(encoding):
-                raise AssertionError("wrong number of fields vs encoders")
+        super().__init_subclass__(opcode=opcode)
 
         if directive != ".cfi_escape":
-            if directive in _SimpleInstruction._registered_directives:
+            if directive in _EncodableInstruction._registered_directives:
                 raise AssertionError("directive already registered")
-            _SimpleInstruction._registered_directives.add(directive)
+            _EncodableInstruction._registered_directives[directive] = cls
 
         cls._directive = directive
-        cls._opcode = opcode
-        cls._encoding = encoding
-
-    @classmethod
-    def _fields(cls) -> Tuple[Field]:
-        return fields(cls)  # type: ignore
 
     def _operands(
         self, byteorder: Literal["big", "little"], ptr_size: int
     ) -> List[int]:
-        field_values = [getattr(self, field.name) for field in self._fields()]
-        if self._directive != ".cfi_escape":
-            return field_values
+        """
+        Convert the instruction's fileds into assembly operands.
+        """
+        if self._directive == ".cfi_escape":
+            encoded = self.encode(byteorder, ptr_size)
+            return list(encoded)
 
-        assert self._opcode is not None
-        result = [self._opcode.value]
-        for value, encoder in zip(field_values, self._encoding):
-            if encoder is _Low6Bits:
-                result[0] |= value
-            else:
-                result.extend(encoder.encode(value, byteorder, ptr_size))
-
-        return result
+        return [getattr(self, field.name) for field in fields(self)]
 
     @override
     def gtirb_encoding(
@@ -142,10 +148,9 @@ class _SimpleInstruction(Instruction):
 # CFA Definition Instructions
 # ----------------------------------------------------------------------------
 class InstDefCFA(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_def_cfa",
     opcode=CallFrameInstructions.def_cfa,
-    encoding=[_ULEB128Encoder(), _ULEB128Encoder()],
 ):
     """
     The DW_CFA_def_cfa instruction takes two unsigned LEB128 operands
@@ -154,15 +159,14 @@ class InstDefCFA(
     offset.
     """
 
-    register: int
-    offset: int
+    register: int = _encoded_field(_ULEB128Encoder())
+    offset: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstDefCFASF(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.def_cfa_sf,
-    encoding=[_ULEB128Encoder(), _SLEB128Encoder()],
 ):
     """
     The DW_CFA_def_cfa_sf instruction takes two operands: an unsigned LEB128
@@ -172,15 +176,14 @@ class InstDefCFASF(
     * data_alignment_factor.
     """
 
-    register: int
-    factored_offset: int
+    register: int = _encoded_field(_ULEB128Encoder())
+    factored_offset: int = _encoded_field(_SLEB128Encoder())
 
 
 class InstDefCFARegister(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_def_cfa_register",
     opcode=CallFrameInstructions.def_cfa_register,
-    encoding=[_ULEB128Encoder()],
 ):
     """
     The DW_CFA_def_cfa_register instruction takes a single unsigned LEB128
@@ -190,14 +193,13 @@ class InstDefCFARegister(
     to use a register and offset.
     """
 
-    register: int
+    register: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstDefCFAOffset(
-    _SimpleInstruction,
-    directive=".cfi_def_cfa_offset",
+    _EncodableInstruction,
+    directive=".cfi_escape",
     opcode=CallFrameInstructions.def_cfa_offset,
-    encoding=[_ULEB128Encoder()],
 ):
     """
     The DW_CFA_def_cfa_offset instruction takes a single unsigned LEB128
@@ -207,14 +209,30 @@ class InstDefCFAOffset(
     defined to use a register and offset.
     """
 
-    offset: int
+    offset: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstDefCFAOffsetSF(
-    _SimpleInstruction,
+    _EncodableInstruction,
+    directive=".cfi_escape",
+    opcode=CallFrameInstructions.def_cfa_offset_sf,
+):
+    """
+    The DW_CFA_def_cfa_offset_sf instruction takes a signed LEB128 operand
+    representing a factored offset. This instruction is identical to
+    DW_CFA_def_cfa_offset except that the operand is signed and factored. The
+    resulting offset is factored_offset * data_alignment_factor. This
+    operation is valid only if the current CFA rule is defined to use a
+    register and offset.
+    """
+
+    factored_offset: int = _encoded_field(_SLEB128Encoder())
+
+
+class InstDefCFAExpression(
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.def_cfa_expression,
-    encoding=[_ExprEncoder()],
 ):
     """
     The DW_CFA_def_cfa_expression instruction takes a single operand encoded
@@ -223,17 +241,16 @@ class InstDefCFAOffsetSF(
     CFA is computed.
     """
 
-    expression: List[Operation]
+    expression: List[Operation] = _encoded_field(_ExprEncoder())
 
 
 # ----------------------------------------------------------------------------
 # Register Rule Instructions
 # ----------------------------------------------------------------------------
 class InstUndefined(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_undefined",
     opcode=CallFrameInstructions.undefined,
-    encoding=[_ULEB128Encoder()],
 ):
     """
     The DW_CFA_undefined instruction takes a single unsigned LEB128 operand
@@ -241,14 +258,13 @@ class InstUndefined(
     for the specified register to “undefined.”
     """
 
-    register: int
+    register: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstSameValue(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_same_value",
     opcode=CallFrameInstructions.same_value,
-    encoding=[_ULEB128Encoder()],
 ):
     """
     The DW_CFA_same_value instruction takes a single unsigned LEB128 operand
@@ -256,14 +272,13 @@ class InstSameValue(
     for the specified register to “same value.”
     """
 
-    register: int
+    register: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstOffset(
-    _SimpleInstruction,
-    directive=".cfi_offset",
+    _EncodableInstruction,
+    directive=".cfi_escape",
     opcode=CallFrameInstructions.offset,
-    encoding=[_Low6Bits, _ULEB128Encoder()],
 ):
     """
     The DW_CFA_offset instruction takes two operands: a register number
@@ -273,15 +288,14 @@ class InstOffset(
     the value of N is factored offset * data_alignment_factor.
     """
 
-    register: int
-    factored_offset: int
+    register: int = _encoded_field(_Low6BitsEncoder())
+    factored_offset: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstOffsetExtended(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.offset_extended,
-    encoding=[_ULEB128Encoder(), _ULEB128Encoder()],
 ):
     """
     The DW_CFA_offset_extended instruction takes two unsigned LEB128 operands
@@ -290,15 +304,14 @@ class InstOffsetExtended(
     register operand.
     """
 
-    register: int
-    factored_offset: int
+    register: int = _encoded_field(_ULEB128Encoder())
+    factored_offset: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstOffsetExtendedSF(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.offset_extended_sf,
-    encoding=[_ULEB128Encoder(), _SLEB128Encoder()],
 ):
     """
     The DW_CFA_offset_extended_sf instruction takes two operands: an unsigned
@@ -308,15 +321,14 @@ class InstOffsetExtendedSF(
     factored_offset * data_alignment_factor.
     """
 
-    register: int
-    factored_offset: int
+    register: int = _encoded_field(_ULEB128Encoder())
+    factored_offset: int = _encoded_field(_SLEB128Encoder())
 
 
 class InstValOffset(
-    _SimpleInstruction,
-    directive=".cfi_val_offset",
+    _EncodableInstruction,
+    directive=".cfi_escape",
     opcode=CallFrameInstructions.val_offset,
-    encoding=[_ULEB128Encoder(), _ULEB128Encoder()],
 ):
     """
     The DW_CFA_val_offset instruction takes two unsigned LEB128 operands
@@ -326,15 +338,14 @@ class InstValOffset(
     factored_offset * data_alignment_factor.
     """
 
-    register: int
-    factored_offset: int
+    register: int = _encoded_field(_ULEB128Encoder())
+    factored_offset: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstValOffsetSF(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.val_offset_sf,
-    encoding=[_ULEB128Encoder(), _SLEB128Encoder()],
 ):
     """
     The DW_CFA_val_offset_sf instruction takes two operands: an unsigned
@@ -344,15 +355,14 @@ class InstValOffsetSF(
     factored_offset * data_alignment_factor.
     """
 
-    register: int
-    factored_offset: int
+    register: int = _encoded_field(_ULEB128Encoder())
+    factored_offset: int = _encoded_field(_SLEB128Encoder())
 
 
 class InstRegister(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_register",
     opcode=CallFrameInstructions.register,
-    encoding=[_ULEB128Encoder(), _SLEB128Encoder()],
 ):
     """
     The DW_CFA_register instruction takes two unsigned LEB128 operands
@@ -360,18 +370,14 @@ class InstRegister(
     the first register to be register(R) where R is the second register.
     """
 
-    register1: int
-    register2: int
+    register1: int = _encoded_field(_ULEB128Encoder())
+    register2: int = _encoded_field(_ULEB128Encoder())
 
 
 class InstExpression(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.expression,
-    encoding=[
-        _ULEB128Encoder(),
-        _ExprEncoder(),
-    ],
 ):
     """
     The DW_CFA_expression instruction takes two operands: an unsigned LEB128
@@ -383,18 +389,14 @@ class InstExpression(
     evaluation stack prior to execution of the DWARF expression.
     """
 
-    register: int
-    expression: List[Operation]
+    register: int = _encoded_field(_ULEB128Encoder())
+    expression: List[Operation] = _encoded_field(_ExprEncoder())
 
 
 class InstValExpression(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.val_expression,
-    encoding=[
-        _ULEB128Encoder(),
-        _ExprEncoder(),
-    ],
 ):
     """
     The DW_CFA_val_expression instruction takes two operands: an unsigned
@@ -407,15 +409,14 @@ class InstValExpression(
     expression.
     """
 
-    register: int
-    expression: List[Operation]
+    register: int = _encoded_field(_ULEB128Encoder())
+    expression: List[Operation] = _encoded_field(_ExprEncoder())
 
 
 class InstRestore(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_restore",
     opcode=CallFrameInstructions.restore,
-    encoding=[_Low6Bits],
 ):
     """
     The DW_CFA_restore instruction takes a single operand (encoded with the
@@ -424,14 +425,13 @@ class InstRestore(
     initial_instructions in the CIE.
     """
 
-    register: int
+    register: int = _encoded_field(_Low6BitsEncoder())
 
 
 class InstRestoreExtended(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.restore_extended,
-    encoding=[_ULEB128Encoder()],
 ):
     """
     The DW_CFA_restore_extended instruction takes a single unsigned LEB128
@@ -440,17 +440,16 @@ class InstRestoreExtended(
     operand.
     """
 
-    register: int
+    register: int = _encoded_field(_ULEB128Encoder())
 
 
 # ----------------------------------------------------------------------------
 # Row State Instructions
 # ----------------------------------------------------------------------------
 class InstRememberState(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_remember_state",
     opcode=CallFrameInstructions.remember_state,
-    encoding=[],
 ):
     """
     The DW_CFA_remember_state instruction takes no operands. The required
@@ -460,10 +459,9 @@ class InstRememberState(
 
 
 class InstRestoreState(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_restore_state",
     opcode=CallFrameInstructions.restore_state,
-    encoding=[],
 ):
     """
     The DW_CFA_restore_state instruction takes no operands. The required
@@ -476,10 +474,9 @@ class InstRestoreState(
 # Padding Instructions
 # ----------------------------------------------------------------------------
 class InstNop(
-    _SimpleInstruction,
+    _EncodableInstruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.nop,
-    encoding=[],
 ):
     """
     The DW_CFA_nop instruction has no operands and no required actions. It is
@@ -490,8 +487,9 @@ class InstNop(
 # ----------------------------------------------------------------------------
 # Pseudo Instructions (no DWARF representation)
 # ----------------------------------------------------------------------------
+@dataclass
 class InstRelOffset(
-    _SimpleInstruction, directive=".cfi_rel_offset", opcode=None, encoding=[]
+    Instruction,
 ):
     """
     Previous value of register is saved at offset offset from the current CFA
@@ -503,13 +501,19 @@ class InstRelOffset(
     register: int
     offset: int
 
+    def gtirb_encoding(
+        self, byteorder: Literal["big", "little"], ptr_size: int
+    ) -> CFIDirectiveType:
+        return (".cfi_rel_offset", [self.register, self.offset], NULL_UUID)
 
-class InstAdjustCFAOffset(
-    _SimpleInstruction,
-    directive=".cfi_adjust_cfa_offset",
-    opcode=None,
-    encoding=[],
-):
+    def assembly_string(
+        self, byteorder: Literal["big", "little"], ptr_size: int
+    ) -> str:
+        return f".cfi_rel_offset {self.register}, {self.offset}"
+
+
+@dataclass
+class InstAdjustCFAOffset(Instruction):
     """
     Same as .cfi_def_cfa_offset but offset is a relative value that is
     added/subtracted from the previous offset.
@@ -517,7 +521,18 @@ class InstAdjustCFAOffset(
 
     offset: int
 
+    def gtirb_encoding(
+        self, byteorder: Literal["big", "little"], ptr_size: int
+    ) -> CFIDirectiveType:
+        return (".cfi_adjust_cfa_offset", [self.offset], NULL_UUID)
 
+    def assembly_string(
+        self, byteorder: Literal["big", "little"], ptr_size: int
+    ) -> str:
+        return f".cfi_adjust_cfa_offset {self.offset}"
+
+
+@dataclass
 class InstEscape(Instruction):
     """
     Allows the user to add arbitrary bytes to the unwind info. One might use
@@ -525,8 +540,7 @@ class InstEscape(Instruction):
     not yet support.
     """
 
-    def __init__(self, values: bytes):
-        self.values = values
+    values: bytes
 
     @override
     def gtirb_encoding(
@@ -539,3 +553,20 @@ class InstEscape(Instruction):
         self, byteorder: Literal["big", "little"], ptr_size: int
     ) -> str:
         return ".cfi_escape " + ", ".join(str(arg) for arg in self.values)
+
+
+# ----------------------------------------------------------------------------
+# Instruction parsing
+# ----------------------------------------------------------------------------
+def parse_cfi_instructions(
+    value: bytes, byteorder: Literal["big", "little"], ptr_size: int
+) -> Iterator[Instruction]:
+    """
+    Decode CFI instructions from a byte sequence.
+    """
+    reader = io.BytesIO(value)
+    offset = 0
+    while offset < len(value):
+        inst, read = _EncodableInstruction.decode(reader, byteorder, ptr_size)
+        offset += read
+        yield inst

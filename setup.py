@@ -43,8 +43,8 @@ setuptools.setup(
         "mcasm ~= 0.3.0",
         "more-itertools >= 8.11",
         "entrypoints",
-        "typing-extensions ~= 4.4",
-        "leb128 ~= 1.0",
+        "typing-extensions ~= 4.7",
+        "leb128 ~= 1.0, >= 1.0.2",
     ],
     entry_points={
         "console_scripts": [
