@@ -114,9 +114,7 @@ def test_empty_label():
             end_offset=None,
             instructions=gtirb_rewriting.OffsetMapping(
                 {
-                    gtirb.Offset(b, 0): [
-                        gtirb_rewriting.dwarf.cfi.InstUndefined(register=0)
-                    ]
+                    gtirb.Offset(b, 0): [(".cfi_undefined", [0], NULL_UUID)],
                 }
             ),
         )
@@ -1260,7 +1258,64 @@ def test_cfi_procedure_implicit():
             instructions=gtirb_rewriting.OffsetMapping(
                 {
                     gtirb.Offset(b1, 1): [
-                        gtirb_rewriting.dwarf.cfi.InstUndefined(register=15)
+                        (".cfi_undefined", [15], NULL_UUID),
+                    ]
+                }
+            ),
+        )
+    ]
+
+
+def test_cfi_instructions():
+    """
+    Test that the assembler accepts CFI assembly directives that do not map
+    directly to DWARF CFI instructions (e.g. factored instructions).
+    """
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.X64,
+    )
+
+    assembler = gtirb_rewriting.Assembler(m, implicit_cfi_procedure=True)
+
+    assembler.assemble(
+        """
+        nop
+
+        # DW_CFA_def_cfa takes two unsigned LEB128 operands, so this would
+        # need to be represented as DW_CFA_def_cfa_sf.
+        .cfi_def_cfa 7, -8
+
+        # DW_CFA_offset takes two unsigned ULEB128 operands. The operand in
+        # the assembly directive can be negative because of the data alignment
+        # factor.
+        .cfi_offset 16, -8
+
+        # .cfi_rel_offset is not an actual CFI instruction and gets lowered
+        # into one by the assembler.
+        .cfi_rel_offset 16, -8
+
+        # .cfi_def_cfa_offset is not an actual CFI instruction and gets
+        # lowered into one by the assembler.
+        .cfi_def_cfa_offset -8
+        """
+    )
+
+    result = assembler.finalize()
+    (b1,) = result.text_section.blocks
+
+    assert result.text_section.cfi_procedures == [
+        gtirb_rewriting.Assembler.Result.CFIProcedure(
+            is_implicit=True,
+            start_offset=None,
+            end_offset=None,
+            instructions=gtirb_rewriting.OffsetMapping(
+                {
+                    gtirb.Offset(b1, 1): [
+                        (".cfi_def_cfa", [7, -8], NULL_UUID),
+                        (".cfi_offset", [16, -8], NULL_UUID),
+                        (".cfi_rel_offset", [16, -8], NULL_UUID),
+                        (".cfi_def_cfa_offset", [-8], NULL_UUID),
                     ]
                 }
             ),
@@ -1296,7 +1351,7 @@ def test_cfi_procedure_explicit():
             instructions=gtirb_rewriting.OffsetMapping(
                 {
                     gtirb.Offset(b1, 1): [
-                        gtirb_rewriting.dwarf.cfi.InstUndefined(register=15)
+                        (".cfi_undefined", [15], NULL_UUID),
                     ]
                 }
             ),

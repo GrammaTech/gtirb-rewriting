@@ -22,7 +22,7 @@
 
 import abc
 import io
-from dataclasses import dataclass, fields
+from dataclasses import fields
 from typing import BinaryIO, ClassVar, Iterator, List, Set, Tuple
 
 import leb128
@@ -470,71 +470,6 @@ class InstNop(
     The DW_CFA_nop instruction has no operands and no required actions. It is
     used as padding to make a CIE or FDE an appropriate size.
     """
-
-
-# ----------------------------------------------------------------------------
-# Pseudo Instructions (no DWARF representation)
-# ----------------------------------------------------------------------------
-@dataclass
-class InstRelOffset(
-    Instruction,
-):
-    """
-    Previous value of register is saved at offset offset from the current CFA
-    register. This is transformed to .cfi_offset using the known displacement
-    of the CFA register from the CFA. This is often easier to use, because the
-    number will match the code it's annotating.
-    """
-
-    register: int
-    offset: int
-
-    def gtirb_encoding(
-        self, byteorder: ByteOrder, ptr_size: int
-    ) -> CFIDirectiveType:
-        return (".cfi_rel_offset", [self.register, self.offset], NULL_UUID)
-
-    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
-        return f".cfi_rel_offset {self.register}, {self.offset}"
-
-
-@dataclass
-class InstAdjustCFAOffset(Instruction):
-    """
-    Same as .cfi_def_cfa_offset but offset is a relative value that is
-    added/subtracted from the previous offset.
-    """
-
-    offset: int
-
-    def gtirb_encoding(
-        self, byteorder: ByteOrder, ptr_size: int
-    ) -> CFIDirectiveType:
-        return (".cfi_adjust_cfa_offset", [self.offset], NULL_UUID)
-
-    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
-        return f".cfi_adjust_cfa_offset {self.offset}"
-
-
-@dataclass
-class InstEscape(Instruction):
-    """
-    Allows the user to add arbitrary bytes to the unwind info. One might use
-    this to add OS-specific CFI opcodes, or generic CFI opcodes that GAS does
-    not yet support.
-    """
-
-    values: bytes
-
-    @override
-    def gtirb_encoding(
-        self, byteorder: ByteOrder, ptr_size: int
-    ) -> CFIDirectiveType:
-        return ".cfi_escape", list(self.values), NULL_UUID
-
-    @override
-    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
-        return ".cfi_escape " + ", ".join(str(arg) for arg in self.values)
 
 
 # ----------------------------------------------------------------------------
