@@ -297,6 +297,53 @@ def test_join_byte_intervals_padding():
     assert b3.address == 0x10C
 
 
+def test_join_byte_intervals_decode_mode_padding():
+    """
+    Test joining byte intervals uses the correct padding bytes for the decode
+    mode.
+    """
+    Mode = gtirb.CodeBlock.DecodeMode
+    b1 = gtirb.CodeBlock(offset=1, size=2, decode_mode=Mode.Default)
+    b2 = gtirb.CodeBlock(offset=0, size=1, decode_mode=Mode.Thumb)
+    b3 = gtirb.CodeBlock(offset=1, size=1, decode_mode=Mode.Default)
+    bi1 = gtirb.ByteInterval(
+        address=0x100,
+        blocks=[b1],
+        contents=b"\x00\x01\x02\x03",
+    )
+    bi2 = gtirb.ByteInterval(
+        address=0x200,
+        blocks=[b2],
+        contents=b"\x10\x11",
+    )
+    bi3 = gtirb.ByteInterval(
+        address=0x300,
+        blocks=[b3],
+        contents=b"\x20\x21\x22\x23",
+    )
+
+    bi = gtirb_rewriting.join_byte_intervals(
+        [bi1, bi2, bi3],
+        nop_encodings={Mode.Default: b"\xff", Mode.Thumb: b"\x00"},
+        alignment={b1: 2, b3: 4, bi2: 8},
+    )
+    assert bi == bi1
+    assert bi.address == 0x100
+    assert len(bi.blocks) == 5
+    assert b1 in bi.blocks
+    assert b2 in bi.blocks
+    assert b3 in bi.blocks
+    assert (
+        bi.contents
+        == b"\x00\x01\x02\x03\xff\xff\xff\xff\x10\x11\x00\x20\x21\x22\x23"
+    )
+    assert bi.size == 15
+
+    assert b1.address == 0x101
+    assert b2.address == 0x108
+    assert b3.address == 0x10C
+
+
 def test_join_byte_intervals_default_tables():
     b1 = gtirb.CodeBlock(offset=0, size=2)
     b2 = gtirb.CodeBlock(offset=0, size=2)

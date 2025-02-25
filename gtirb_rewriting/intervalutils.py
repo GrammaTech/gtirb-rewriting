@@ -144,6 +144,7 @@ def join_byte_intervals(
     nop: Optional[bytes] = None,
     alignment: Optional[Mapping[gtirb.Node, int]] = None,
     tables: Optional[Iterable[OffsetMapping[object]]] = None,
+    nop_encodings: Optional[Mapping[gtirb.CodeBlock.DecodeMode, bytes]] = None,
 ) -> gtirb.ByteInterval:
     """Concatenate a list of byte intervals.
 
@@ -172,12 +173,20 @@ def join_byte_intervals(
     destination, but it does not remove the intervals from their sections.
 
     :param intervals:  list of byte intervals to concatenate
-    :param nop:  bytes representing a single nop instruction
+    :param nop:  bytes representing a single nop instruction in the default
+        decode mode
     :param alignment:  table of alignments for blocks and intervals
     :param tables:  collection of offset mappings to update
+    :param nop_encodings:  nop bytes to use in different decode; if the mapping
+        specifies bytes for the default decode mode, they will supercede the
+        bytes in the `nop` argument
     """
     if len(intervals) < 2:
         return intervals[0]
+
+    nop_encodings = dict(nop_encodings) if nop_encodings else {}
+    if nop is not None:
+        nop_encodings.setdefault(gtirb.CodeBlock.DecodeMode.Default, nop)
 
     if tables is None:
         # This is a bit hacky, but to avoid assuming that the byte intervals
@@ -211,10 +220,10 @@ def join_byte_intervals(
         if size == 0:
             return
         if isinstance(last_block, gtirb.CodeBlock):
-            BlockType = gtirb.CodeBlock
-            if nop is not None:
-                pad_bytes = nop
+            if last_block.decode_mode in nop_encodings:
+                pad_bytes = nop_encodings[last_block.decode_mode]
             elif last_module is not None:
+                # TODO: get NOP encoding for the current decode_mode here.
                 pad_bytes = ABI.get(last_module).nop()
             else:
                 raise PaddingError("cannot determine nop instruction")
@@ -222,7 +231,6 @@ def join_byte_intervals(
             if remainder != 0:
                 raise PaddingError("nop does not fit evenly in padding")
         else:
-            BlockType = gtirb.DataBlock
             pad_bytes = b"\x00"
 
         destination.contents += pad_bytes * size
@@ -238,9 +246,16 @@ def join_byte_intervals(
             padding_block_offset = 0
             padding_block_size = len(destination.contents)
         if padding_block_size > 0:
-            padding = BlockType(
-                offset=padding_block_offset, size=padding_block_size
-            )
+            if isinstance(last_block, gtirb.CodeBlock):
+                padding = gtirb.CodeBlock(
+                    offset=padding_block_offset,
+                    size=padding_block_size,
+                    decode_mode=last_block.decode_mode,
+                )
+            else:
+                padding = gtirb.DataBlock(
+                    offset=padding_block_offset, size=padding_block_size
+                )
             padding.byte_interval = destination
 
     symexprs = OffsetMapping()
