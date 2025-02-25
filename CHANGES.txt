@@ -11,6 +11,8 @@
 - Layout is now performed before and after rewriting, allowing for rewriting
   of modules without addresses and ensuring that the output has addresses.
   Layout is implemented with the gtirb-layout package.
+- Added support for different decode modes to join_byte_intervals. Currently
+  nop encodings for the non-default mode must be specified by the caller.
 
 0.2.0:
 - CFI directives are now preserved, allowing rewriting of C++ programs with
