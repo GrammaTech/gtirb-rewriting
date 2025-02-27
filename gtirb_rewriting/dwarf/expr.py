@@ -322,6 +322,9 @@ class OpConst(Operation, opcode_type=ExpressionOperations):
     A base class for operations that push a constant value onto the stack.
     """
 
+    # In previous versions of gtirb-rewriting, OpConst lacked subclasses and
+    # clients directly created OpConst instances. For compatibility we
+    # preserve that behavior by creating the apropriate subclass.
     def __new__(cls, value: int) -> "OpConst":
         """
         Create the appropriate OpConst subclass for the given value.

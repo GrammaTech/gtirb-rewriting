@@ -32,6 +32,11 @@ ByteOrder = Literal["little", "big"]
 
 
 class _Encoder(Generic[_T]):
+    """
+    Base class for encoders that can be used to serialize and deserialize
+    values. The base class only handles validation for values.
+    """
+
     def validate(self, value: _T) -> None:
         """
         Validates that the value can be represented by this encoder. Raises a
@@ -53,7 +58,15 @@ class _FusedEncoder(ABC, _Encoder[_T]):
         byteorder: ByteOrder,
         ptr_size: int,
     ) -> Union[bytes, bytearray]:
-        ...
+        """
+        Encodes the value and the opcode to produce a 'fused' value.
+
+        :param opcode: The opcode.
+        :param value: The value to encode.
+        :param byteorder: The endianness.
+        :param ptr_size: The pointer size, in bytes, for the target.
+        :returns: The encoded value and opcode.
+        """
 
     @abstractmethod
     def decode(
@@ -63,7 +76,15 @@ class _FusedEncoder(ABC, _Encoder[_T]):
         byteorder: ByteOrder,
         ptr_size: int,
     ) -> _T:
-        ...
+        """
+        Decodes a value that is mixed in with the opcode.
+
+        :param opcode: The opcode.
+        :param byte_value: The byte that's mixed with the opcode.
+        :param byteorder: The endianness.
+        :param ptr_size: The pointer size, in bytes, for the target.
+        :returns: The decoded value.
+        """
 
 
 class _AddToOpcodeEncoder(_FusedEncoder[int]):
@@ -71,10 +92,10 @@ class _AddToOpcodeEncoder(_FusedEncoder[int]):
     The operand value is added to the opcode.
     """
 
-    def __init__(self, max_value: int) -> None:
-        assert 0 < max_value <= 0xFF
+    def __init__(self, upper_bound: int) -> None:
+        assert 0 < upper_bound <= 0xFF
         super().__init__()
-        self.max_value = max_value
+        self.upper_bound = upper_bound
 
     def encode(
         self,
@@ -97,53 +118,40 @@ class _AddToOpcodeEncoder(_FusedEncoder[int]):
     def validate(self, value: int):
         if value < 0:
             raise ValueError("value must be positive")
-        if value > self.max_value:
-            raise ValueError(f"value must be less than {self.max_value+1}")
-
-
-class _Low6BitsEncoder(_FusedEncoder[int]):
-    """
-    The operand value is stored in the low six bits of the opcode.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    def encode(
-        self,
-        opcode: int,
-        value: int,
-        byteorder: ByteOrder,
-        ptr_size: int,
-    ) -> bytes:
-        return (opcode | value).to_bytes(1, byteorder)
-
-    def decode(
-        self,
-        opcode: int,
-        byte_value: int,
-        byteorder: ByteOrder,
-        ptr_size: int,
-    ) -> int:
-        return byte_value & 0b111111
-
-    def validate(self, value: int):
-        if value not in _int_domain(bit_size=6, signed=False):
-            raise ValueError("value cannot fit in a 6-bit unsigned integer")
+        if value >= self.upper_bound:
+            raise ValueError(f"value must be less than {self.upper_bound}")
 
 
 class _StandaloneEncoder(ABC, _Encoder[_T]):
+    """
+    Encodes a value as bytes.
+    """
+
     @abstractmethod
     def encode(
         self, value: _T, byteorder: ByteOrder, ptr_size: int
     ) -> Union[bytes, bytearray]:
-        ...
+        """
+        Encodes a value as bytes.
+
+        :param value: The value.
+        :param byteorder: The endianness.
+        :param ptr_size: The pointer size, in bytes, for the target.
+        :returns: The encoded bytes.
+        """
 
     @abstractmethod
     def decode(
         self, io: BinaryIO, byteorder: ByteOrder, ptr_size: int
     ) -> Tuple[_T, int]:
-        ...
+        """
+        Decodes a value.
+
+        :param io: The stream to read from.
+        :param byteorder: The endianness.
+        :param ptr_size: The pointer size, in bytes, for the target.
+        :returns: The decoded value and the number of bytes read.
+        """
 
 
 class _ULEB128Encoder(_StandaloneEncoder[int]):

@@ -48,6 +48,11 @@ class CFIParseTest:
         CFIParseTest(
             "cfi_val_expression",
             b"\x16\x10\x01\x31",
+            #   ^   ^   ^   ^
+            #   |   |   |   |- DW_OP_lit1
+            #   |   |   |- expr length
+            #   |   |- register
+            #   |- DW_CFA_val_expression
             (InstValExpression(16, [OpLit(1)]),),
         ),
     ),

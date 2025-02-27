@@ -23,15 +23,16 @@
 import abc
 import io
 from dataclasses import dataclass, fields
-from typing import BinaryIO, ClassVar, Dict, Iterator, List, Tuple, Type
+from typing import BinaryIO, ClassVar, Iterator, List, Set, Tuple
 
 import leb128
-from typing_extensions import Literal, override
+from typing_extensions import override
 
 from .._auxdata import NULL_UUID, CFIDirectiveType
 from ._encodable import _encoded_field, _OpcodeEncodable
 from ._encoders import (
-    _Low6BitsEncoder,
+    ByteOrder,
+    _AddToOpcodeEncoder,
     _SLEB128Encoder,
     _StandaloneEncoder,
     _ULEB128Encoder,
@@ -48,14 +49,14 @@ class _ExprEncoder(_StandaloneEncoder[List[Operation]]):
     def encode(
         self,
         value: List[Operation],
-        byteorder: Literal["big", "little"],
+        byteorder: ByteOrder,
         ptr_size: int,
     ) -> bytearray:
         encoded_expr = b"".join(op.encode(byteorder, ptr_size) for op in value)
         return leb128.u.encode(len(encoded_expr)) + encoded_expr
 
     def decode(
-        self, io: BinaryIO, byteorder: Literal["big", "little"], ptr_size: int
+        self, io: BinaryIO, byteorder: ByteOrder, ptr_size: int
     ) -> Tuple[List[Operation], int]:
         length, len_read = leb128.u.decode_reader(io)
         ops = []
@@ -73,14 +74,12 @@ class Instruction:
     """
 
     @abc.abstractmethod
-    def assembly_string(
-        self, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> str:
+    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
         ...
 
     @abc.abstractmethod
     def gtirb_encoding(
-        self, byteorder: Literal["big", "little"], ptr_size: int
+        self, byteorder: ByteOrder, ptr_size: int
     ) -> CFIDirectiveType:
         ...
 
@@ -92,13 +91,11 @@ class _EncodableInstruction(
 ):
     """
     An encodable instruction is an instruction that can be represented in
-    the binary as an instruction in the FDE.
+    the binary as an instruction in the FDE (Frame Description Entry).
     """
 
-    _registered_directives: ClassVar[
-        Dict[str, Type["_EncodableInstruction"]]
-    ] = {}
-    _directive: ClassVar[str] = ""
+    _registered_directives: ClassVar[Set[str]] = set()
+    _directive: ClassVar[str]
 
     def __init_subclass__(
         cls,
@@ -111,15 +108,13 @@ class _EncodableInstruction(
         if directive != ".cfi_escape":
             if directive in _EncodableInstruction._registered_directives:
                 raise AssertionError("directive already registered")
-            _EncodableInstruction._registered_directives[directive] = cls
+            _EncodableInstruction._registered_directives.add(directive)
 
         cls._directive = directive
 
-    def _operands(
-        self, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> List[int]:
+    def _operands(self, byteorder: ByteOrder, ptr_size: int) -> List[int]:
         """
-        Convert the instruction's fileds into assembly operands.
+        Convert the instruction's fields into assembly operands.
         """
         if self._directive == ".cfi_escape":
             encoded = self.encode(byteorder, ptr_size)
@@ -129,14 +124,12 @@ class _EncodableInstruction(
 
     @override
     def gtirb_encoding(
-        self, byteorder: Literal["big", "little"], ptr_size: int
+        self, byteorder: ByteOrder, ptr_size: int
     ) -> CFIDirectiveType:
         return self._directive, self._operands(byteorder, ptr_size), NULL_UUID
 
     @override
-    def assembly_string(
-        self, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> str:
+    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
         args = self._operands(byteorder, ptr_size)
         if args:
             return self._directive + " " + ", ".join(str(arg) for arg in args)
@@ -288,7 +281,7 @@ class InstOffset(
     the value of N is factored offset * data_alignment_factor.
     """
 
-    register: int = _encoded_field(_Low6BitsEncoder())
+    register: int = _encoded_field(_AddToOpcodeEncoder(64))
     factored_offset: int = _encoded_field(_ULEB128Encoder())
 
 
@@ -425,7 +418,7 @@ class InstRestore(
     initial_instructions in the CIE.
     """
 
-    register: int = _encoded_field(_Low6BitsEncoder())
+    register: int = _encoded_field(_AddToOpcodeEncoder(64))
 
 
 class InstRestoreExtended(
@@ -502,13 +495,11 @@ class InstRelOffset(
     offset: int
 
     def gtirb_encoding(
-        self, byteorder: Literal["big", "little"], ptr_size: int
+        self, byteorder: ByteOrder, ptr_size: int
     ) -> CFIDirectiveType:
         return (".cfi_rel_offset", [self.register, self.offset], NULL_UUID)
 
-    def assembly_string(
-        self, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> str:
+    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
         return f".cfi_rel_offset {self.register}, {self.offset}"
 
 
@@ -522,13 +513,11 @@ class InstAdjustCFAOffset(Instruction):
     offset: int
 
     def gtirb_encoding(
-        self, byteorder: Literal["big", "little"], ptr_size: int
+        self, byteorder: ByteOrder, ptr_size: int
     ) -> CFIDirectiveType:
         return (".cfi_adjust_cfa_offset", [self.offset], NULL_UUID)
 
-    def assembly_string(
-        self, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> str:
+    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
         return f".cfi_adjust_cfa_offset {self.offset}"
 
 
@@ -544,14 +533,12 @@ class InstEscape(Instruction):
 
     @override
     def gtirb_encoding(
-        self, byteorder: Literal["big", "little"], ptr_size: int
+        self, byteorder: ByteOrder, ptr_size: int
     ) -> CFIDirectiveType:
         return ".cfi_escape", list(self.values), NULL_UUID
 
     @override
-    def assembly_string(
-        self, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> str:
+    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
         return ".cfi_escape " + ", ".join(str(arg) for arg in self.values)
 
 
@@ -559,7 +546,7 @@ class InstEscape(Instruction):
 # Instruction parsing
 # ----------------------------------------------------------------------------
 def parse_cfi_instructions(
-    value: bytes, byteorder: Literal["big", "little"], ptr_size: int
+    value: bytes, byteorder: ByteOrder, ptr_size: int
 ) -> Iterator[Instruction]:
     """
     Decode CFI instructions from a byte sequence.

@@ -31,17 +31,16 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
-    Union,
     overload,
 )
 
-from typing_extensions import BinaryIO, Literal, Self, dataclass_transform
+from typing_extensions import BinaryIO, Self, dataclass_transform
 
 from ._encoders import (
+    ByteOrder,
     _AddToOpcodeEncoder,
     _Encoder,
     _FusedEncoder,
-    _Low6BitsEncoder,
     _StandaloneEncoder,
 )
 
@@ -52,6 +51,9 @@ _ENCODER_KEY = "gtirb_rewriting_encoder"
 
 
 def _encoded_field(encoder: _Encoder[_FieldT], *args, **kwargs) -> _FieldT:
+    """
+    Specifies how an operand should be encoded for _OpcodeEncodable.
+    """
     metadata = kwargs.setdefault("metadata", {})
     metadata[_ENCODER_KEY] = encoder
     return dataclasses.field(*args, **kwargs)
@@ -61,7 +63,40 @@ def _encoded_field(encoder: _Encoder[_FieldT], *args, **kwargs) -> _FieldT:
 class _OpcodeEncodable(Generic[_OpcodeT]):
     """
     A base class for classes that can be represented as an opcode and
-    operands, encoded as bytes.
+    operands, encoded as bytes. The opcode should be an Enum subclass and the
+    operands can be integers.
+
+    To use _OpcodeEncodable, create a subclass that passes the opcode
+    enumeration type as `opcode_type`. Then, for each operation, create
+    subclasses of that class and pass the associated enumeration value as
+    `opcode`. Finally, in each operation class, add the appropriate members
+    for the operands and use `_encoded_field` to specify how the member should
+    be encoded. From here, _OpcodeEncodable will take care of creating an
+    initializer for your operands and for implementing `decode` and `encode`
+    methods.
+
+    For example, here is a simple type hierarchy for a hypothetical
+    instruction set:
+    ```python
+    class Operations(Enum):
+        And = 0
+
+    class SampleOp(_OpcodeEncodable[Operations], opcode_type=Operations):
+        pass
+
+    class AndOp(SampleOp, opcode=Operations.And):
+        # The operation takes two signed 8-bit integers as operands.
+        reg1: int = _encoded_field(_SIntEncoder(1))
+        reg2: int = _encoded_field(_SIntEncoder(1))
+
+    op = AndOp(1, 2)
+    assert op.encode('little', 8) == b"\x00\x01\x02"
+    ```
+
+    In addition to simple fields that get encoded after the operand byte, we
+    support fused fields where the operand value gets encoded with the operand
+    byte. A class can have at most one fused operand and it must be the first
+    member declared.
     """
 
     @dataclasses.dataclass
@@ -70,28 +105,19 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
         Storage that is specific to each enum type in use by subclasses.
         """
 
-        simple_opcodes: Dict[
-            int, "Type[_OpcodeEncodable]"
-        ] = dataclasses.field(default_factory=dict)
-        low6_opcodes: Dict[int, "Type[_OpcodeEncodable]"] = dataclasses.field(
+        opcodes: Dict[int, "Type[_OpcodeEncodable]"] = dataclasses.field(
             default_factory=dict
         )
 
         def _verify_unique(self, opcode: int):
-            if opcode in self.simple_opcodes or opcode in self.low6_opcodes:
+            if opcode in self.opcodes:
                 raise AssertionError(f"{opcode} already registered")
 
-        def register_simple(
+        def register_opcode(
             self, opcode: int, encoder: "Type[_OpcodeEncodable]"
         ) -> None:
             self._verify_unique(opcode)
-            self.simple_opcodes[opcode] = encoder
-
-        def register_low6(
-            self, opcode: int, encoder: "Type[_OpcodeEncodable]"
-        ) -> None:
-            self._verify_unique(opcode)
-            self.low6_opcodes[opcode] = encoder
+            self.opcodes[opcode] = encoder
 
     _per_type_storage: ClassVar[Dict[type, _PerTypeStorage]] = {}
     _opcode: ClassVar[Optional[int]] = None
@@ -132,14 +158,12 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
             _, fused_encoder = cls._fused_encoder()
             if fused_encoder:
                 if isinstance(fused_encoder, _AddToOpcodeEncoder):
-                    for i in range(fused_encoder.max_value):
-                        storage.register_simple(opcode.value + i, cls)
-                elif isinstance(fused_encoder, _Low6BitsEncoder):
-                    storage.register_low6(opcode.value, cls)
+                    for i in range(fused_encoder.upper_bound):
+                        storage.register_opcode(opcode.value + i, cls)
                 else:
                     raise AssertionError("unknown fused encoder")
             else:
-                storage.register_simple(opcode.value, cls)
+                storage.register_opcode(opcode.value, cls)
 
             cls._opcode = opcode.value
 
@@ -160,7 +184,12 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
             yield field, field.metadata[_ENCODER_KEY]
 
     @classmethod
-    def _fused_encoder(cls):
+    def _fused_encoder(
+        cls,
+    ) -> Tuple[Optional[dataclasses.Field], Optional[_FusedEncoder]]:
+        """
+        Finds the fused encoder field, if any.
+        """
         for field, encoder in cls._fields_and_encoders():
             if isinstance(encoder, _FusedEncoder):
                 return field, encoder
@@ -183,19 +212,22 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
             except ValueError as err:
                 raise ValueError(f"{field.name}: {err}") from err
 
-    def encode(
-        self, byteorder: Literal["big", "little"], ptr_size: int
-    ) -> Union[bytes, bytearray]:
+    def encode(self, byteorder: ByteOrder, ptr_size: int) -> bytearray:
+        """
+        Create the encoded byte representation for this object.
+        """
         assert self._opcode is not None
         fused_field, fused_encoder = self._fused_encoder()
 
+        result = bytearray()
+
         if fused_field and fused_encoder:
             value = getattr(self, fused_field.name)
-            result = fused_encoder.encode(
+            result += fused_encoder.encode(
                 self._opcode, value, byteorder, ptr_size
             )
         else:
-            result = self._opcode.to_bytes(1, byteorder)
+            result += self._opcode.to_bytes(1, byteorder)
 
         for field, encoder in self._fields_and_encoders():
             if isinstance(encoder, _StandaloneEncoder):
@@ -206,8 +238,12 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
 
     @classmethod
     def decode(
-        cls, io: BinaryIO, byteorder: Literal["big", "little"], ptr_size: int
+        cls, io: BinaryIO, byteorder: ByteOrder, ptr_size: int
     ) -> Tuple[Self, int]:
+        """
+        Decodes a single object from the input stream. Returns the decoded
+        object and the number of bytes read.
+        """
         if cls._opcode_type is None:
             name = cls.__name__
             raise TypeError(f"Can't instantiate abstract class {name}")
@@ -216,9 +252,7 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
 
         opcode_byte = int.from_bytes(io.read(1), byteorder)
         bytes_read = 1
-        opcode_cls = type_storage.simple_opcodes.get(opcode_byte)
-        if opcode_cls is None:
-            opcode_cls = type_storage.low6_opcodes.get(opcode_byte & 0xC0)
+        opcode_cls = type_storage.opcodes.get(opcode_byte)
 
         if not opcode_cls:
             raise ValueError(f"invalid opcode byte: {opcode_byte}")

@@ -28,7 +28,6 @@ import pytest
 
 from gtirb_rewriting.dwarf._encoders import (
     _AddToOpcodeEncoder,
-    _Low6BitsEncoder,
     _SIntEncoder,
     _SLEB128Encoder,
     _UIntEncoder,
@@ -118,7 +117,7 @@ def test_add_to_opcode_encoder():
 
 
 def test_low_6_bits_encoder():
-    encoder = _Low6BitsEncoder()
+    encoder = _AddToOpcodeEncoder(64)
     encoder.validate(0x01)
     assert encoder.encode(0xC0, 0x01, "little", 8) == b"\xC1"
     assert encoder.decode(0xC0, 0xC1, "little", 8) == 0x01
