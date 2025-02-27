@@ -32,6 +32,7 @@ from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
+    DefaultDict,
     Dict,
     Iterator,
     List,
@@ -855,12 +856,12 @@ class _State:
     blocks_with_code: Set[gtirb.ByteBlock] = dataclasses.field(
         default_factory=set
     )
-    elf_symbol_attributes: Dict[
+    elf_symbol_attributes: DefaultDict[
         gtirb.Symbol, "Assembler.Result.ElfSymbolAttributes"
     ] = dataclasses.field(
-        default_factory=lambda: defaultdict(
-            Assembler.Result.ElfSymbolAttributes
-        )
+        default_factory=lambda: DefaultDict[
+            gtirb.Symbol, "Assembler.Result.ElfSymbolAttributes"
+        ](Assembler.Result.ElfSymbolAttributes)
     )
     block_types: Dict[
         gtirb.ByteBlock, "Assembler.Result.DataType"
