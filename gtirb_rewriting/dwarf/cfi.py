@@ -89,11 +89,6 @@ class _EncodableInstruction(
     _OpcodeEncodable[CallFrameInstructions],
     opcode_type=CallFrameInstructions,
 ):
-    """
-    An encodable instruction is an instruction that can be represented in
-    the binary as an instruction in the FDE (Frame Description Entry).
-    """
-
     _registered_directives: ClassVar[Set[str]] = set()
     _directive: ClassVar[str]
 

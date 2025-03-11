@@ -21,7 +21,7 @@
 # endorsement should be inferred.
 
 import dataclasses
-from enum import Enum
+from enum import IntEnum
 from typing import (
     ClassVar,
     Dict,
@@ -45,7 +45,7 @@ from ._encoders import (
 )
 
 _FieldT = TypeVar("_FieldT")
-_OpcodeT = TypeVar("_OpcodeT", bound=Enum)
+_OpcodeT = TypeVar("_OpcodeT", bound=IntEnum)
 
 _ENCODER_KEY = "gtirb_rewriting_encoder"
 
@@ -97,6 +97,8 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
     support fused fields where the operand value gets encoded with the operand
     byte. A class can have at most one fused operand and it must be the first
     member declared.
+
+    Fields are encoded and decoded in the order they are declared as members.
     """
 
     @dataclasses.dataclass
@@ -109,14 +111,11 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
             default_factory=dict
         )
 
-        def _verify_unique(self, opcode: int):
-            if opcode in self.opcodes:
-                raise AssertionError(f"{opcode} already registered")
-
         def register_opcode(
             self, opcode: int, encoder: "Type[_OpcodeEncodable]"
         ) -> None:
-            self._verify_unique(opcode)
+            if opcode in self.opcodes:
+                raise ValueError(f"{opcode} already registered")
             self.opcodes[opcode] = encoder
 
     _per_type_storage: ClassVar[Dict[type, _PerTypeStorage]] = {}
@@ -161,7 +160,7 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
                     for i in range(fused_encoder.upper_bound):
                         storage.register_opcode(opcode.value + i, cls)
                 else:
-                    raise AssertionError("unknown fused encoder")
+                    raise ValueError("unknown fused encoder")
             else:
                 storage.register_opcode(opcode.value, cls)
 
@@ -171,7 +170,7 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
             cls._opcode_type = opcode_type
 
         else:
-            raise AssertionError("must either have a type or an opcode")
+            assert False, "must either have a type or an opcode"
 
     @classmethod
     def _fields_and_encoders(
@@ -205,10 +204,13 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
             name = type(self).__name__
             raise TypeError(f"Can't instantiate abstract class {name}")
 
+        self._validate()
+
+    def _validate(self, ptr_size: Optional[int] = None) -> None:
         for field, encoder in self._fields_and_encoders():
             value = getattr(self, field.name)
             try:
-                encoder.validate(value)
+                encoder.validate(value, ptr_size)
             except ValueError as err:
                 raise ValueError(f"{field.name}: {err}") from err
 
@@ -217,6 +219,7 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
         Create the encoded byte representation for this object.
         """
         assert self._opcode is not None
+        self._validate(ptr_size=ptr_size)
         fused_field, fused_encoder = self._fused_encoder()
 
         result = bytearray()

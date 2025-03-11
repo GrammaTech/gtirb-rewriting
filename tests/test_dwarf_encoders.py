@@ -59,7 +59,7 @@ def test_int_encoder(
         signed = False
 
     for value in values:
-        encoder.validate(value)
+        encoder.validate(value, ptr_size=size)
         encoded = encoder.encode(value, byteorder, ptr_size=size)
         assert encoded == value.to_bytes(size, byteorder, signed=signed)
 
@@ -70,12 +70,9 @@ def test_int_encoder(
         assert stream.read() == b"!"
 
     with pytest.raises(ValueError):
-        encoder.validate(values[0] - 1)
-    # UIntPtrEncoder does not know its size for validation, so it can't raise
-    # an error here.
-    if encoder_type is not _UIntPtrEncoder:
-        with pytest.raises(ValueError):
-            encoder.validate(values[-1] + 1)
+        encoder.validate(values[0] - 1, ptr_size=size)
+    with pytest.raises(ValueError):
+        encoder.validate(values[-1] + 1, ptr_size=size)
 
 
 @pytest.mark.parametrize("signed", (True, False))
@@ -90,7 +87,7 @@ def test_leb128_encoder(signed: bool):
         m = leb128.u
 
     for value in values:
-        encoder.validate(value)
+        encoder.validate(value, ptr_size=8)
         encoded = encoder.encode(value, "little", 8)
         assert encoded == m.encode(value)
 
@@ -102,26 +99,26 @@ def test_leb128_encoder(signed: bool):
 
     if not signed:
         with pytest.raises(ValueError):
-            encoder.validate(-1)
+            encoder.validate(-1, ptr_size=8)
 
 
 def test_add_to_opcode_encoder():
     encoder = _AddToOpcodeEncoder(0xF)
-    encoder.validate(0x01)
+    encoder.validate(0x01, ptr_size=8)
     assert encoder.encode(0xF0, 0x01, "little", 8) == b"\xF1"
     assert encoder.decode(0xF0, 0xF1, "little", 8) == 0x01
     with pytest.raises(ValueError):
-        encoder.validate(-1)
+        encoder.validate(-1, ptr_size=8)
     with pytest.raises(ValueError):
-        encoder.validate(0x10)
+        encoder.validate(0x10, ptr_size=8)
 
 
 def test_low_6_bits_encoder():
     encoder = _AddToOpcodeEncoder(64)
-    encoder.validate(0x01)
+    encoder.validate(0x01, ptr_size=8)
     assert encoder.encode(0xC0, 0x01, "little", 8) == b"\xC1"
     assert encoder.decode(0xC0, 0xC1, "little", 8) == 0x01
     with pytest.raises(ValueError):
-        encoder.validate(-1)
+        encoder.validate(-1, ptr_size=8)
     with pytest.raises(ValueError):
-        encoder.validate(0xC0)
+        encoder.validate(0xC0, ptr_size=8)

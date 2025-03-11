@@ -23,7 +23,7 @@
 # flake8: noqa
 # fmt: off
 
-from enum import Enum, IntFlag
+from enum import IntEnum, IntFlag
 
 
 class PointerEncodings(IntFlag):
@@ -51,7 +51,7 @@ class PointerEncodings(IntFlag):
     indirect = 0x80
 
 
-class CallFrameInstructions(int, Enum):
+class CallFrameInstructions(IntEnum):
     nop                 = 0x00
     set_loc             = 0x01
     advance_loc1        = 0x02
@@ -88,7 +88,7 @@ class CallFrameInstructions(int, Enum):
     aarch64_negate_ra_state      = 0x2D
 
 
-class ExpressionOperations(int, Enum):
+class ExpressionOperations(IntEnum):
     addr                = 0x03
     deref               = 0x06
     const1u             = 0x08

@@ -332,34 +332,7 @@ class OpConst(Operation, opcode_type=ExpressionOperations):
         if cls is not OpConst:
             return super().__new__(cls)
 
-        if 0 <= value <= 31:
-            return OpLit(value)
-
-        for bit_size, signed, cls in (
-            (8, False, OpConst1U),
-            (16, False, OpConst2U),
-            (32, False, OpConst4U),
-            (64, False, OpConst8U),
-            (8, True, OpConst1S),
-            (16, True, OpConst2S),
-            (32, True, OpConst4S),
-            (64, True, OpConst8S),
-        ):
-            if value in _int_domain(bit_size, signed):
-                if bit_size >= 32:
-                    if signed:
-                        leb_encoding = leb128.i.encode(value)
-                        leb_cls = OpConstS
-                    else:
-                        leb_encoding = leb128.u.encode(value)
-                        leb_cls = OpConstU
-
-                    if len(leb_encoding) * 8 < bit_size:
-                        return leb_cls(value)
-
-                return cls(value)
-
-        raise ValueError("value cannot be encoded")
+        return make_const_op(value)
 
     value: int
 
@@ -489,3 +462,41 @@ class OpBRegX(Operation, opcode=ExpressionOperations.bregx):
 
     register: int = _encoded_field(_ULEB128Encoder())
     offset: int = _encoded_field(_SLEB128Encoder())
+
+
+# ----------------------------------------------------------------------------
+# Helper Functions
+# ----------------------------------------------------------------------------
+def make_const_op(value: int) -> OpConst:
+    """
+    Create the smallest OpConst that can be used to encode a given constant
+    value.
+    """
+    if 0 <= value <= 31:
+        return OpLit(value)
+
+    for bit_size, signed, cls in (
+        (8, False, OpConst1U),
+        (16, False, OpConst2U),
+        (32, False, OpConst4U),
+        (64, False, OpConst8U),
+        (8, True, OpConst1S),
+        (16, True, OpConst2S),
+        (32, True, OpConst4S),
+        (64, True, OpConst8S),
+    ):
+        if value in _int_domain(bit_size, signed):
+            if bit_size >= 32:
+                if signed:
+                    leb_encoding = leb128.i.encode(value)
+                    leb_cls = OpConstS
+                else:
+                    leb_encoding = leb128.u.encode(value)
+                    leb_cls = OpConstU
+
+                if len(leb_encoding) * 8 < bit_size:
+                    return leb_cls(value)
+
+            return cls(value)
+
+    raise ValueError("value cannot be encoded")

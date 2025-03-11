@@ -21,7 +21,7 @@
 # endorsement should be inferred.
 
 from abc import ABC, abstractmethod
-from typing import Generic, Tuple, TypeVar, Union
+from typing import Generic, Optional, Tuple, TypeVar, Union
 
 import leb128
 from typing_extensions import BinaryIO, Literal
@@ -34,10 +34,20 @@ ByteOrder = Literal["little", "big"]
 class _Encoder(Generic[_T]):
     """
     Base class for encoders that can be used to serialize and deserialize
-    values. The base class only handles validation for values.
+    values.
+
+    The signatures for encode and decode differ between fused encoders and
+    standalone encoders. For encoding and decoding, fused encoders are given
+    the registered opcode value and the value to encode/decode. Standalone
+    encoders just get the value they need to encode/decode and must be
+    independent of the opcode.
+
+    Therefore the base class only handles validation for values. This allows
+    for encoders to be treated uniformly, whether the encoder is fused or
+    standalone.
     """
 
-    def validate(self, value: _T) -> None:
+    def validate(self, value: _T, ptr_size: Optional[int]) -> None:
         """
         Validates that the value can be represented by this encoder. Raises a
         ValueError it is unrepresentable.
@@ -115,7 +125,7 @@ class _AddToOpcodeEncoder(_FusedEncoder[int]):
     ) -> int:
         return byte_value - opcode
 
-    def validate(self, value: int):
+    def validate(self, value: int, ptr_size: Optional[int]):
         if value < 0:
             raise ValueError("value must be positive")
         if value >= self.upper_bound:
@@ -165,7 +175,7 @@ class _ULEB128Encoder(_StandaloneEncoder[int]):
     ) -> Tuple[int, int]:
         return leb128.u.decode_reader(io)
 
-    def validate(self, value: int):
+    def validate(self, value: int, ptr_size: Optional[int]):
         if value < 0:
             raise ValueError("value must be positive")
 
@@ -200,7 +210,7 @@ class _IntEncoder(_StandaloneEncoder[int]):
             self.byte_size,
         )
 
-    def validate(self, value: int):
+    def validate(self, value: int, ptr_size: Optional[int]):
         size_range = _int_domain(self.byte_size * 8, signed=self.signed)
 
         if value not in size_range:
@@ -232,9 +242,16 @@ class _UIntPtrEncoder(_StandaloneEncoder[int]):
             ptr_size,
         )
 
-    def validate(self, value: int):
+    def validate(self, value: int, ptr_size: Optional[int]):
         if value < 0:
             raise ValueError("value must be positive")
+        if ptr_size is not None:
+            size_range = _int_domain(ptr_size * 8, signed=False)
+
+            if value not in size_range:
+                raise ValueError(
+                    f"value cannot fit in {ptr_size}-byte unsigned integer"
+                )
 
 
 def _int_domain(bit_size: int, signed: bool) -> range:
