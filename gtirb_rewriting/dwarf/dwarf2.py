@@ -23,10 +23,10 @@
 # flake8: noqa
 # fmt: off
 
-from enum import Enum
+from enum import IntEnum, IntFlag
 
 
-class PointerEncodings(int, Enum):
+class PointerEncodings(IntFlag):
     """
     A description of how a pointer is encoded. The low 4 bits indicate the
     format of the data and the upper 4 bits indicate how the value is applied.
@@ -48,9 +48,10 @@ class PointerEncodings(int, Enum):
     datarel = 0x30
     funcrel = 0x40
     aligned = 0x50
+    indirect = 0x80
 
 
-class CallFrameInstructions(int, Enum):
+class CallFrameInstructions(IntEnum):
     nop                 = 0x00
     set_loc             = 0x01
     advance_loc1        = 0x02
@@ -87,7 +88,7 @@ class CallFrameInstructions(int, Enum):
     aarch64_negate_ra_state      = 0x2D
 
 
-class ExpressionOperations(int, Enum):
+class ExpressionOperations(IntEnum):
     addr                = 0x03
     deref               = 0x06
     const1u             = 0x08
