@@ -1,3 +1,7 @@
+0.4.0:
+- Added the ability to evaluate CFI directives with a new function,
+  evaluate_cfi_directives.
+
 0.3.0:
 - Added RewritingContext.retarget_symbol, which allows adjusting code/data
   references of one symbol to use another synmbol instead. For example, you

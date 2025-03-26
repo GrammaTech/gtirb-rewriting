@@ -295,6 +295,13 @@ class ABI:
         """
         raise NotImplementedError
 
+    def default_dwarf_eh_return_column(self) -> int:
+        """
+        The default column used for the return address in the DWARF exception
+        handling tables.
+        """
+        raise NotImplementedError
+
     def _sym_expr_rules(
         self, module: gtirb.Module
     ) -> Iterable[_SymExprAttributeRule]:
@@ -585,6 +592,9 @@ class _X86_64_ELF(_X86_64):
     def temporary_label_prefix(self) -> str:
         return ".L"
 
+    def default_dwarf_eh_return_column(self) -> int:
+        return 16
+
     def _sym_expr_rules(
         self, module: gtirb.Module
     ) -> Iterable[_SymExprAttributeRule]:
@@ -738,6 +748,9 @@ class _ARM64_ELF(ABI):
 
     def temporary_label_prefix(self) -> str:
         return ".L"
+
+    def default_dwarf_eh_return_column(self) -> int:
+        return 32
 
     def _sym_expr_rules(
         self, module: gtirb.Module
