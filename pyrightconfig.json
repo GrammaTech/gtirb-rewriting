@@ -9,5 +9,6 @@
   "reportPropertyTypeMismatch": "error",
   "reportUninitializedInstanceVariable": "error",
   "reportUnnecessaryComparison": "error",
+  "reportPrivateImportUsage": "none",
   "ignore": ["gtirb_rewriting/gtirb_protobuf_compat/proto_3.py"]
 }
