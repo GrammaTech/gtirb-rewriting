@@ -20,13 +20,11 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-import abc
 import io
-from dataclasses import dataclass, fields
+from dataclasses import fields
 from typing import BinaryIO, ClassVar, Iterator, List, Set, Tuple
 
 import leb128
-from typing_extensions import override
 
 from .._auxdata import NULL_UUID, CFIDirectiveType
 from ._encodable import _encoded_field, _OpcodeEncodable
@@ -68,27 +66,14 @@ class _ExprEncoder(_StandaloneEncoder[List[Operation]]):
         return ops, len_read + op_bytes_read
 
 
-class Instruction:
+class Instruction(
+    _OpcodeEncodable[CallFrameInstructions],
+    opcode_type=CallFrameInstructions,
+):
     """
     A DWARF CFI instruction.
     """
 
-    @abc.abstractmethod
-    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
-        ...
-
-    @abc.abstractmethod
-    def gtirb_encoding(
-        self, byteorder: ByteOrder, ptr_size: int
-    ) -> CFIDirectiveType:
-        ...
-
-
-class _EncodableInstruction(
-    Instruction,
-    _OpcodeEncodable[CallFrameInstructions],
-    opcode_type=CallFrameInstructions,
-):
     _registered_directives: ClassVar[Set[str]] = set()
     _directive: ClassVar[str]
 
@@ -101,9 +86,9 @@ class _EncodableInstruction(
         super().__init_subclass__(opcode=opcode)
 
         if directive != ".cfi_escape":
-            if directive in _EncodableInstruction._registered_directives:
+            if directive in cls._registered_directives:
                 raise AssertionError("directive already registered")
-            _EncodableInstruction._registered_directives.add(directive)
+            cls._registered_directives.add(directive)
 
         cls._directive = directive
 
@@ -117,13 +102,11 @@ class _EncodableInstruction(
 
         return [getattr(self, field.name) for field in fields(self)]
 
-    @override
     def gtirb_encoding(
         self, byteorder: ByteOrder, ptr_size: int
     ) -> CFIDirectiveType:
         return self._directive, self._operands(byteorder, ptr_size), NULL_UUID
 
-    @override
     def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
         args = self._operands(byteorder, ptr_size)
         if args:
@@ -136,7 +119,7 @@ class _EncodableInstruction(
 # CFA Definition Instructions
 # ----------------------------------------------------------------------------
 class InstDefCFA(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_def_cfa",
     opcode=CallFrameInstructions.def_cfa,
 ):
@@ -152,7 +135,7 @@ class InstDefCFA(
 
 
 class InstDefCFASF(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.def_cfa_sf,
 ):
@@ -169,7 +152,7 @@ class InstDefCFASF(
 
 
 class InstDefCFARegister(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_def_cfa_register",
     opcode=CallFrameInstructions.def_cfa_register,
 ):
@@ -185,7 +168,7 @@ class InstDefCFARegister(
 
 
 class InstDefCFAOffset(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.def_cfa_offset,
 ):
@@ -201,7 +184,7 @@ class InstDefCFAOffset(
 
 
 class InstDefCFAOffsetSF(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.def_cfa_offset_sf,
 ):
@@ -218,7 +201,7 @@ class InstDefCFAOffsetSF(
 
 
 class InstDefCFAExpression(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.def_cfa_expression,
 ):
@@ -236,7 +219,7 @@ class InstDefCFAExpression(
 # Register Rule Instructions
 # ----------------------------------------------------------------------------
 class InstUndefined(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_undefined",
     opcode=CallFrameInstructions.undefined,
 ):
@@ -250,7 +233,7 @@ class InstUndefined(
 
 
 class InstSameValue(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_same_value",
     opcode=CallFrameInstructions.same_value,
 ):
@@ -264,7 +247,7 @@ class InstSameValue(
 
 
 class InstOffset(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.offset,
 ):
@@ -281,7 +264,7 @@ class InstOffset(
 
 
 class InstOffsetExtended(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.offset_extended,
 ):
@@ -297,7 +280,7 @@ class InstOffsetExtended(
 
 
 class InstOffsetExtendedSF(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.offset_extended_sf,
 ):
@@ -314,7 +297,7 @@ class InstOffsetExtendedSF(
 
 
 class InstValOffset(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.val_offset,
 ):
@@ -331,7 +314,7 @@ class InstValOffset(
 
 
 class InstValOffsetSF(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.val_offset_sf,
 ):
@@ -348,7 +331,7 @@ class InstValOffsetSF(
 
 
 class InstRegister(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_register",
     opcode=CallFrameInstructions.register,
 ):
@@ -363,7 +346,7 @@ class InstRegister(
 
 
 class InstExpression(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.expression,
 ):
@@ -382,7 +365,7 @@ class InstExpression(
 
 
 class InstValExpression(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.val_expression,
 ):
@@ -402,7 +385,7 @@ class InstValExpression(
 
 
 class InstRestore(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_restore",
     opcode=CallFrameInstructions.restore,
 ):
@@ -417,7 +400,7 @@ class InstRestore(
 
 
 class InstRestoreExtended(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.restore_extended,
 ):
@@ -435,7 +418,7 @@ class InstRestoreExtended(
 # Row State Instructions
 # ----------------------------------------------------------------------------
 class InstRememberState(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_remember_state",
     opcode=CallFrameInstructions.remember_state,
 ):
@@ -447,7 +430,7 @@ class InstRememberState(
 
 
 class InstRestoreState(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_restore_state",
     opcode=CallFrameInstructions.restore_state,
 ):
@@ -462,7 +445,7 @@ class InstRestoreState(
 # Padding Instructions
 # ----------------------------------------------------------------------------
 class InstNop(
-    _EncodableInstruction,
+    Instruction,
     directive=".cfi_escape",
     opcode=CallFrameInstructions.nop,
 ):
@@ -470,71 +453,6 @@ class InstNop(
     The DW_CFA_nop instruction has no operands and no required actions. It is
     used as padding to make a CIE or FDE an appropriate size.
     """
-
-
-# ----------------------------------------------------------------------------
-# Pseudo Instructions (no DWARF representation)
-# ----------------------------------------------------------------------------
-@dataclass
-class InstRelOffset(
-    Instruction,
-):
-    """
-    Previous value of register is saved at offset offset from the current CFA
-    register. This is transformed to .cfi_offset using the known displacement
-    of the CFA register from the CFA. This is often easier to use, because the
-    number will match the code it's annotating.
-    """
-
-    register: int
-    offset: int
-
-    def gtirb_encoding(
-        self, byteorder: ByteOrder, ptr_size: int
-    ) -> CFIDirectiveType:
-        return (".cfi_rel_offset", [self.register, self.offset], NULL_UUID)
-
-    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
-        return f".cfi_rel_offset {self.register}, {self.offset}"
-
-
-@dataclass
-class InstAdjustCFAOffset(Instruction):
-    """
-    Same as .cfi_def_cfa_offset but offset is a relative value that is
-    added/subtracted from the previous offset.
-    """
-
-    offset: int
-
-    def gtirb_encoding(
-        self, byteorder: ByteOrder, ptr_size: int
-    ) -> CFIDirectiveType:
-        return (".cfi_adjust_cfa_offset", [self.offset], NULL_UUID)
-
-    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
-        return f".cfi_adjust_cfa_offset {self.offset}"
-
-
-@dataclass
-class InstEscape(Instruction):
-    """
-    Allows the user to add arbitrary bytes to the unwind info. One might use
-    this to add OS-specific CFI opcodes, or generic CFI opcodes that GAS does
-    not yet support.
-    """
-
-    values: bytes
-
-    @override
-    def gtirb_encoding(
-        self, byteorder: ByteOrder, ptr_size: int
-    ) -> CFIDirectiveType:
-        return ".cfi_escape", list(self.values), NULL_UUID
-
-    @override
-    def assembly_string(self, byteorder: ByteOrder, ptr_size: int) -> str:
-        return ".cfi_escape " + ", ".join(str(arg) for arg in self.values)
 
 
 # ----------------------------------------------------------------------------
@@ -549,6 +467,6 @@ def parse_cfi_instructions(
     reader = io.BytesIO(value)
     offset = 0
     while offset < len(value):
-        inst, read = _EncodableInstruction.decode(reader, byteorder, ptr_size)
+        inst, read = Instruction.decode(reader, byteorder, ptr_size)
         offset += read
         yield inst

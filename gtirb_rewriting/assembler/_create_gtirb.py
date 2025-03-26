@@ -26,7 +26,6 @@ import gtirb
 
 import gtirb_rewriting._auxdata as auxdata
 from gtirb_rewriting._adt import OffsetMapping
-from gtirb_rewriting.abi import ABI
 
 from .._auxdata import NULL_UUID, CFIDirectiveType
 
@@ -170,8 +169,6 @@ def create_cfi_directives(
     Creates the cfiDirectives aux data table for an assembler result.
     """
 
-    abi = ABI.get(result.target)
-
     directives = OffsetMapping[List[CFIDirectiveType]]()
 
     def append_instruction(offset: gtirb.Offset, inst: CFIDirectiveType):
@@ -212,12 +209,7 @@ def create_cfi_directives(
                     )
             for offset, instructions in procedure.instructions.items():
                 for instruction in instructions:
-                    append_instruction(
-                        offset,
-                        instruction.gtirb_encoding(
-                            abi.byteorder(), abi.pointer_size()
-                        ),
-                    )
+                    append_instruction(offset, instruction)
             if not procedure.is_implicit and procedure.end_offset:
                 append_instruction(
                     procedure.end_offset, (".cfi_endproc", [], NULL_UUID)

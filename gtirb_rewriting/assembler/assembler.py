@@ -50,9 +50,8 @@ from typing_extensions import Concatenate, ParamSpec, Self, override
 import gtirb_rewriting._auxdata as _auxdata
 
 from .._adt import IdentitySet, OffsetMapping
-from .._auxdata import CFIDirectiveType
+from .._auxdata import NULL_UUID, CFIDirectiveType
 from ..assembly import X86Syntax
-from ..dwarf import cfi
 from ..utils import _is_elf_pie, _is_fallthrough_edge, _target_triple
 from ._create_gtirb import create_cfi_directives as _create_cfi_directives
 from ._create_gtirb import create_gtirb as _create_gtirb
@@ -648,7 +647,7 @@ class Assembler:
             start_offset: Optional[gtirb.Offset] = None
             end_offset: Optional[gtirb.Offset] = None
             instructions: OffsetMapping[
-                List[cfi.Instruction]
+                List[CFIDirectiveType]
             ] = dataclasses.field(default_factory=OffsetMapping)
             is_implicit: bool = False
 
@@ -1496,7 +1495,9 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, adjustment: int
     ) -> None:
         super().emit_cfi_adjust_cfa_offset(state, adjustment)
-        self._append_cfi_instruction(cfi.InstAdjustCFAOffset(adjustment))
+        self._append_cfi_instruction(
+            (".cfi_adjust_cfa_offset", [adjustment], NULL_UUID)
+        )
 
     @_convert_errors
     @override
@@ -1504,7 +1505,9 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, register: int, offset: int
     ) -> None:
         super().emit_cfi_def_cfa(state, register, offset)
-        self._append_cfi_instruction(cfi.InstDefCFA(register, offset))
+        self._append_cfi_instruction(
+            (".cfi_def_cfa", [register, offset], NULL_UUID)
+        )
 
     @_convert_errors
     @override
@@ -1512,7 +1515,9 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, offset: int
     ) -> None:
         super().emit_cfi_def_cfa_offset(state, offset)
-        self._append_cfi_instruction(cfi.InstDefCFAOffset(offset))
+        self._append_cfi_instruction(
+            (".cfi_def_cfa_offset", [offset], NULL_UUID)
+        )
 
     @_convert_errors
     @override
@@ -1520,13 +1525,15 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, register: int
     ) -> None:
         super().emit_cfi_def_cfa_register(state, register)
-        self._append_cfi_instruction(cfi.InstDefCFARegister(register))
+        self._append_cfi_instruction(
+            (".cfi_def_cfa_register", [register], NULL_UUID)
+        )
 
     @_convert_errors
     @override
     def emit_cfi_escape(self, state: mcasm.ParserState, values: bytes) -> None:
         super().emit_cfi_escape(state, values)
-        self._append_cfi_instruction(cfi.InstEscape(values))
+        self._append_cfi_instruction((".cfi_escape", list(values), NULL_UUID))
 
     @_convert_errors
     @override
@@ -1547,7 +1554,9 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, register: int, offset: int
     ) -> None:
         super().emit_cfi_offset(state, register, offset)
-        self._append_cfi_instruction(cfi.InstOffset(register, offset))
+        self._append_cfi_instruction(
+            (".cfi_offset", [register, offset], NULL_UUID)
+        )
 
     @_convert_errors
     @override
@@ -1568,7 +1577,9 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, register_1: int, register_2: int
     ) -> None:
         super().emit_cfi_register(state, register_1, register_2)
-        self._append_cfi_instruction(cfi.InstRegister(register_1, register_2))
+        self._append_cfi_instruction(
+            (".cfi_register", [register_1, register_2], NULL_UUID)
+        )
 
     @_convert_errors
     @override
@@ -1576,26 +1587,28 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, register: int, offset: int
     ) -> None:
         super().emit_cfi_rel_offset(state, register, offset)
-        self._append_cfi_instruction(cfi.InstRelOffset(register, offset))
+        self._append_cfi_instruction(
+            (".cfi_rel_offset", [register, offset], NULL_UUID)
+        )
 
     @_convert_errors
     @override
     def emit_cfi_remember_state(self, state: mcasm.ParserState) -> None:
         super().emit_cfi_remember_state(state)
-        self._append_cfi_instruction(cfi.InstRememberState())
+        self._append_cfi_instruction((".cfi_remember_state", [], NULL_UUID))
 
     @_convert_errors
     def emit_cfi_restore(
         self, state: mcasm.ParserState, register: int
     ) -> None:
         super().emit_cfi_restore(state, register)
-        self._append_cfi_instruction(cfi.InstRestore(register))
+        self._append_cfi_instruction((".cfi_restore", [register], NULL_UUID))
 
     @_convert_errors
     @override
     def emit_cfi_restore_state(self, state: mcasm.ParserState) -> None:
         super().emit_cfi_restore_state(state)
-        self._append_cfi_instruction(cfi.InstRestoreState())
+        self._append_cfi_instruction((".cfi_restore_state", [], NULL_UUID))
 
     @_convert_errors
     @override
@@ -1612,7 +1625,9 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, register: int
     ) -> None:
         super().emit_cfi_same_value(state, register)
-        self._append_cfi_instruction(cfi.InstSameValue(register))
+        self._append_cfi_instruction(
+            (".cfi_same_value", [register], NULL_UUID)
+        )
 
     @_convert_errors
     @override
@@ -1620,7 +1635,7 @@ class _Streamer(mcasm.Streamer):
         self, state: mcasm.ParserState, register: int
     ) -> None:
         super().emit_cfi_undefined(state, register)
-        self._append_cfi_instruction(cfi.InstUndefined(register))
+        self._append_cfi_instruction((".cfi_undefined", [register], NULL_UUID))
 
     def diagnostic(
         self, state: mcasm.ParserState, diag: mcasm.mc.Diagnostic
@@ -1662,7 +1677,7 @@ class _Streamer(mcasm.Streamer):
             parser_state.loc,
         )
 
-    def _append_cfi_instruction(self, inst: cfi.Instruction) -> None:
+    def _append_cfi_instruction(self, inst: CFIDirectiveType) -> None:
         """
         Appends a CFI instruction to the current procedure at the current
         offset.
