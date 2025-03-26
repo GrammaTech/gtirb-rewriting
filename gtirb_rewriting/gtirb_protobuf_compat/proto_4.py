@@ -20,11 +20,6 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
-# For other GTIRB versions, some symbolic expression attributes
-# will not be defined and they will cause type checking errors.
-# Therefore, we deactivate type checking in this file.
-
-# pyright: basic,  reportGeneralTypeIssues=false
 
 from typing import Dict, Set
 

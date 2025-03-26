@@ -20,7 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 #
-# pyright: strict, reportPrivateUsage=false
+# pyright: strict, reportPrivateUsage=false, reportPrivateImportUsage=false
 
 import dataclasses
 import enum
