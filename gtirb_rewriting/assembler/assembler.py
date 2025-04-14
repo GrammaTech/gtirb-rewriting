@@ -19,8 +19,6 @@
 # N68335-17-C-0700.  The content of the information does not necessarily
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
-#
-# pyright: strict, reportPrivateUsage=false, reportPrivateImportUsage=false
 
 import dataclasses
 import enum
