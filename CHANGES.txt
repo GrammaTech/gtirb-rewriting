@@ -1,7 +1,3 @@
-0.4.0:
-- Added the ability to evaluate CFI directives with a new function,
-  evaluate_cfi_directives.
-
 0.3.0:
 - Added RewritingContext.retarget_symbol, which allows adjusting code/data
   references of one symbol to use another synmbol instead. For example, you
@@ -17,6 +13,8 @@
   Layout is implemented with the gtirb-layout package.
 - Added support for different decode modes to join_byte_intervals. Currently
   nop encodings for the non-default mode must be specified by the caller.
+- Added the ability to evaluate CFI directives with a new function,
+  evaluate_cfi_directives.
 
 0.2.0:
 - CFI directives are now preserved, allowing rewriting of C++ programs with
