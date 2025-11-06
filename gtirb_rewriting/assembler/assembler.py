@@ -1842,6 +1842,28 @@ class _Streamer(mcasm.Streamer):
                 )
             expr = expr.sub_expr
 
+        elif isinstance(expr, mcasm.mc.TargetExprMips):
+            variant_kind = expr.variant_kind
+            if variant_kind == mcasm.mc.MipsExprKind.GOT:
+                attributes.add(compat_proto.GOT)
+            elif variant_kind == mcasm.mc.MipsExprKind.HI:
+                attributes.add(compat_proto.HI)
+            elif variant_kind == mcasm.mc.MipsExprKind.LO:
+                attributes.add(compat_proto.LO)
+            elif variant_kind == mcasm.mc.MipsExprKind.PCREL_HI16:
+                attributes.add(compat_proto.PCREL)
+                attributes.add(compat_proto.HI)
+            elif variant_kind == mcasm.mc.MipsExprKind.PCREL_LO16:
+                attributes.add(compat_proto.PCREL)
+                attributes.add(compat_proto.LO)
+            elif variant_kind == mcasm.mc.MipsExprKind.GOT_CALL:
+                attributes.add(compat_proto.GOT)
+            else:
+                raise UnsupportedAssemblyError._make(
+                    f"unsupported mips-specific fixup: {variant_kind}",
+                    expr.location or loc,
+                )
+            expr = expr.sub_expr
         if (
             isinstance(expr, mcasm.mc.BinaryExpr)
             and expr.opcode == mcasm.mc.BinaryExpr.Opcode.Add

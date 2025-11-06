@@ -514,7 +514,12 @@ def test_sym_expr_in_data():
 
 @pytest.mark.parametrize(
     "isa",
-    (gtirb.Module.ISA.IA32, gtirb.Module.ISA.X64, gtirb.Module.ISA.ARM64),
+    (
+        gtirb.Module.ISA.IA32,
+        gtirb.Module.ISA.X64,
+        gtirb.Module.ISA.ARM64,
+        gtirb.Module.ISA.MIPS32,
+    ),
 )
 def test_indirect_call(isa):
     _, m = create_test_module(gtirb.Module.FileFormat.ELF, isa)
@@ -542,6 +547,18 @@ def test_indirect_call(isa):
             .quad 0
             """
         )
+    elif isa == gtirb.Module.ISA.MIPS32:
+        assembler.assemble(
+            """
+            jalr $t0
+            nop
+
+            .data
+            foo:
+            .long 0
+            """
+        )
+
     result = assembler.finalize()
     text_section = result.text_section
 
@@ -695,6 +712,97 @@ def test_arm64_sym_attribute_got():
     }
 
 
+def test_mips32_sym_attribute_hi_lo():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.MIPS32,
+        binary_type=["DYN"],
+    )
+    sym = add_symbol(m, "foo", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        lui $t0, %pcrel_hi(foo)
+        addiu $t1, $t0, %pcrel_lo(foo)
+        lui $t0, %hi(foo)
+        addiu $t1, $t0, %lo(foo)
+        """
+    )
+    result = assembler.finalize()
+    text_section = result.text_section
+
+    assert 0 in text_section.symbolic_expressions
+    assert isinstance(text_section.symbolic_expressions[0], gtirb.SymAddrConst)
+    assert text_section.symbolic_expressions[0].symbol is sym
+    assert text_section.symbolic_expressions[0].offset == 0
+    assert text_section.symbolic_expressions[0].attributes == {
+        compat_proto.HI,
+        compat_proto.PCREL,
+    }
+
+    assert 4 in text_section.symbolic_expressions
+    assert isinstance(text_section.symbolic_expressions[4], gtirb.SymAddrConst)
+    assert text_section.symbolic_expressions[4].symbol is sym
+    assert text_section.symbolic_expressions[4].offset == 0
+    assert text_section.symbolic_expressions[4].attributes == {
+        compat_proto.LO,
+        compat_proto.PCREL,
+    }
+
+    assert 8 in text_section.symbolic_expressions
+    assert isinstance(text_section.symbolic_expressions[8], gtirb.SymAddrConst)
+    assert text_section.symbolic_expressions[8].symbol is sym
+    assert text_section.symbolic_expressions[8].offset == 0
+    assert text_section.symbolic_expressions[8].attributes == {
+        compat_proto.HI,
+    }
+
+    assert 12 in text_section.symbolic_expressions
+    assert isinstance(
+        text_section.symbolic_expressions[12], gtirb.SymAddrConst
+    )
+    assert text_section.symbolic_expressions[12].symbol is sym
+    assert text_section.symbolic_expressions[12].offset == 0
+    assert text_section.symbolic_expressions[12].attributes == {
+        compat_proto.LO,
+    }
+
+
+def test_mips32_sym_attribute_got():
+    ir, m = create_test_module(
+        gtirb.Module.FileFormat.ELF,
+        gtirb.Module.ISA.MIPS32,
+    )
+    sym = add_symbol(m, "foo", add_proxy_block(m))
+
+    assembler = gtirb_rewriting.Assembler(m)
+    assembler.assemble(
+        """
+        lw $t0, %got(foo)($gp)
+        lw $t0, %call16(foo)($gp)
+        """
+    )
+    result = assembler.finalize()
+    text_section = result.text_section
+
+    assert 0 in text_section.symbolic_expressions
+    assert isinstance(text_section.symbolic_expressions[0], gtirb.SymAddrConst)
+    assert text_section.symbolic_expressions[0].symbol is sym
+    assert text_section.symbolic_expressions[0].offset == 0
+    assert text_section.symbolic_expressions[0].attributes == {
+        compat_proto.GOT,
+    }
+
+    assert 4 in text_section.symbolic_expressions
+    assert isinstance(text_section.symbolic_expressions[4], gtirb.SymAddrConst)
+    assert text_section.symbolic_expressions[4].symbol is sym
+    assert text_section.symbolic_expressions[4].offset == 0
+    assert text_section.symbolic_expressions[4].attributes == {
+        compat_proto.GOT,
+    }
+
+
 def test_undef_symbols():
     ir, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
@@ -731,14 +839,21 @@ def test_multiple_symbol_definitions():
     assert exc.value.offset == 1
 
 
-def test_indirect_jumps():
+@pytest.mark.parametrize(
+    "isa, ijump_instr",
+    (
+        (gtirb.Module.ISA.X64, "jmp [rax]"),
+        (gtirb.Module.ISA.MIPS32, "jr $t9"),
+    ),
+)
+def test_indirect_jumps(isa: gtirb.Module.ISA, ijump_instr: str):
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
-        gtirb.Module.ISA.X64,
+        isa,
     )
 
     assembler = gtirb_rewriting.Assembler(m)
-    assembler.assemble("jmp [rax]", gtirb_rewriting.X86Syntax.INTEL)
+    assembler.assemble(ijump_instr, gtirb_rewriting.X86Syntax.INTEL)
     result = assembler.finalize()
     text_section = result.text_section
 
@@ -753,15 +868,22 @@ def test_indirect_jumps():
     assert text_section.symbolic_expressions == {}
 
 
-def test_direct_calls():
+@pytest.mark.parametrize(
+    "isa, dcall_instr, op_offset",
+    (
+        (gtirb.Module.ISA.X64, "call exit", 1),
+        (gtirb.Module.ISA.MIPS32, "jal exit", 0),
+    ),
+)
+def test_direct_calls(isa: gtirb.Module.ISA, dcall_instr: str, op_offset: int):
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
-        gtirb.Module.ISA.X64,
+        isa,
     )
     exit_sym = add_symbol(m, "exit", add_proxy_block(m))
 
     assembler = gtirb_rewriting.Assembler(m)
-    assembler.assemble("call exit", gtirb_rewriting.X86Syntax.INTEL)
+    assembler.assemble(dcall_instr, gtirb_rewriting.X86Syntax.INTEL)
     result = assembler.finalize()
     text_section = result.text_section
 
@@ -778,18 +900,25 @@ def test_direct_calls():
         ),
     }
     assert text_section.symbolic_expressions == {
-        1: gtirb.SymAddrConst(0, exit_sym)
+        op_offset: gtirb.SymAddrConst(0, exit_sym)
     }
 
 
-def test_indirect_calls():
+@pytest.mark.parametrize(
+    "isa, icall_instr",
+    (
+        (gtirb.Module.ISA.X64, "call [rax]"),
+        (gtirb.Module.ISA.MIPS32, "jalr $9"),
+    ),
+)
+def test_indirect_calls(isa: gtirb.Module.ISA, icall_instr: str):
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
-        gtirb.Module.ISA.X64,
+        isa,
     )
 
     assembler = gtirb_rewriting.Assembler(m)
-    assembler.assemble("call [rax]", gtirb_rewriting.X86Syntax.INTEL)
+    assembler.assemble(icall_instr, gtirb_rewriting.X86Syntax.INTEL)
     result = assembler.finalize()
     text_section = result.text_section
 
@@ -1103,10 +1232,17 @@ def test_fill():
     assert result.text_section.data == b"\x00" * 42
 
 
-def test_sym_minus_sym():
+@pytest.mark.parametrize(
+    "isa",
+    (
+        gtirb.Module.ISA.X64,
+        gtirb.Module.ISA.MIPS32,
+    ),
+)
+def test_sym_minus_sym(isa: gtirb.Module.ISA):
     _, m = create_test_module(
         gtirb.Module.FileFormat.ELF,
-        gtirb.Module.ISA.X64,
+        isa,
     )
     foo = add_symbol(m, "foo", add_proxy_block(m))
     foo2 = add_symbol(m, "foo2", add_proxy_block(m))

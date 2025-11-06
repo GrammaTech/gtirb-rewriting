@@ -1,3 +1,6 @@
+0.4.0 (Unreleased)
+- Added support for ELF MIPS32
+
 0.3.0:
 - Added RewritingContext.retarget_symbol, which allows adjusting code/data
   references of one symbol to use another synmbol instead. For example, you

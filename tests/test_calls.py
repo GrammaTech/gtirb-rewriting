@@ -21,6 +21,7 @@
 # endorsement should be inferred.
 
 import unittest
+import unittest.mock
 
 import gtirb
 import pytest

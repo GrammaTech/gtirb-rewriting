@@ -71,6 +71,10 @@ class CallPatch(Patch):
             self._imp = _CallPatchX86(sym, args, conv, **constraint_kwargs)
         elif sym.module.isa == gtirb.Module.ISA.ARM64:
             self._imp = _CallPatchARM64(sym, args, conv, **constraint_kwargs)
+        elif sym.module.isa == gtirb.Module.ISA.MIPS32:
+            raise NotImplementedError
+        else:
+            assert False, f"Unsupported ISA: {sym.module.isa}"
 
         self.sym = sym
         super().__init__(self._imp.constraints)

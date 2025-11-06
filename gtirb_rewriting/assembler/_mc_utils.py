@@ -40,6 +40,7 @@ _INDIRECT_CALL_INSTRS = {
         "FARCALL64m",
     },
     gtirb.Module.ISA.ARM64: {"BLR", "BLRAA", "BLRAAZ", "BLRAB", "BLRABZ"},
+    gtirb.Module.ISA.MIPS32: {"JALR"},
 }
 
 
