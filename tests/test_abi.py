@@ -382,12 +382,60 @@ def test_arm64_scratch_regs():
     )
 
 
+def test_mips_clobbers_registers():
+    abi = gtirb_rewriting.abi._MIPS32_ELF()
+    constraints = gtirb_rewriting.Constraints(clobbers_registers=("a0", "a1"))
+
+    registers = abi._allocate_patch_registers(constraints)
+    prologue, epilogue, stack_adjustment = abi._create_prologue_and_epilogue(
+        constraints, registers, False
+    )
+    assert stack_adjustment == 8
+    assert stringify_snippets(prologue) == remove_indentation(
+        """
+        addiu $sp, $sp, -8
+        sw $a0, 0($sp)
+        sw $a1, 4($sp)
+        """
+    )
+    assert stringify_snippets(epilogue) == remove_indentation(
+        """
+        lw $a1, 4($sp)
+        lw $a0, 0($sp)
+        addiu $sp, $sp, 8
+        """
+    )
+
+
+def test_mips32_scratch_regs():
+    abi = gtirb_rewriting.abi._MIPS32_ELF()
+
+    # Try asking for too many registers
+    constraints = gtirb_rewriting.Constraints(
+        scratch_registers=len(abi.all_registers())
+    )
+    with pytest.raises(ValueError):
+        registers = abi._allocate_patch_registers(constraints)
+
+    # Now try for the max number we expect and verify that aren't
+    # in it.
+    constraints.scratch_registers = len(abi._scratch_registers())
+    registers = abi._allocate_patch_registers(constraints)
+
+    assert all(
+        reg.name
+        not in ("gp", "sp", "fp", "s8", "ra", "k0", "k1", "at", "zero")
+        for reg in registers.scratch_registers
+    )
+
+
 @pytest.mark.parametrize(
     "abi_class,skip_for_scratch",
     [
         (gtirb_rewriting.abi._IA32_PE, ("eax", "ebx")),
         (gtirb_rewriting.abi._X86_64_ELF, ("rax", "rbx")),
         (gtirb_rewriting.abi._ARM64_ELF, ("x0", "x1")),
+        (gtirb_rewriting.abi._MIPS32_ELF, ("t0", "t1")),
     ],
 )
 def test_read_registers(abi_class, skip_for_scratch):

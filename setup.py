@@ -40,7 +40,7 @@ setuptools.setup(
         "gtirb-functions >= 1.0.8",
         "gtirb-layout ~= 1.0",
         "gtirb >= 1.10.6",
-        "mcasm ~= 0.3.0",
+        "mcasm ~= 0.4.0",
         "more-itertools >= 8.11",
         "entrypoints",
         "typing-extensions ~= 4.7",

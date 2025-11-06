@@ -45,6 +45,8 @@ def _target_triple(
         arch = "arm"
     elif isa == gtirb.Module.ISA.ARM64:
         arch = "arm64"
+    elif isa == gtirb.Module.ISA.MIPS32:
+        arch = "mips"
     else:
         assert False, f"Unsupported ISA: {isa}"
 

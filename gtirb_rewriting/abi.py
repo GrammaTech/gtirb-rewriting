@@ -777,9 +777,122 @@ class _ARM64_ELF(ABI):
             return ()
 
 
+class _MIPS32_ELF(ABI):
+    def _create_prologue_and_epilogue(
+        self,
+        constraints: Constraints,
+        register_use: _PatchRegisterAllocation,
+        is_leaf_function: bool,
+    ) -> Tuple[Iterable[_AsmSnippet], Iterable[_AsmSnippet], Optional[int]]:
+        prologue: List[_AsmSnippet] = []
+        epilogue: List[_AsmSnippet] = []
+        stack_adjustment = 0
+
+        if constraints.align_stack:
+            raise NotImplementedError("Align_stack for MIPS not supported")
+
+        stack_adjustment = len(register_use.clobbered_registers) * 4
+
+        if stack_adjustment != 0:
+            prologue.append(
+                _AsmSnippet(f"addiu $sp, $sp, -{stack_adjustment}")
+            )
+            epilogue.append(_AsmSnippet(f"addiu $sp, $sp, {stack_adjustment}"))
+
+        for index, reg in enumerate(register_use.clobbered_registers):
+            offset = index * 4
+            prologue.append(_AsmSnippet(f"sw ${reg}, {offset}($sp)"))
+            epilogue.append(_AsmSnippet(f"lw ${reg}, {offset}($sp)"))
+
+        return prologue, reversed(epilogue), stack_adjustment
+
+    def _inclusive_range(self, start: int, end: int) -> Iterable[int]:
+        return range(start, end + 1)
+
+    def _scratch_registers(self) -> List[Register]:
+        # $t0-$t8 temporaries (caller-saved: don't survive function calls)
+        # Exclude $t9 since has a special role upon function entry and when
+        # calling other functions.
+        # Also exclude $t8, which is used in the prolog and epilog.
+        return [
+            self.get_register(f"t{i}") for i in self._inclusive_range(0, 7)
+        ]
+
+    def all_registers(self) -> List[Register]:
+        results = [
+            Register({"32": f"t{i}"}, "32")
+            for i in self._inclusive_range(0, 9)
+        ]
+        results += [
+            Register({"32": f"a{i}"}, "32")
+            for i in self._inclusive_range(0, 3)
+        ]
+        results += [
+            Register({"32": f"s{i}"}, "32")
+            for i in self._inclusive_range(0, 7)
+        ]
+        for reg in [
+            "v0",
+            "v1",
+            "k0",
+            "k1",
+            "at",
+            "zero",
+            "gp",
+            "sp",
+            "fp",
+            "ra",
+        ]:
+            results.append(Register({"32": reg}, "32"))
+        return results
+
+    def nop(self) -> bytes:
+        return b"\x00\x00\x00\x00"
+
+    def caller_saved_registers(self) -> Set[Register]:
+        # Temporary regsiters ($t0=$t9)
+        results = {
+            self.get_register(f"t{i}") for i in self._inclusive_range(0, 9)
+        }
+        # Argument registers ($a0-$a3)
+        results |= {
+            self.get_register(f"a{i}") for i in self._inclusive_range(0, 3)
+        }
+        # Return value registers ($v0-$v1)
+        for reg in ["v0", "v1"]:
+            results.add(self.get_register(reg))
+        return results
+
+    def pointer_size(self) -> int:
+        return 4
+
+    def calling_convention(self) -> CallingConventionDesc:
+        return CallingConventionDesc(
+            registers=("a0", "a1", "a2", "a3"),
+            stack_alignment=8,
+            caller_cleanup=True,
+            shadow_space=0,
+        )
+
+    def stack_register(self) -> Register:
+        return self.get_register("sp")
+
+    def temporary_label_prefix(self) -> str:
+        return ".L"
+
+    def default_dwarf_eh_return_column(self) -> int:
+        return 32
+
+    def _sym_expr_rules(
+        self, module: gtirb.Module
+    ) -> Iterable[_SymExprAttributeRule]:
+        return ()
+
+
 _ABIS: Dict[Tuple[gtirb.Module.ISA, gtirb.Module.FileFormat], ABI] = {
     (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.PE): _X86_64_PE(),
     (gtirb.Module.ISA.X64, gtirb.Module.FileFormat.ELF): _X86_64_ELF(),
     (gtirb.Module.ISA.IA32, gtirb.Module.FileFormat.PE): _IA32_PE(),
     (gtirb.Module.ISA.ARM64, gtirb.Module.FileFormat.ELF): _ARM64_ELF(),
+    (gtirb.Module.ISA.MIPS32, gtirb.Module.FileFormat.ELF): _MIPS32_ELF(),
 }

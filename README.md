@@ -22,6 +22,9 @@ transform from scratch.
 | IA32 (x86)   | PE          |
 | X64 (x86-64) | ELF         |
 | X64 (x86-64) | PE          |
+| MIPS32[^mips]| ELF         |
+
+[^mips]: Currently, only partial support is available for MIPS32.
 
 ## Design
 

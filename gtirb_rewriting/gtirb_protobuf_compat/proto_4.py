@@ -35,6 +35,11 @@ GOT: gtirb.SymbolicExpression.Attribute = (
 LO12: gtirb.SymbolicExpression.Attribute = (
     gtirb.SymbolicExpression.Attribute.LO12
 )
+HI: gtirb.SymbolicExpression.Attribute = gtirb.SymbolicExpression.Attribute.HI
+LO: gtirb.SymbolicExpression.Attribute = gtirb.SymbolicExpression.Attribute.LO
+PCREL: gtirb.SymbolicExpression.Attribute = (
+    gtirb.SymbolicExpression.Attribute.PCREL
+)
 
 ELF_VARIANT_KINDS: Dict[
     mcasm.mc.SymbolRefExpr.VariantKind, Set[gtirb.SymbolicExpression.Attribute]
