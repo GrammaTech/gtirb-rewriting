@@ -22,9 +22,9 @@
 import re
 import unittest.mock
 
-import capstone_gt
 import gtirb
 import gtirb_functions
+from gtirb_capstone.capstone_compatibility import capstone
 from gtirb_test_helpers import (
     add_code_block,
     add_data_section,
@@ -66,7 +66,7 @@ def test_all_block_scope_anywhere():
     block = add_code_block(bi, b"\x31\xC0\x31\xC9")
     func = add_function_object(mod, "func", block)
 
-    cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
+    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     disasm = tuple(cs.disasm(block.contents, 0))
 
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)
@@ -91,7 +91,7 @@ def test_all_block_scope_exit():
     block = add_code_block(bi, b"\x31\xC0\x31\xC9")
     func = add_function_object(mod, "func", block)
 
-    cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
+    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     disasm = tuple(cs.disasm(block.contents, 0))
 
     func = unittest.mock.MagicMock(spec=gtirb_functions.Function)

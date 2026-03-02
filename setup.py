@@ -35,8 +35,7 @@ setuptools.setup(
     description="Utilities for rewriting GTIRB",
     packages=setuptools.find_packages(),
     install_requires=[
-        "capstone-gt",
-        "gtirb-capstone >= 1.0.1",
+        "gtirb-capstone >= 1.1.1",
         "gtirb-functions >= 1.0.8",
         "gtirb-layout ~= 1.0",
         "gtirb >= 1.10.6",

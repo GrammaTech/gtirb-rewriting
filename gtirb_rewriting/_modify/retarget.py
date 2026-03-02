@@ -22,8 +22,8 @@
 
 from typing import Dict, Iterable
 
-import capstone_gt
 import gtirb
+from gtirb_capstone.capstone_compatibility import capstone
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 from gtirb_rewriting._modify.edges import update_edge
@@ -211,8 +211,8 @@ def _sym_expr_access_type(
             for inst in decoder.get_instructions(block)
             if inst.address <= expr_addr < (inst.address + inst.size)
         )
-        if instruction.group(capstone_gt.CS_GRP_JUMP) or instruction.group(
-            capstone_gt.CS_GRP_CALL
+        if instruction.group(capstone.CS_GRP_JUMP) or instruction.group(
+            capstone.CS_GRP_CALL
         ):
             return _SymExprAttributeRule.AccessType.CONTROL_FLOW
         else:
