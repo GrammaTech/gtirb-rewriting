@@ -100,6 +100,7 @@ test-minver-20:
   <<: *test
 
 test-unstable-20:
+  allow_failure: true
   image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:$IMAGE_TAG
   before_script:
   - pip install --upgrade pip

@@ -23,8 +23,8 @@ import logging
 import uuid
 from typing import Iterable, Iterator, List, Optional, Sequence, Set
 
-import capstone_gt
 import gtirb
+from gtirb_capstone.capstone_compatibility import capstone
 from gtirb_capstone.instructions import GtirbInstructionDecoder
 
 import gtirb_rewriting._auxdata as _auxdata
@@ -63,18 +63,18 @@ def _target_triple(
 
 
 def _is_partial_disassembly(
-    block: gtirb.CodeBlock, disassembly: Iterable[capstone_gt.CsInsn]
+    block: gtirb.CodeBlock, disassembly: Iterable[capstone.CsInsn]
 ) -> bool:
     """
     Determines if disassembly of a block is complete or only partial, which
-    can happen when capstone_gt is unable to disassemble an instruction.
+    can happen when capstone is unable to disassemble an instruction.
     """
     return sum(inst.size for inst in disassembly) != block.size
 
 
 def _nonterminator_instructions(
-    block: gtirb.CodeBlock, disassembly: Sequence[capstone_gt.CsInsn]
-) -> Iterator[capstone_gt.CsInsn]:
+    block: gtirb.CodeBlock, disassembly: Sequence[capstone.CsInsn]
+) -> Iterator[capstone.CsInsn]:
     """
     Yields all instructions in a block of diassembly except for the terminator,
     if present.

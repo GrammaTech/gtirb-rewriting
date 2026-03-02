@@ -22,8 +22,8 @@
 import logging
 import unittest.mock
 
-import capstone_gt
 import gtirb
+from gtirb_capstone.capstone_compatibility import capstone
 from gtirb_test_helpers import (
     add_code_block,
     add_data_block,
@@ -67,7 +67,7 @@ def test_triples():
 
 
 def test_nonterminator_instructions():
-    cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
+    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     # xor %eax, %eax; ret
     disasm = tuple(cs.disasm(b"\x31\xC0\xC3", 0))
     assert len(disasm) == 2
@@ -85,7 +85,7 @@ def test_nonterminator_instructions():
 
 
 def test_nonterminator_instructions_fallthrough():
-    cs = capstone_gt.Cs(capstone_gt.CS_ARCH_X86, capstone_gt.CS_MODE_64)
+    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     # xor %eax, %eax; xor %ecx, %ecx
     disasm = tuple(cs.disasm(b"\x31\xC0\x31\xC9", 0))
     assert len(disasm) == 2

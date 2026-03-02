@@ -22,9 +22,9 @@
 from enum import Enum, auto
 from typing import Iterator, Optional, Pattern, Sequence, Set, Union
 
-import capstone_gt
 import gtirb
 import gtirb_functions
+from gtirb_capstone.capstone_compatibility import capstone
 
 from .utils import _is_partial_disassembly, _nonterminator_instructions
 
@@ -104,7 +104,7 @@ class Scope:
     def _potential_offsets(
         self,
         block: gtirb.ByteBlock,
-        disassembly: Optional[Sequence[capstone_gt.CsInsn]],
+        disassembly: Optional[Sequence[capstone.CsInsn]],
     ) -> Iterator[int]:
         """
         Returns an iterator of all the potential offsets in the block where
@@ -151,7 +151,7 @@ class AllBlocksScope(Scope):
     def _potential_offsets(
         self,
         block: gtirb.ByteBlock,
-        disassembly: Optional[Sequence[capstone_gt.CsInsn]],
+        disassembly: Optional[Sequence[capstone.CsInsn]],
     ) -> Iterator[int]:
         assert isinstance(block, gtirb.CodeBlock)
         return _potential_offsets_in_block(self.position, block, disassembly)
@@ -183,7 +183,7 @@ class SingleBlockScope(Scope):
     def _potential_offsets(
         self,
         block: gtirb.ByteBlock,
-        disassembly: Optional[Sequence[capstone_gt.CsInsn]],
+        disassembly: Optional[Sequence[capstone.CsInsn]],
     ) -> Iterator[int]:
         assert isinstance(block, gtirb.CodeBlock)
         return _potential_offsets_in_block(self.position, block, disassembly)
@@ -252,7 +252,7 @@ class AllFunctionsScope(Scope):
     def _potential_offsets(
         self,
         block: gtirb.ByteBlock,
-        disassembly: Optional[Sequence[capstone_gt.CsInsn]],
+        disassembly: Optional[Sequence[capstone.CsInsn]],
     ) -> Iterator[int]:
         assert isinstance(block, gtirb.CodeBlock)
         return _potential_offsets_in_block(
@@ -291,7 +291,7 @@ class _SpecificLocationScope(Scope):
     def _potential_offsets(
         self,
         block: gtirb.ByteBlock,
-        disassembly: Optional[Sequence[capstone_gt.CsInsn]],
+        disassembly: Optional[Sequence[capstone.CsInsn]],
     ) -> Iterator[int]:
         yield self.offset
 
@@ -299,7 +299,7 @@ class _SpecificLocationScope(Scope):
 def _potential_offsets_in_block(
     block_position: BlockPosition,
     block: gtirb.CodeBlock,
-    disassembly: Optional[Sequence[capstone_gt.CsInsn]],
+    disassembly: Optional[Sequence[capstone.CsInsn]],
 ) -> Iterator[int]:
     if block_position == BlockPosition.ENTRY:
         yield 0
