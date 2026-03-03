@@ -1,4 +1,5 @@
-0.4.0 (Unreleased)
+0.4.0:
+- Fixes for upstream changes in gtirb-capstone
 - Added support for ELF MIPS32
 
 0.3.0:
