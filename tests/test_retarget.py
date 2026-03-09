@@ -220,3 +220,24 @@ def test_retarget_updates_cfi_directives():
             (".cfi_endproc", [], NULL_UUID),
         ],
     }
+
+
+def test_retarget_update_symbol_forwarding():
+
+    _, m = create_test_module(
+        gtirb.Module.FileFormat.ELF, gtirb.Module.ISA.X64
+    )
+
+    from_sym = add_symbol(m, "from_sym", add_proxy_block(m))
+    original_target = add_symbol(m, "original_target", add_proxy_block(m))
+    new_target = add_symbol(m, "new_target", add_proxy_block(m))
+
+    m.aux_data["symbolForwarding"].data = {from_sym: original_target}
+
+    retarget_symbol_uses(
+        m,
+        {original_target: new_target},
+        GtirbInstructionDecoder(m.isa),
+    )
+
+    assert m.aux_data["symbolForwarding"].data == {from_sym: new_target}

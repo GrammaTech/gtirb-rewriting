@@ -61,6 +61,13 @@ def retarget_symbol_uses(
                     if retarget:
                         directives[i] = (directive, args, retarget)
 
+    symbol_forwarding = _auxdata.symbol_forwarding.get(module)
+    if symbol_forwarding:
+        for from_sym, to_sym in symbol_forwarding.items():
+            retarget = retargeted_symbols.get(to_sym)
+            if retarget:
+                symbol_forwarding[from_sym] = retarget
+
     for byte_interval in module.byte_intervals:
         for offset, expr in byte_interval.symbolic_expressions.items():
             new_expr = expr
