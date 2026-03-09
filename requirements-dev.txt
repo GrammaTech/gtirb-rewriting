@@ -1,9 +1,5 @@
-ddisasm
-gtirb-pprinter
-gtirb-test-helpers >= 1.3.0
-pyright ~= 1.1.403
-pytest >= 8.0
-pytest-cov >= 4.0
-requests
-twine
-types-dataclasses
+pkginfo >= 1.8
+pre-commit >= 3.0
+tox >= 4.0
+tox-uv ~= 1.26
+twine >= 1.8

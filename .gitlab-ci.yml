@@ -52,7 +52,7 @@ test_prerelease:
   image: quay.io/pypa/manylinux_2_28_x86_64
   before_script:
     # Use `uv` because manylinux does not put `pip` in the default path.
-    - uv venv
+    - uv venv --python=3.10
     - uv pip install --index-url=$INTERNAL_PIP_INDEX -r requirements-dev.txt
   allow_failure: true
   script:
@@ -72,7 +72,7 @@ test_module:
   image: quay.io/pypa/manylinux_2_28_x86_64
   before_script:
     # Use `uv` because manylinux does not put `pip` in the default path.
-    - uv venv
+    - uv venv --python=3.10
     - uv pip install --index-url=$INTERNAL_PIP_INDEX -r requirements-dev.txt
   script:
     - .venv/bin/tox run
