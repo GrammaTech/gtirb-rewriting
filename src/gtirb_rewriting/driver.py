@@ -52,7 +52,7 @@ class PassDriver(ABC):
     A driver that provides command line options and creates a rewriting pass.
     """
 
-    def add_options(self, group) -> None:
+    def add_options(self, group) -> None:  # noqa: B027
         """
         Add pass-specific options to an argparse group. Optional.
         :param group: The argparse group object (the result of
@@ -96,15 +96,12 @@ class _EntryPointCompatible(Protocol):
     """
 
     @property
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @property
-    def distro(self) -> Optional[entrypoints_module.Distribution]:
-        ...
+    def distro(self) -> Optional[entrypoints_module.Distribution]: ...
 
-    def load(self) -> Any:
-        ...
+    def load(self) -> Any: ...
 
 
 class _PassEntryPointAdaptor:
@@ -353,7 +350,9 @@ def main(
 def generic_main(
     *,
     argv: List[str] = sys.argv,
-    extra: Mapping[str, Union[Type[Pass], Type[PassDriver]]] = {},
+    extra: Mapping[
+        str, Union[Type[Pass], Type[PassDriver]]
+    ] = {},  # noqa: B006
 ) -> None:
     """
     The generic gtirb-rewriting driver, used to implement the gtirb-rewriting

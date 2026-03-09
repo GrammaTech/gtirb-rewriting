@@ -40,7 +40,7 @@ def enum_type(enum_type):
     return type
 
 
-def enum_names(enum_type, ignore=set()):
+def enum_names(enum_type, ignore=()):
     try:
         members = list(enum_type)
     except TypeError:

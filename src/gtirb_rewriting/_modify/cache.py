@@ -57,12 +57,12 @@ class ReturnEdgeCache(gtirb.CFG):
     """
 
     def __init__(self, edges=None) -> None:
-        self._return_edges: Dict[
-            gtirb.CfgNode, Set[gtirb.Edge]
-        ] = collections.defaultdict(set)
-        self._proxy_return_edges: Dict[
-            gtirb.CfgNode, Set[gtirb.Edge]
-        ] = collections.defaultdict(set)
+        self._return_edges: Dict[gtirb.CfgNode, Set[gtirb.Edge]] = (
+            collections.defaultdict(set)
+        )
+        self._proxy_return_edges: Dict[gtirb.CfgNode, Set[gtirb.Edge]] = (
+            collections.defaultdict(set)
+        )
         super().__init__(edges)
 
     def add(self, edge: gtirb.Edge) -> None:

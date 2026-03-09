@@ -25,6 +25,7 @@ from typing import Iterator, Optional, Pattern, Sequence, Set, Union
 import gtirb
 import gtirb_functions
 from gtirb_capstone.capstone_compatibility import capstone
+from typing_extensions import assert_never
 
 from .utils import _is_partial_disassembly, _nonterminator_instructions
 
@@ -238,7 +239,9 @@ class AllFunctionsScope(Scope):
             return block in func.get_entry_blocks()
         if self.position == FunctionPosition.EXIT:
             return block in func.get_exit_blocks()
-        assert False, f"Invalid position: {self.position}"
+        raise ValueError(
+            f"Invalid position for all functions scope: {self.position}"
+        )
 
     def _needs_functions(self) -> bool:
         return True
@@ -320,7 +323,7 @@ def _potential_offsets_in_block(
             for inst in _nonterminator_instructions(block, disassembly)
         )
     else:
-        assert False, "Invalid block position"
+        assert_never(block_position)
 
 
 def pattern_match(

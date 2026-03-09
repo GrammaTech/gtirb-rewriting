@@ -26,7 +26,7 @@ Edit a single block's contents.
 
 
 import logging
-from typing import List, MutableMapping, Optional, Set
+from typing import Container, List, MutableMapping, Optional, Set
 
 import gtirb
 from more_itertools import pairwise
@@ -338,9 +338,9 @@ def insert(
 
     sym_expr_data = _auxdata.symbolic_expression_sizes.get_or_insert(module)
     for rel_offset, size in text_section.symbolic_expression_sizes.items():
-        sym_expr_data[
-            gtirb.Offset(bi, block.offset + offset + rel_offset)
-        ] = size
+        sym_expr_data[gtirb.Offset(bi, block.offset + offset + rel_offset)] = (
+            size
+        )
 
     for sect in code.sections.values():
         if sect is not code.text_section:
@@ -513,7 +513,7 @@ def edit_byte_interval(
     offset: int,
     length: int,
     content: bytes,
-    static_blocks: Set[gtirb.ByteBlock] = set(),
+    static_blocks: Container[gtirb.ByteBlock] = set(),  # noqa: B006
 ) -> None:
     """
     Edits a byte interval's contents, moving blocks, symbolic expressions, and

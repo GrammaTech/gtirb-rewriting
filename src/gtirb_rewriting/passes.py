@@ -30,6 +30,8 @@ import gtirb_rewriting._auxdata as _auxdata
 from ._modify import make_return_cache
 from .rewriting import RewritingContext
 
+logger = logging.getLogger("gtirb_rewriting")
+
 
 class Pass:
     def begin_module(
@@ -70,7 +72,7 @@ class PassManager:
 
     def __init__(
         self,
-        logger=logging.getLogger("gtirb_rewriting"),
+        logger=logger,
         expensive_assertions=True,
     ):
         """
