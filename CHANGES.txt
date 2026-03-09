@@ -1,3 +1,6 @@
+0.4.1:
+- Update symbolForwarding auxdata when a symbol is retargeted
+
 0.4.0:
 - Fixes for upstream changes in gtirb-capstone
 - Added support for ELF MIPS32
