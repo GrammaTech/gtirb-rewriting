@@ -56,7 +56,7 @@ test_prerelease:
     - uv pip install --index-url=$INTERNAL_PIP_INDEX -r requirements-dev.txt
   allow_failure: true
   script:
-    - .venv/bin/tox run -m prerelease
+    - .venv/bin/tox run-parallel -m prerelease
   artifacts:
     when: always
     # Store the coverage data in an artifact. It will be uploaded to gitlab by
@@ -75,7 +75,7 @@ test_module:
     - uv venv --python=3.10
     - uv pip install --index-url=$INTERNAL_PIP_INDEX -r requirements-dev.txt
   script:
-    - .venv/bin/tox run
+    - .venv/bin/tox run-parallel
   coverage: '/TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
