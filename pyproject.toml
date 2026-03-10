@@ -37,7 +37,7 @@ dependencies = [
     "gtirb >= 1.10.6",
     "mcasm ~= 0.4.0",
     "more-itertools >= 8.11",
-    "entrypoints >= 1.0.0",
+    "entrypoints ~= 0.4.0",
     "typing-extensions ~= 4.7",
     "leb128 ~= 1.0, >= 1.0.2",
 ]

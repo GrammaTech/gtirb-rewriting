@@ -78,6 +78,34 @@ def test_constraints_decorator_partial():
     assert patch.get_asm(context) == "nop"
 
 
+def test_constraints_decorator_wrapped():
+    """
+    Test that Patch.from_function follows the __wrapped__ chain when looking
+    for constraints.
+    """
+
+    def wrapper_decorator(fn):
+        # By default, wraps will copy over the instance __dict__. Explicitly
+        # opt out of that to test that gtirb-rewriting follows the __wrapped__
+        # chain.
+        @functools.wraps(fn, assigned=(), updated=())
+        def wrapper(*args, **kwargs):
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    @wrapper_decorator
+    @gtirb_rewriting.patch_constraints(clobbers_flags=True)
+    def patch_func(context, flag):
+        return "nop"
+
+    assert not hasattr(patch_func, "constraints")
+    patch = gtirb_rewriting.Patch.from_function(
+        functools.partial(patch_func, flag=1)
+    )
+    assert patch.constraints.clobbers_flags
+
+
 def test_temporary_label_elf_x64():
     m = gtirb.Module(
         isa=gtirb.Module.ISA.X64,

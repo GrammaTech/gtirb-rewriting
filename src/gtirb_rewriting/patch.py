@@ -88,8 +88,8 @@ def _find_constraints(func):
     while isinstance(func, partial):
         func = func.func
 
-    unwrapped = inspect.unwrap(func, stop=lambda f: hasattr(f, "constraints"))
-    constraints = getattr(unwrapped, "constraints", None)
+    func = inspect.unwrap(func, stop=lambda f: hasattr(f, "constraints"))
+    constraints = getattr(func, "constraints", None)
     if constraints:
         return constraints
 
