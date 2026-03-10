@@ -513,7 +513,7 @@ def edit_byte_interval(
     offset: int,
     length: int,
     content: bytes,
-    static_blocks: Container[gtirb.ByteBlock] = set(),  # noqa: B006
+    static_blocks: Container[gtirb.ByteBlock] = (),
 ) -> None:
     """
     Edits a byte interval's contents, moving blocks, symbolic expressions, and

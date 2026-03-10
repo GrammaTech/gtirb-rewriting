@@ -1183,7 +1183,7 @@ class _Streamer(mcasm.Streamer):
                 # This if/elif exhaustively covers the cases that let us into
                 # the parent block, so this is just to shut up analysis tools
                 # that don't understant that this is unreachable.
-                assert False  # noqa: B011
+                raise AssertionError()
 
             self._state.cfg.add(
                 gtirb.Edge(

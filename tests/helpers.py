@@ -81,10 +81,15 @@ def add_elf_base_symbol_version(
         _,
     ) = _get_or_insert_elf_symbol_versions(module)
 
-    for version_id, (_, flags) in symver_defs.items():  # noqa: B007
-        if flags == _VER_FLG_BASE:
-            break
-    else:
+    version_id = next(
+        (
+            version_id
+            for version_id, (_, flags) in symver_defs.items()
+            if flags == _VER_FLG_BASE
+        ),
+        None,
+    )
+    if version_id is None:
         version_id = _next_symbol_id(symver_defs, symver_needed)
     symver_defs[version_id] = ([version], _VER_FLG_BASE)
 
@@ -119,14 +124,19 @@ def add_defined_elf_symbol_version(
     if symbol in symbol_versions:
         raise ValueError(f"symbol {symbol.name} has already been versioned")
 
-    for version_id, (versions, flags) in symver_defs.items():  # noqa: B007
-        if (
-            versions[0] == version
-            and versions[1:] == previous_versions
-            and flags != _VER_FLG_BASE
-        ):
-            break
-    else:
+    version_id = next(
+        (
+            version_id
+            for version_id, (versions, flags) in symver_defs.items()
+            if (
+                versions[0] == version
+                and versions[1:] == previous_versions
+                and flags != _VER_FLG_BASE
+            )
+        ),
+        None,
+    )
+    if version_id is None:
         version_id = _next_symbol_id(symver_defs, symver_needed)
         symver_defs[version_id] = ([version, *previous_versions], 0)
 
@@ -163,10 +173,15 @@ def add_needed_elf_symbol_version(
         raise ValueError(f"symbol {symbol.name} has already been versioned")
 
     library_versions = symver_needed.setdefault(library, {})
-    for version_id, lib_version in library_versions.items():  # noqa: B007
-        if version == lib_version:
-            break
-    else:
+    version_id = next(
+        (
+            version_id
+            for version_id, lib_version in library_versions.items()
+            if version == lib_version
+        ),
+        None,
+    )
+    if version_id is None:
         version_id = _next_symbol_id(symver_defs, symver_needed)
         library_versions[version_id] = version
 

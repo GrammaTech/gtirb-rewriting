@@ -168,10 +168,12 @@ class RowState:
 
     def __init__(
         self,
-        registers: Mapping[int, RegisterRule] = {},  # noqa: B006
+        registers: Optional[Mapping[int, RegisterRule]] = None,
         cfa: Optional[CFARule] = None,
     ):
-        self.registers = dict(registers)
+        self.registers = {}
+        if registers:
+            self.registers.update(registers)
         self.cfa = cfa
 
     def __copy__(self) -> Self:

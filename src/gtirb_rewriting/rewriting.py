@@ -1121,9 +1121,8 @@ class RewritingContext:
                     modifications,
                     func,
                     block,
-                    lambda offset: cfi_tracker.in_procedure(
-                        idx,  # noqa: B023
-                        offset,
+                    lambda offset, idx=idx: cfi_tracker.in_procedure(
+                        idx, offset
                     ),
                 )
 
