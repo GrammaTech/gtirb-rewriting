@@ -21,7 +21,7 @@
 # endorsement should be inferred.
 
 import itertools
-from typing import Dict, List, Sequence, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import gtirb
 import gtirb_functions
@@ -81,10 +81,15 @@ def add_elf_base_symbol_version(
         _,
     ) = _get_or_insert_elf_symbol_versions(module)
 
-    for version_id, (_, flags) in symver_defs.items():
-        if flags == _VER_FLG_BASE:
-            break
-    else:
+    version_id = next(
+        (
+            version_id
+            for version_id, (_, flags) in symver_defs.items()
+            if flags == _VER_FLG_BASE
+        ),
+        None,
+    )
+    if version_id is None:
         version_id = _next_symbol_id(symver_defs, symver_needed)
     symver_defs[version_id] = ([version], _VER_FLG_BASE)
 
@@ -119,14 +124,19 @@ def add_defined_elf_symbol_version(
     if symbol in symbol_versions:
         raise ValueError(f"symbol {symbol.name} has already been versioned")
 
-    for version_id, (versions, flags) in symver_defs.items():
-        if (
-            versions[0] == version
-            and versions[1:] == previous_versions
-            and flags != _VER_FLG_BASE
-        ):
-            break
-    else:
+    version_id = next(
+        (
+            version_id
+            for version_id, (versions, flags) in symver_defs.items()
+            if (
+                versions[0] == version
+                and versions[1:] == previous_versions
+                and flags != _VER_FLG_BASE
+            )
+        ),
+        None,
+    )
+    if version_id is None:
         version_id = _next_symbol_id(symver_defs, symver_needed)
         symver_defs[version_id] = ([version, *previous_versions], 0)
 
@@ -163,10 +173,15 @@ def add_needed_elf_symbol_version(
         raise ValueError(f"symbol {symbol.name} has already been versioned")
 
     library_versions = symver_needed.setdefault(library, {})
-    for version_id, lib_version in library_versions.items():
-        if version == lib_version:
-            break
-    else:
+    version_id = next(
+        (
+            version_id
+            for version_id, lib_version in library_versions.items()
+            if version == lib_version
+        ),
+        None,
+    )
+    if version_id is None:
         version_id = _next_symbol_id(symver_defs, symver_needed)
         library_versions[version_id] = version
 
@@ -178,13 +193,13 @@ def add_function_object(
     module: gtirb.Module,
     sym_or_name: Union[str, gtirb.Symbol],
     entry_block: gtirb.CodeBlock,
-    other_blocks: Set[gtirb.CodeBlock] = set(),
+    other_blocks: Optional[Set[gtirb.CodeBlock]] = None,
 ) -> gtirb_functions.Function:
     """
     Adds a function to all the appropriate aux data tables and creates a
     Function object.
     """
-
+    other_blocks = other_blocks or set()
     func_uuid = add_function(module, sym_or_name, entry_block, other_blocks)
     name_sym = module.aux_data["functionNames"].data[func_uuid]
     return gtirb_functions.Function(

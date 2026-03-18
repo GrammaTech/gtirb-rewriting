@@ -71,6 +71,8 @@ from .utils import (
     show_block_asm,
 )
 
+logger = logging.getLogger("gtirb_rewriting")
+
 
 class UnresolvableScopeError(ValueError):
     """
@@ -110,9 +112,9 @@ class _ModificationStore:
 
     def __init__(self):
         self._scope_changes: List[_Modification] = []
-        self._block_changes: Dict[
-            gtirb.ByteBlock, List[_Modification]
-        ] = defaultdict(list)
+        self._block_changes: Dict[gtirb.ByteBlock, List[_Modification]] = (
+            defaultdict(list)
+        )
 
     def add(self, modification: _Modification) -> None:
         """
@@ -241,7 +243,7 @@ class RewritingContext:
         self,
         module: gtirb.Module,
         functions: Sequence[gtirb_functions.Function],
-        logger=logging.getLogger("gtirb_rewriting"),
+        logger=logger,
         expensive_assertions=True,
     ):
         """
@@ -1119,7 +1121,9 @@ class RewritingContext:
                     modifications,
                     func,
                     block,
-                    lambda offset: cfi_tracker.in_procedure(idx, offset),
+                    lambda offset, idx=idx: cfi_tracker.in_procedure(
+                        idx, offset
+                    ),
                 )
 
         if self._symbol_retargets:

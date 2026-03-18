@@ -1,21 +1,24 @@
-# Python files and directories
+*.egg-info
+*.eggs
 *.pyc
-__pycache__/
-.mypy_cache/
-.pytest_cache/
-.tox/
-/*.egg-info/
-/build/
-/dist/
-
-# IDE files and directories
-/.vscode/
-
-# Other files and directories
-core.*
-vgcore.*
-htmlcov
+*~
+.DS_Store
+.cache
 .coverage
+.coverage.*
+.tox
+.vscode
+MANIFEST
+__pycache__/
+_build/
+build/
+coverage.xml
+dist/
+docs/api/
+html/
+junit-*.xml
+uv.lock
 
+src/gtirb_rewriting/version.py
 tests/e2e
 tests/unwind

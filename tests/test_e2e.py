@@ -130,7 +130,7 @@ def pretty_print(tmpdir: pathlib.Path, ir: gtirb.IR) -> pathlib.Path:
         # We specifically want to make sure gtirb-rewriting didn't generate
         # overlapping blocks. Other warnings are interesting but non-fatal.
         assert b"WARNING: found overlapping" not in result.stderr
-        warnings.warn(UserWarning(result.stderr.decode()))
+        warnings.warn(UserWarning(result.stderr.decode()), stacklevel=2)
 
     return bin_path
 

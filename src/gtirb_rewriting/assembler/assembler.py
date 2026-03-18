@@ -644,9 +644,9 @@ class Assembler:
             return_column: Optional[int] = None
             start_offset: Optional[gtirb.Offset] = None
             end_offset: Optional[gtirb.Offset] = None
-            instructions: OffsetMapping[
-                List[CFIDirectiveType]
-            ] = dataclasses.field(default_factory=OffsetMapping)
+            instructions: OffsetMapping[List[CFIDirectiveType]] = (
+                dataclasses.field(default_factory=OffsetMapping)
+            )
             is_implicit: bool = False
 
             def _referenced_nodes(self) -> Iterator[gtirb.Block]:
@@ -709,9 +709,9 @@ class Assembler:
             most one empty block, which will be at the end of the list.
             """
 
-            symbolic_expressions: Dict[
-                int, gtirb.SymbolicExpression
-            ] = dataclasses.field(default_factory=dict)
+            symbolic_expressions: Dict[int, gtirb.SymbolicExpression] = (
+                dataclasses.field(default_factory=dict)
+            )
             """
             A map of offset to symbolic expression, with 0 being the start of
             `data`.
@@ -746,9 +746,9 @@ class Assembler:
             PE this is IMAGE_SCN_* flags.
             """
 
-            block_types: Dict[
-                gtirb.DataBlock, "Assembler.Result.DataType"
-            ] = dataclasses.field(default_factory=dict)
+            block_types: Dict[gtirb.DataBlock, "Assembler.Result.DataType"] = (
+                dataclasses.field(default_factory=dict)
+            )
             """
             The types for data blocks that must be rendered a certain way.
             """
@@ -760,9 +760,9 @@ class Assembler:
             A mapping of byte offset to the line of assembly that produced it.
             """
 
-            cfi_procedures: List[
-                "Assembler.Result.CFIProcedure"
-            ] = dataclasses.field(default_factory=list)
+            cfi_procedures: List["Assembler.Result.CFIProcedure"] = (
+                dataclasses.field(default_factory=list)
+            )
             """
             The CFI procedures in this section.
             """
@@ -798,9 +798,9 @@ class Assembler:
         Proxy blocks that represent unknown targets.
         """
 
-        elf_symbol_attributes: Dict[
-            gtirb.Symbol, ElfSymbolAttributes
-        ] = dataclasses.field(default_factory=dict)
+        elf_symbol_attributes: Dict[gtirb.Symbol, ElfSymbolAttributes] = (
+            dataclasses.field(default_factory=dict)
+        )
         """
         ELF symbol type and binding information.
         """
@@ -860,9 +860,9 @@ class _State:
             gtirb.Symbol, "Assembler.Result.ElfSymbolAttributes"
         ](Assembler.Result.ElfSymbolAttributes)
     )
-    block_types: Dict[
-        gtirb.ByteBlock, "Assembler.Result.DataType"
-    ] = dataclasses.field(default_factory=dict)
+    block_types: Dict[gtirb.ByteBlock, "Assembler.Result.DataType"] = (
+        dataclasses.field(default_factory=dict)
+    )
 
     @property
     def text_section(self) -> "Assembler.Result.Section":
@@ -1135,13 +1135,13 @@ class _Streamer(mcasm.Streamer):
     ) -> None:
         for fixup in fixups:
             pos = len(self._state.current_section.data) + fixup.offset
-            self._state.current_section.symbolic_expressions[
-                pos
-            ] = self._fixup_to_symbolic_operand(
-                fixup,
-                data,
-                inst.desc.is_call or inst.desc.is_branch,
-                state.loc,
+            self._state.current_section.symbolic_expressions[pos] = (
+                self._fixup_to_symbolic_operand(
+                    fixup,
+                    data,
+                    inst.desc.is_call or inst.desc.is_branch,
+                    state.loc,
+                )
             )
             self._state.current_section.symbolic_expression_sizes[pos] = (
                 fixup.kind_info.bit_size // 8
@@ -1183,7 +1183,7 @@ class _Streamer(mcasm.Streamer):
                 # This if/elif exhaustively covers the cases that let us into
                 # the parent block, so this is just to shut up analysis tools
                 # that don't understant that this is unreachable.
-                assert False
+                raise AssertionError()
 
             self._state.cfg.add(
                 gtirb.Edge(
@@ -1405,9 +1405,9 @@ class _Streamer(mcasm.Streamer):
         if self._state.current_block.size:
             self._split_block(add_fallthrough=True)
 
-        self._state.current_section.alignment[
-            self._state.current_block
-        ] = alignment
+        self._state.current_section.alignment[self._state.current_block] = (
+            alignment
+        )
 
     @_convert_errors_and_return(True)
     def emit_symbol_attribute(
@@ -1429,15 +1429,15 @@ class _Streamer(mcasm.Streamer):
         self, symbol: gtirb.Symbol, attribute: mcasm.mc.SymbolAttr
     ) -> bool:
         if attribute in self._ELF_BINDINGS:
-            self._state.elf_symbol_attributes[
-                symbol
-            ].binding = self._ELF_BINDINGS[attribute]
+            self._state.elf_symbol_attributes[symbol].binding = (
+                self._ELF_BINDINGS[attribute]
+            )
             return True
 
         if attribute in self._ELF_VISIBILITIES:
-            self._state.elf_symbol_attributes[
-                symbol
-            ].visibility = self._ELF_VISIBILITIES[attribute]
+            self._state.elf_symbol_attributes[symbol].visibility = (
+                self._ELF_VISIBILITIES[attribute]
+            )
             return True
 
         if attribute in self._ELF_TYPES:
@@ -1653,7 +1653,11 @@ class _Streamer(mcasm.Streamer):
             name == "emit_elf_symver_directive"
             and self._state.ignore_symver_directives
         ):
-            warnings.warn(f"{name} was ignored", IgnoredSymverDirectiveWarning)
+            warnings.warn(
+                f"{name} was ignored",
+                IgnoredSymverDirectiveWarning,
+                stacklevel=2,
+            )
             return super().unhandled_event(  # pyright: ignore
                 name, base_impl, *args, **kwargs
             )

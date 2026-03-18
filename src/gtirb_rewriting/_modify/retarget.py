@@ -54,7 +54,7 @@ def retarget_symbol_uses(
 
     cfi_auxdata = _auxdata.cfi_directives.get(module)
     if cfi_auxdata:
-        for offset, directives in cfi_auxdata.items():
+        for directives in cfi_auxdata.values():
             for i, (directive, args, symbol) in enumerate(directives):
                 if isinstance(symbol, gtirb.Symbol):
                     retarget = retargeted_symbols.get(symbol)
@@ -184,7 +184,7 @@ def _retarget_sym_expr(
     elif len(matching_rules) == 1:
         new_attrs = matching_rules[0].get_relevant_attrs(new_defined)
     else:
-        assert False, f"multiple rules matched: {matching_rules}"
+        raise ValueError(f"multiple rules matched: {matching_rules}")
 
     if isinstance(expr, gtirb.SymAddrConst):
         return gtirb.SymAddrConst(expr.offset, new_symbol, new_attrs)

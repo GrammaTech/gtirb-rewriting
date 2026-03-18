@@ -1,157 +1,122 @@
 variables:
-  COVERAGE_FAIL_BELOW: 80
-  # The IMAGE_TAG is derived from the branch name so that if a branch modifies
-  # the CI images, it builds and runs using the new images without conflicting
-  # with main.
-  IMAGE_TAG: "$CI_COMMIT_REF_SLUG"
-
+  # Change cache directories to be inside the project directory since we
+  # can only cache paths that are in the local working copy.
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PRE_COMMIT_HOME: "$CI_PROJECT_DIR/.cache/pre-commit"
+  PYRIGHT_PYTHON_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pyright"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
 
 stages:
-    - build-images
-    - check-format
-    - test
-    - export
+  - check-format
+  - build
+  - test
+  - publish
 
 default:
-  image: python:3.7-slim
   tags: ['shared']
-
-.build-ci-image: &build-ci-image
-  stage: build-images
-  image:
-    name: gcr.io/kaniko-project/executor:debug
-    entrypoint: [""]
-  script:
-    # Configure authentication credentials for GitLab
-    - >-
-      echo "{\"auths\":{
-        \"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"},
-        \"https://index.docker.io/v1/\":{\"username\":\"$DOCKERHUB_USERNAME\",\"password\":\"$DOCKERHUB_PASSWORD\"}
-      }}" > /kaniko/.docker/config.json
-    # Run the kaniko executor, which will build our image (using a cache if available)
-    # Push to our internal registry
-    # If we're on the main branch, also push the latest tag.
-    - >-
-      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
-        export EXTRA_DEST="--destination=${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
-      fi
-    - >-
-      /kaniko/executor
-      --cache=true
-      --cache-copy-layers=true
-      --context=$CI_PROJECT_DIR
-      --dockerfile=$CI_PROJECT_DIR/$DOCKERFILE_PATH
-      --destination=${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:$IMAGE_TAG
-      $EXTRA_DEST
-
-build-image-ubuntu20:
-  <<: *build-ci-image
-  variables:
-    DOCKERFILE_PATH: Dockerfile.ci
-    IMAGE_NAME: ci-ubuntu20
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.10
+  # Cache package downloads when possible.
+  cache:
+    key: python-packages
+    paths:
+      - .cache
+  before_script:
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip3 install --index-url "$INTERNAL_PIP_INDEX" -r requirements-dev.txt
 
 check-format:
   stage: check-format
   script:
-    - apt update -y && apt install -y git
-    - pip3 install pre-commit
-    - |+
+    - |
       pre-commit run --all-files --show-diff-on-failure || ( (cat <<EOF
-      ================================================================================
+      =========================================================================
       If this stage fails, the formatting of your changes may be incorrect.
       To automatically format your files, install pre-commit:
           pip3 install pre-commit
           pre-commit install
-      pre-commit will now automatically format any files before commit.
+      pre-commit will now automatically format any files before committing.
       To fix any misformatted files, run:
           pre-commit run --all-files
       And then commit any changes.
-      More information regarding pre-commit can be found at https://pre-commit.com.
-      ================================================================================
+      More information regarding pre-commit can be found at
+      https://pre-commit.com
+      =========================================================================
       EOF
       ) && exit 1)
 
-.test-template: &test
+test_prerelease:
   stage: test
+  needs: [check-format]
+  # Use manylinux image so we can test multiple python versions.
+  image: quay.io/pypa/manylinux_2_28_x86_64
+  before_script:
+    # Use `uv` because manylinux does not put `pip` in the default path.
+    - uv venv --python=3.10
+    - uv pip install --index-url=$INTERNAL_PIP_INDEX -r requirements-dev.txt
+  allow_failure: true
   script:
-    - $PIP_WRAPPER pip install -r requirements-dev.txt -e . $EXTRA_PIP_ARGS
-    - pytest --cov=gtirb_rewriting --cov-fail-under=$COVERAGE_FAIL_BELOW --cov-report=xml:coverage.xml --cov-report=term --junitxml=report.xml
-    - pyright
-  coverage: /TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/
+    - .venv/bin/tox run-parallel -m prerelease
+  artifacts:
+    when: always
+    # Store the coverage data in an artifact. It will be uploaded to gitlab by
+    # the test_module job.
+    paths:
+      - junit-*.xml
+      - .coverage.*
+
+test_module:
+  stage: test
+  needs: [check-format, test_prerelease]
+  # Use manylinux image so we can test multiple python versions.
+  image: quay.io/pypa/manylinux_2_28_x86_64
+  before_script:
+    # Use `uv` because manylinux does not put `pip` in the default path.
+    - uv venv --python=3.10
+    - uv pip install --index-url=$INTERNAL_PIP_INDEX -r requirements-dev.txt
+  script:
+    - .venv/bin/tox run-parallel
+  coverage: '/TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
     reports:
-      junit: report.xml
+      junit: junit-*.xml
       coverage_report:
         coverage_format: cobertura
         path: coverage.xml
 
-test-stable-20:
-  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:$IMAGE_TAG
-  <<: *test
-
-test-minver-20:
-  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:$IMAGE_TAG
-  before_script:
-  - pip install uv
-  variables:
-    PIP_WRAPPER: uv
-    EXTRA_PIP_ARGS: --resolution=lowest-direct --system
-  <<: *test
-
-test-unstable-20:
-  allow_failure: true
-  image: $CI_REGISTRY/rewriting/gtirb-rewriting/ci-ubuntu20:$IMAGE_TAG
-  before_script:
-  - pip install --upgrade pip
-  variables:
-    EXTRA_PIP_ARGS: --pre --index-url $EXTRA_INDEX_URL
-  <<: *test
-
-# This job ensures that:
-#   - Release branches never publish -dev packages, and packages
-#     on release branches are never overwritten.  This behavior coincides
-#     with that of the external export job, where on the public pypi, packages
-#     cannot be overwritten.
-#   - main therefore only ever publishes '-dev' packages
-#   - The -dev package on main is always the newest version in the repository
-export_internal:
-  stage: export
-  script:
-    - pip install -r requirements-dev.txt
-    - python3 setup.py bdist_wheel --dist-dir=$CI_PROJECT_DIR/dist
-    - VERSION=$(python3 -c "from imp import load_source; pkginfo = load_source('pkginfo.version', 'gtirb_rewriting/version.py'); print(pkginfo.__version__)")
-    - PKGNAME=$(python3 -c "from imp import load_source; pkginfo = load_source('pkginfo.version', 'gtirb_rewriting/version.py'); print(pkginfo.__packagename__)")
-    - if [[ "$VERSION" =~ \.dev[[:digit:]]*.*$ && "$CI_COMMIT_REF_NAME" =~ ^release-.* ]]; then exit 1; fi
-    # this job is not using $CI_JOB_TOKEN because it only has read access
-    # https://gitlab.com/gitlab-org/gitlab/-/issues/35067
-    # this job is also not using $CI_DEPLOY_USER and $CI_DEPLOY_PASSWORD because it only has write access
-    - if [[ "$CI_COMMIT_BRANCH" == "main" ]]; then
-        if [[ ! "$VERSION" =~ \.dev[[:digit:]]*$ ]]; then
-          echo "[ERROR] On the main branch, we must be exporting a -dev version."
-          exit 1;
-        fi;
-        if pip3 install --extra-index-url=$EXTRA_INDEX_URL "$PKGNAME>$VERSION" 2>/dev/null; then
-          echo "[ERROR] The package version being published on main should always be >= the version in the repository.";
-          exit 1;
-        fi;
-        ls $CI_PROJECT_DIR/dist/*.whl | xargs python3 $CI_PROJECT_DIR/delete_remote_packages.py $GL_PKG_API_TOKEN;
-      fi
-    - sed "s/password = <access token>/password = $GL_PKG_API_TOKEN/" $CI_PROJECT_DIR/.pypirc > ~/.pypirc
-    - python3 -m twine upload --verbose --repository repypi $CI_PROJECT_DIR/dist/*.whl
+.publish-development:
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - if: '$CI_COMMIT_REF_NAME =~ /^release-.*/'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d[.\d]+/'
 
-export_external:
-  stage: export
-  image: python:3.7-slim
+publish_internal:
+  stage: publish
+  extends: .publish-development
+  variables:
+    TWINE_REPOSITORY_URL: https://$INTERNAL_PYPI_URL
+    TWINE_USERNAME: __token__
+    # This job uses GL_PKG_API_TOKEN instead of CI_JOB_TOKEN because the
+    # latter does not have write access to the common package repository.
+    TWINE_PASSWORD: $GL_PKG_API_TOKEN
   script:
-    - pip install -r requirements-dev.txt
-    - python3 setup.py bdist_wheel --dist-dir=$CI_PROJECT_DIR/dist
-    - VERSION=$(python3 -c "from imp import load_source; pkginfo = load_source('pkginfo.version', 'gtirb_rewriting/version.py'); print(pkginfo.__version__)")
+    - pip install --index-url "$INTERNAL_PIP_INDEX" -r requirements-dev.txt
+    - pip wheel --no-deps --wheel-dir=dist .
+    - twine upload --verbose dist/*.whl
+
+publish_external:
+  stage: publish
+  variables:
+    TWINE_USER_NAME: __token__
+    TWINE_PASSWORD: $PYPI_API_KEY
+  script:
+    - pip install --index-url "$INTERNAL_PIP_INDEX" -r requirements-dev.txt
+    - pip wheel --no-deps --wheel-dir=dist .
+    - VERSION=$(python3 -c "import pkginfo, sys; print(pkginfo.Wheel(sys.argv[1]).version)" dist/*.whl
     # Do not publish .dev versions on the public pypi
-    - if [[ "$VERSION" =~ \.dev[[:digit:]]*.*$ ]]; then exit 1; fi
-    - python3 -m twine upload --verbose $CI_PROJECT_DIR/dist/*.whl -u __token__ -p $PYPI_API_KEY
+    - if [[ "$VERSION" =~ \.dev ]]; then exit 1; fi
+    - twine upload --verbose dist/*.whl
   rules:
-    - if: '$CI_COMMIT_REF_NAME =~ /^release-.*/'
+    # Only publish to the public pypi if PYPI_API_KEY is defined for this
+    # project and this is a release.
+    - if: '$PYPI_API_KEY && $CI_COMMIT_TAG =~ /^v\d[.\d]+/'

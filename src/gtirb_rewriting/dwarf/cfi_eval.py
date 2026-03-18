@@ -168,10 +168,12 @@ class RowState:
 
     def __init__(
         self,
-        registers: Mapping[int, RegisterRule] = {},
+        registers: Optional[Mapping[int, RegisterRule]] = None,
         cfa: Optional[CFARule] = None,
     ):
-        self.registers = dict(registers)
+        self.registers = {}
+        if registers:
+            self.registers.update(registers)
         self.cfa = cfa
 
     def __copy__(self) -> Self:
@@ -336,9 +338,9 @@ def evaluate_cfi_directives(
                 elif name == ".cfi_restore":
                     (register,) = args
                     if register in state.initial.registers:
-                        state.current.registers[
-                            register
-                        ] = state.initial.registers[register]
+                        state.current.registers[register] = (
+                            state.initial.registers[register]
+                        )
                     else:
                         state.current.registers.pop(register)
                 elif name == ".cfi_val_offset":
@@ -383,13 +385,13 @@ def evaluate_cfi_directives(
                                 tuple(inst.expression)
                             )
                         elif isinstance(inst, cfi.InstExpression):
-                            state.current.registers[
-                                inst.register
-                            ] = RegisterAtExpression(tuple(inst.expression))
+                            state.current.registers[inst.register] = (
+                                RegisterAtExpression(tuple(inst.expression))
+                            )
                         elif isinstance(inst, cfi.InstValExpression):
-                            state.current.registers[
-                                inst.register
-                            ] = RegisterIsExpression(tuple(inst.expression))
+                            state.current.registers[inst.register] = (
+                                RegisterIsExpression(tuple(inst.expression))
+                            )
                         elif isinstance(inst, cfi.InstNop):
                             pass
                         else:

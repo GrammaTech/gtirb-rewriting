@@ -70,14 +70,12 @@ class TableDefinition(Generic[ContainerT, DataT]):
     @overload
     def _get_or_insert_table(
         self, container: ContainerT, create: Callable[[], DataT]
-    ) -> gtirb.AuxData:
-        ...
+    ) -> gtirb.AuxData: ...
 
     @overload
     def _get_or_insert_table(
         self, container: ContainerT, create: Optional[Callable[[], DataT]]
-    ) -> Optional[gtirb.AuxData]:
-        ...
+    ) -> Optional[gtirb.AuxData]: ...
 
     def _get_or_insert_table(
         self, container: ContainerT, create: Optional[Callable[[], DataT]]

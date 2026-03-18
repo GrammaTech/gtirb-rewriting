@@ -49,8 +49,7 @@ def update_edge(
     edge: gtirb.Edge,
     new_cfg: gtirb.CFG,
     **kwargs: Unpack[_EdgeKWArgs],
-) -> None:
-    ...
+) -> None: ...
 
 
 @overload
@@ -59,8 +58,7 @@ def update_edge(
     new_cfg: gtirb.CFG,
     old_cfg: gtirb.CFG,
     **kwargs: Unpack[_EdgeKWArgs],
-) -> None:
-    ...
+) -> None: ...
 
 
 def update_edge(

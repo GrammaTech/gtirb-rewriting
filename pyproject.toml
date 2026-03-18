@@ -1,0 +1,116 @@
+[build-system]
+requires = ["setuptools >= 64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gtirb-rewriting"
+description = "Utilities for rewriting GTIRB"
+readme = "README.md"
+keywords = []
+authors = [
+    {name = "GrammaTech, Inc."},
+]
+# We need to use the deprecated license key table because setuptools did not
+# add support for the new format until v77, which requires Python 3.9+.
+license = { text = "GPLv3" }
+
+requires-python = ">=3.8"
+dynamic = ["version"]
+
+# Classifiers, see https://pypi.org/classifiers/.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "gtirb-capstone >= 1.1.1",
+    "gtirb-functions >= 1.0.8",
+    "gtirb-layout ~= 1.0",
+    "gtirb >= 1.10.6",
+    "mcasm ~= 0.4.0",
+    "more-itertools >= 8.11",
+    "entrypoints ~= 0.4.0",
+    "typing-extensions ~= 4.7",
+    "leb128 ~= 1.0, >= 1.0.2",
+]
+
+[project.scripts]
+gtirb-rewriting = "gtirb_rewriting.driver:generic_main"
+gtirb-as = "gtirb_rewriting.assembler.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/grammatech/gtirb-rewriting"
+Documentation = "https://github.com/GrammaTech/gtirb-rewriting/tree/main/doc"
+Repository = "https://github.com/GrammaTech/gtirb-rewriting.git"
+Issues = "https://github.com/GrammaTech/gtirb-rewriting/issues"
+
+################################################################################
+# Tool settings
+
+# The default setuptools and setuptools-scm settings work for most common
+# situations. If your project has unusual packaging needs, consult the
+# documentation at https://setuptools.pypa.io/en/latest/userguide/index.html
+# and https://setuptools-scm.readthedocs.io/en/stable/usage/.
+
+# Version numbers
+[tool.setuptools_scm]
+version_file = "src/gtirb_rewriting/version.py"
+
+# Code formatting
+# See https://black.readthedocs.io/
+[tool.black]
+line-length = 79
+
+# Import statement formatting
+# See https://pycqa.github.io/isort/
+[tool.isort]
+profile = "black"
+line_length = 79
+
+# Test coverage
+# See https://coverage.readthedocs.io/
+[tool.coverage.run]
+source = ["gtirb_rewriting", "tests"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "if (typing\\.)?TYPE_CHECKING:",
+]
+
+[tool.coverage.paths]
+# Ensure we find the source, whether or not it was installed with --editable.
+source = [
+    "src",
+    "*/site-packages",
+]
+
+# Type checking
+# See https://github.com/microsoft/pyright/blob/main/docs/configuration.md
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.8"
+
+strictListInference = true
+strictDictionaryInference = true
+strictSetInference = true
+
+reportConstantRedefinition = "error"
+reportDuplicateImport = "error"
+reportPropertyTypeMismatch = "error"
+reportUninitializedInstanceVariable = "error"
+reportUnnecessaryComparison = "error"
+reportPrivateImportUsage = "none"
+
+ignore = ["src/gtirb_rewriting/gtirb_protobuf_compat/proto_3.py"]

@@ -21,6 +21,7 @@
 # endorsement should be inferred.
 
 import dataclasses
+import inspect
 from functools import partial
 from typing import Callable, List, Optional
 
@@ -83,23 +84,15 @@ def patch_constraints(*args, **kwargs):
     return constraints_decorator
 
 
-def _unwrap_callable(func):
-    while True:
-        yield func
-
-        if isinstance(func, partial):
-            func = func.func
-        elif hasattr(func, "__wrapper__"):
-            func = getattr(func, "__wrapper__")
-        else:
-            break
-
-
 def _find_constraints(func):
-    for layer in _unwrap_callable(func):
-        constraints = getattr(layer, "constraints", None)
-        if constraints:
-            return constraints
+    while isinstance(func, partial):
+        func = func.func
+
+    func = inspect.unwrap(func, stop=lambda f: hasattr(f, "constraints"))
+    constraints = getattr(func, "constraints", None)
+    if constraints:
+        return constraints
+
     return None
 
 

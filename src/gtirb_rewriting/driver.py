@@ -62,7 +62,7 @@ class PassDriver(ABC):
         --no-lep-init instead of just --no-init (where lep is part of the pass
         name).
         """
-        pass
+        return
 
     @abstractmethod
     def create_pass(self, args: argparse.Namespace, ir: gtirb.IR) -> Pass:
@@ -96,15 +96,12 @@ class _EntryPointCompatible(Protocol):
     """
 
     @property
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @property
-    def distro(self) -> Optional[entrypoints_module.Distribution]:
-        ...
+    def distro(self) -> Optional[entrypoints_module.Distribution]: ...
 
-    def load(self) -> Any:
-        ...
+    def load(self) -> Any: ...
 
 
 class _PassEntryPointAdaptor:
@@ -353,7 +350,7 @@ def main(
 def generic_main(
     *,
     argv: List[str] = sys.argv,
-    extra: Mapping[str, Union[Type[Pass], Type[PassDriver]]] = {},
+    extra: Optional[Mapping[str, Union[Type[Pass], Type[PassDriver]]]] = None,
 ) -> None:
     """
     The generic gtirb-rewriting driver, used to implement the gtirb-rewriting
@@ -363,9 +360,11 @@ def generic_main(
     """
     entrypoints: List[_EntryPointCompatible] = []
     entrypoints.extend(entrypoints_module.get_group_all("gtirb_rewriting"))
-    entrypoints.extend(
-        _PassEntryPointAdaptor(name, value) for name, value in extra.items()
-    )
+    if extra:
+        entrypoints.extend(
+            _PassEntryPointAdaptor(name, value)
+            for name, value in extra.items()
+        )
 
     _driver_core(entrypoints, True, argv)
 

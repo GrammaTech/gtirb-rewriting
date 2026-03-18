@@ -24,6 +24,7 @@ from typing import Callable, Iterable, Iterator, List, Optional, Union
 
 import gtirb
 import more_itertools
+from typing_extensions import assert_never
 
 from ..abi import ABI, CallingConventionDesc
 from ..assembly import X86Syntax
@@ -71,10 +72,8 @@ class CallPatch(Patch):
             self._imp = _CallPatchX86(sym, args, conv, **constraint_kwargs)
         elif sym.module.isa == gtirb.Module.ISA.ARM64:
             self._imp = _CallPatchARM64(sym, args, conv, **constraint_kwargs)
-        elif sym.module.isa == gtirb.Module.ISA.MIPS32:
-            raise NotImplementedError
         else:
-            assert False, f"Unsupported ISA: {sym.module.isa}"
+            raise NotImplementedError(f"Unsupported ISA: {sym.module.isa}")
 
         self.sym = sym
         super().__init__(self._imp.constraints)
@@ -200,7 +199,7 @@ class _CallPatchX86(_CallPatchImpl):
             elif isinstance(arg_value, int):
                 arg_str = str(arg_value)
             else:
-                assert False
+                assert_never(arg_value)
 
             if arg.reg:
                 lines.append(f"mov {arg.reg}, {arg_str}")

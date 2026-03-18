@@ -1,24 +1,40 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v2.3.0
+    rev: v5.0.0
     hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
       - id: check-executables-have-shebangs
+      - id: check-illegal-windows-names
       - id: check-json
       - id: check-merge-conflict
+        args: ["--assume-in-merge"]
+      - id: check-shebang-scripts-are-executable
+      - id: check-toml
       - id: check-yaml
-      - id: debug-statements
+      - id: destroyed-symlinks
+      - id: detect-private-key
       - id: end-of-file-fixer
-      - id: flake8
       - id: mixed-line-ending
       - id: requirements-txt-fixer
       - id: trailing-whitespace
+
+  # Python formatting. See configuration in pyproject.toml.
   - repo: https://github.com/psf/black
-    rev: 22.3.0
+    rev: 24.10.0
     hooks:
       - id: black
-        args: ["--line-length", "79"]
-  - repo: https://github.com/timothycrosley/isort
-    rev: 5.11.5
+
+  # Python import sorting. See configuration in pyproject.toml.
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
     hooks:
       - id: isort
         files: \.py$
+
+  # Lightweight Python linting. See configuration in .flake8.
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        additional_dependencies: ["flake8-bugbear==24.10.31"]

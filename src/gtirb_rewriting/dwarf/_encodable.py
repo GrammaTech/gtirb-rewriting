@@ -127,16 +127,14 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
         cls,
         *,
         opcode: _OpcodeT,
-    ):
-        ...
+    ): ...
 
     @overload
     def __init_subclass__(
         cls,
         *,
         opcode_type: Type[_OpcodeT],
-    ):
-        ...
+    ): ...
 
     def __init_subclass__(
         cls,
@@ -170,7 +168,7 @@ class _OpcodeEncodable(Generic[_OpcodeT]):
             cls._opcode_type = opcode_type
 
         else:
-            assert False, "must either have a type or an opcode"
+            raise ValueError("must either have a type or an opcode")
 
     @classmethod
     def _fields_and_encoders(

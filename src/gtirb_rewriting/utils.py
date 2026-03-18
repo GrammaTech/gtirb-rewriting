@@ -48,7 +48,7 @@ def _target_triple(
     elif isa == gtirb.Module.ISA.MIPS32:
         arch = "mips"
     else:
-        assert False, f"Unsupported ISA: {isa}"
+        raise NotImplementedError(f"Unsupported ISA: {isa}")
 
     if file_format == gtirb.Module.FileFormat.ELF:
         vendor = "pc"
@@ -57,7 +57,7 @@ def _target_triple(
         vendor = "pc"
         os = "win32"
     else:
-        assert False, f"Unsupported file format: {file_format}"
+        raise NotImplementedError(f"Unsupported file format: {file_format}")
 
     return f"{arch}-{vendor}-{os}"
 
@@ -105,7 +105,7 @@ def _format_symbolic_expr(expr) -> str:
 def show_block_asm(
     block: gtirb.ByteBlock,
     arch: Optional[gtirb.Module.ISA] = None,
-    logger=logging.getLogger(),
+    logger: logging.Logger = logging.root,
     decoder=None,
 ) -> None:
     """
@@ -210,7 +210,9 @@ def _text_section_name(module: gtirb.Module):
     elif module.file_format == gtirb.Module.FileFormat.PE:
         return ".text"
     else:
-        assert False, f"unsupported file format: {module.file_format}"
+        raise NotImplementedError(
+            f"unsupported file format: {module.file_format}"
+        )
 
 
 def decorate_extern_symbol(module: gtirb.Module, sym: str) -> str:
