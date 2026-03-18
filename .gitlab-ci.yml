@@ -112,7 +112,7 @@ publish_external:
   script:
     - pip install --index-url "$INTERNAL_PIP_INDEX" -r requirements-dev.txt
     - pip wheel --no-deps --wheel-dir=dist .
-    - VERSION=$(python3 -c "import pkginfo, sys; print(pkginfo.Wheel(sys.argv[1]).version)" dist/*.whl
+    - VERSION=$(python3 -c "import pkginfo, sys; print(pkginfo.Wheel(sys.argv[1]).version)" dist/*.whl)
     # Do not publish .dev versions on the public pypi
     - if [[ "$VERSION" =~ \.dev ]]; then exit 1; fi
     - twine upload --verbose dist/*.whl
