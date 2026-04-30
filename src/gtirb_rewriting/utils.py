@@ -176,12 +176,11 @@ def _is_call_edge(edge: gtirb.Edge) -> bool:
     return edge.label is not None and edge.label.type == gtirb.Edge.Type.Call
 
 
-def _block_fallthrough_targets(block: gtirb.CodeBlock) -> Set[gtirb.CodeBlock]:
+def _block_fallthrough_targets(block: gtirb.CodeBlock) -> Set[gtirb.CfgNode]:
     return {
         edge.target
         for edge in block.outgoing_edges
         if _is_fallthrough_edge(edge)
-        and isinstance(edge.target, gtirb.CodeBlock)
     }
 
 

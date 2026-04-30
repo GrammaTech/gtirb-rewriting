@@ -85,7 +85,7 @@ def update_edge(
 def update_return_edges_from_changing_call_fallthrough(
     cache: ModifyCache,
     call_edge: gtirb.Edge,
-    fallthrough_targets: Container[gtirb.CodeBlock],
+    fallthrough_targets: Container[gtirb.CfgNode],
     new_fallthrough: gtirb.CodeBlock,
     new_cfg: gtirb.CFG,
 ) -> None:
@@ -179,7 +179,7 @@ def add_return_edges_to_callee(
 def remove_return_edges_from_callee(
     cache: ModifyCache,
     call_edge: gtirb.Edge,
-    fallthrough_targets: Container[gtirb.CodeBlock],
+    fallthrough_targets: Container[gtirb.CfgNode],
     cfg: gtirb.CFG,
 ) -> None:
     """
