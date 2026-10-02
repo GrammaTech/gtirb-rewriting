@@ -542,6 +542,45 @@ def create_ir(
                 ),
             ],
         ),
+        # Test that `.cfi_startproc simple` (operand 1) is evaluated the same
+        # way as a plain `.cfi_startproc`.
+        CFIEvalTest(
+            "startproc-simple",
+            [
+                (
+                    [
+                        (".cfi_startproc", [1], NULL_UUID),
+                        (".cfi_def_cfa", [7, 8], NULL_UUID),
+                        (".cfi_offset", [16, -8], NULL_UUID),
+                    ],
+                    ProcedureState(
+                        16,
+                        current=RowState(
+                            cfa=CFARegisterOffset(7, 8),
+                            registers={16: RegisterOffset(-8)},
+                        ),
+                        initial=RowState(
+                            cfa=CFARegisterOffset(7, 8),
+                            registers={16: RegisterOffset(-8)},
+                        ),
+                    ),
+                ),
+                (
+                    [(".cfi_endproc", [], NULL_UUID)],
+                    None,
+                ),
+            ],
+        ),
+        # Test that we error on unexpected .cfi_startproc operands.
+        CFIEvalTest(
+            "errors-startproc-operands",
+            [
+                (
+                    [(".cfi_startproc", [2], NULL_UUID)],
+                    ValueError,
+                ),
+            ],
+        ),
         # Test a .cfi_startproc within a .cfi_startproc.
         CFIEvalTest(
             "errors-procedure-in-procedure",

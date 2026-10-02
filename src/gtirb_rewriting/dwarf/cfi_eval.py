@@ -253,6 +253,14 @@ def evaluate_cfi_directives(
                             "encountered .cfi_startproc already inside CFI "
                             "procedure"
                         )
+
+                    # No operand (or 0) is a plain `.cfi_startproc` and a
+                    # single operand of 1 is `.cfi_startproc simple`.
+                    if list(args) not in ([], [0], [1]):
+                        raise ValueError(
+                            f"unexpected .cfi_startproc operands: {args}"
+                        )
+
                     state = ProcedureState(
                         return_column=abi.default_dwarf_eh_return_column()
                     )

@@ -28,6 +28,7 @@ from typing import Iterator, Tuple, Type
 from unittest.mock import Mock
 
 import gtirb
+import mcasm
 import pytest
 from gtirb_test_helpers import (
     add_data_block,
@@ -1637,3 +1638,68 @@ def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
             (".cfi_endproc", [], NULL_UUID),
         ],
     }
+
+
+def _mcasm_reports_simple_cfi_procedures() -> bool:
+    """
+    Returns whether mcasm exposes whether `.cfi_startproc simple` was used.
+    """
+    found = []
+
+    class Streamer(mcasm.Streamer):
+        def emit_cfi_start_proc_impl(self, state, frame):
+            found.append(hasattr(frame, "is_simple"))
+
+    mcasm.Assembler("x86_64-pc-linux").assemble(
+        Streamer(), ".cfi_startproc\nret\n.cfi_endproc\n"
+    )
+    return any(found)
+
+
+def _startproc_directives(result: gtirb_rewriting.Assembler.Result):
+    return [
+        directive
+        for directives in result.create_cfi_directives().values()
+        for directive in directives
+        if directive[0] == ".cfi_startproc"
+    ]
+
+
+def _assemble_x64(asm: str) -> gtirb_rewriting.Assembler.Result:
+    assembler = gtirb_rewriting.Assembler(
+        gtirb_rewriting.Assembler.Target(
+            gtirb.Module.ISA.X64,
+            gtirb.Module.FileFormat.ELF,
+            ["DYN"],
+            True,
+        )
+    )
+    assembler.assemble(asm)
+    return assembler.finalize()
+
+
+def test_cfi_startproc_simple_encoding():
+    """
+    A simple CFI procedure is encoded as `.cfi_startproc` with operand 1.
+    """
+    result = _assemble_x64(".cfi_startproc\nud2\n.cfi_endproc\n")
+    assert _startproc_directives(result) == [(".cfi_startproc", [], NULL_UUID)]
+
+    (proc,) = result.text_section.cfi_procedures
+    proc.is_simple = True
+    assert _startproc_directives(result) == [
+        (".cfi_startproc", [1], NULL_UUID)
+    ]
+
+
+@pytest.mark.skipif(
+    not _mcasm_reports_simple_cfi_procedures(),
+    reason="mcasm does not expose DwarfFrameInfo.is_simple",
+)
+def test_cfi_startproc_simple_assembly():
+    result = _assemble_x64(
+        ".cfi_startproc simple\n.cfi_def_cfa 7, 8\nud2\n.cfi_endproc\n"
+    )
+    assert _startproc_directives(result) == [
+        (".cfi_startproc", [1], NULL_UUID)
+    ]

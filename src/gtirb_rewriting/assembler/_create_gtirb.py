@@ -177,8 +177,14 @@ def create_cfi_directives(
     for section in result.sections.values():
         for procedure in section.cfi_procedures:
             if not procedure.is_implicit and procedure.start_offset:
+                # `.cfi_startproc simple` is encoded as a single operand of 1.
                 append_instruction(
-                    procedure.start_offset, (".cfi_startproc", [], NULL_UUID)
+                    procedure.start_offset,
+                    (
+                        ".cfi_startproc",
+                        [1] if procedure.is_simple else [],
+                        NULL_UUID,
+                    ),
                 )
                 if procedure.lsda:
                     append_instruction(
