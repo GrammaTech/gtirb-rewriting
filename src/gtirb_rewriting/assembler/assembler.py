@@ -1469,9 +1469,7 @@ class _Streamer(mcasm.Streamer):
         )
         procedure = Assembler.Result.CFIProcedure(
             is_implicit=is_implicit,
-            # Older versions of mcasm do not expose whether `simple` was
-            # given, in which case the procedure is treated as non-simple.
-            is_simple=bool(getattr(frame, "is_simple", False)),
+            is_simple=frame.is_simple,
         )
         if not is_implicit:
             procedure.start_offset = self._state.current_offset

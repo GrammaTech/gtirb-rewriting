@@ -302,6 +302,16 @@ class ABI:
         """
         raise NotImplementedError
 
+    def default_cfi_initial_directives(
+        self,
+    ) -> List[_auxdata.CFIDirectiveType]:
+        """
+        The CFI directives that the assembler implicitly emits for a
+        `.cfi_startproc` without the `simple` argument, describing the
+        state at the start of a procedure.
+        """
+        raise NotImplementedError
+
     def _sym_expr_rules(
         self, module: gtirb.Module
     ) -> Iterable[_SymExprAttributeRule]:
@@ -595,6 +605,15 @@ class _X86_64_ELF(_X86_64):
     def default_dwarf_eh_return_column(self) -> int:
         return 16
 
+    def default_cfi_initial_directives(
+        self,
+    ) -> List[_auxdata.CFIDirectiveType]:
+        # CFA = rsp + 8, return address (rip) at CFA - 8.
+        return [
+            (".cfi_def_cfa", [7, 8], _auxdata.NULL_UUID),
+            (".cfi_offset", [16, -8], _auxdata.NULL_UUID),
+        ]
+
     def _sym_expr_rules(
         self, module: gtirb.Module
     ) -> Iterable[_SymExprAttributeRule]:
@@ -752,6 +771,12 @@ class _ARM64_ELF(ABI):
     def default_dwarf_eh_return_column(self) -> int:
         return 32
 
+    def default_cfi_initial_directives(
+        self,
+    ) -> List[_auxdata.CFIDirectiveType]:
+        # CFA = sp + 0.
+        return [(".cfi_def_cfa", [31, 0], _auxdata.NULL_UUID)]
+
     def _sym_expr_rules(
         self, module: gtirb.Module
     ) -> Iterable[_SymExprAttributeRule]:
@@ -882,6 +907,12 @@ class _MIPS32_ELF(ABI):
 
     def default_dwarf_eh_return_column(self) -> int:
         return 32
+
+    def default_cfi_initial_directives(
+        self,
+    ) -> List[_auxdata.CFIDirectiveType]:
+        # CFA = sp + 0 (the assemblers emit this as def_cfa_register sp).
+        return [(".cfi_def_cfa", [29, 0], _auxdata.NULL_UUID)]
 
     def _sym_expr_rules(
         self, module: gtirb.Module
