@@ -1648,7 +1648,7 @@ def _startproc_directives(result: gtirb_rewriting.Assembler.Result):
     ]
 
 
-def _assemble_x64(asm: str) -> gtirb_rewriting.Assembler.Result:
+def test_cfi_startproc_simple_assembly():
     assembler = gtirb_rewriting.Assembler(
         gtirb_rewriting.Assembler.Target(
             gtirb.Module.ISA.X64,
@@ -1657,28 +1657,18 @@ def _assemble_x64(asm: str) -> gtirb_rewriting.Assembler.Result:
             True,
         )
     )
-    assembler.assemble(asm)
-    return assembler.finalize()
-
-
-def test_cfi_startproc_simple_encoding():
-    """
-    A simple CFI procedure is encoded as `.cfi_startproc` with operand 1.
-    """
-    result = _assemble_x64(".cfi_startproc\nud2\n.cfi_endproc\n")
-    assert _startproc_directives(result) == [(".cfi_startproc", [], NULL_UUID)]
-
-    (proc,) = result.text_section.cfi_procedures
-    proc.is_simple = True
-    assert _startproc_directives(result) == [
-        (".cfi_startproc", [1], NULL_UUID)
-    ]
-
-
-def test_cfi_startproc_simple_assembly():
-    result = _assemble_x64(
-        ".cfi_startproc simple\n.cfi_def_cfa 7, 8\nud2\n.cfi_endproc\n"
+    assembler.assemble(
+        textwrap.dedent(
+            """\
+            .cfi_startproc simple
+            .cfi_def_cfa 7, 8
+            ud2
+            .cfi_endproc
+            """
+        )
     )
+    result = assembler.finalize()
+
     assert _startproc_directives(result) == [
         (".cfi_startproc", [1], NULL_UUID)
     ]

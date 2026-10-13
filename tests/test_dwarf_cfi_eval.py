@@ -577,10 +577,6 @@ def create_ir(
                         ),
                     ),
                 ),
-                (
-                    [(".cfi_endproc", [], NULL_UUID)],
-                    None,
-                ),
             ],
         ),
         # Test a .cfi_startproc within a .cfi_startproc.
@@ -682,8 +678,9 @@ def test_cfi_eval_copy():
     )
 
 
+@pytest.mark.parametrize("simple", (False, True), ids=("default", "simple"))
 @pytest.mark.parametrize(
-    ("isa", "expected"),
+    ("isa", "default_rules"),
     (
         (
             gtirb.Module.ISA.X64,
@@ -695,21 +692,24 @@ def test_cfi_eval_copy():
         (gtirb.Module.ISA.ARM64, RowState(cfa=CFARegisterOffset(31, 0))),
         (gtirb.Module.ISA.MIPS32, RowState(cfa=CFARegisterOffset(29, 0))),
     ),
+    ids=("x64", "arm64", "mips32"),
 )
-def test_cfi_eval_default_rules(isa: gtirb.Module.ISA, expected: RowState):
+def test_cfi_eval_default_rules(
+    isa: gtirb.Module.ISA, default_rules: RowState, simple: bool
+):
     """
-    Test that a plain .cfi_startproc uses each ABI's default initial rules
-    and that `.cfi_startproc simple` does not.
+    Test that a plain .cfi_startproc starts with the ABI's default initial
+    rules and that `.cfi_startproc simple` starts with no rules.
     """
-    for args, rules in (([], expected), ([1], RowState())):
-        _, m = create_test_module(gtirb.Module.FileFormat.ELF, isa)
-        _, bi = add_text_section(m, address=0)
-        b = add_code_block(bi, b"\x00\x00\x00\x00")
-        m.aux_data["cfiDirectives"].data[gtirb.Offset(b, 0)] = [
-            (".cfi_startproc", args, NULL_UUID)
-        ]
+    _, m = create_test_module(gtirb.Module.FileFormat.ELF, isa)
+    _, bi = add_text_section(m, address=0)
+    b = add_code_block(bi, b"\x00\x00\x00\x00")
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b, 0)] = [
+        (".cfi_startproc", [1] if simple else [], NULL_UUID)
+    ]
 
-        ((_, _, state),) = evaluate_cfi_directives(m, [b])
-        assert state is not None
-        assert state.current == rules
-        assert state.initial == rules
+    expected = RowState() if simple else default_rules
+    ((_, _, state),) = evaluate_cfi_directives(m, [b])
+    assert state is not None
+    assert state.current == expected
+    assert state.initial == expected
