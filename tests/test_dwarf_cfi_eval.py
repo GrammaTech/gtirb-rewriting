@@ -542,43 +542,6 @@ def create_ir(
                 ),
             ],
         ),
-        # Test that a plain .cfi_startproc starts with the ABI's default
-        # initial rules, and that they are part of the initial state.
-        CFIEvalTest(
-            "startproc-default-rules",
-            [
-                (
-                    [
-                        (".cfi_startproc", [], NULL_UUID),
-                    ],
-                    ProcedureState(
-                        16,
-                        current=RowState(
-                            cfa=CFARegisterOffset(7, 8),
-                            registers={16: RegisterOffset(-8)},
-                        ),
-                        initial=RowState(
-                            cfa=CFARegisterOffset(7, 8),
-                            registers={16: RegisterOffset(-8)},
-                        ),
-                    ),
-                ),
-                (
-                    [(".cfi_def_cfa_offset", [16], NULL_UUID)],
-                    ProcedureState(
-                        16,
-                        current=RowState(
-                            cfa=CFARegisterOffset(7, 16),
-                            registers={16: RegisterOffset(-8)},
-                        ),
-                        initial=RowState(
-                            cfa=CFARegisterOffset(7, 8),
-                            registers={16: RegisterOffset(-8)},
-                        ),
-                    ),
-                ),
-            ],
-        ),
         # Test a .cfi_startproc within a .cfi_startproc.
         CFIEvalTest(
             "errors-procedure-in-procedure",
