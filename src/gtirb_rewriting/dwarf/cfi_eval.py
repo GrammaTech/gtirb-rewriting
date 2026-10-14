@@ -20,6 +20,7 @@
 # reflect the position or policy of the Government and no official
 # endorsement should be inferred.
 
+import collections
 import uuid
 from copy import copy
 from dataclasses import dataclass, field
@@ -244,8 +245,9 @@ def evaluate_cfi_directives(
 
         for block_offset, directives in sorted(block_directives.items()):
             started_procedure = False
-            for directive in directives:
-                name, args, sym_or_uuid = directive
+            pending = collections.deque(directives)
+            while pending:
+                name, args, sym_or_uuid = pending.popleft()
 
                 if name == ".cfi_startproc":
                     if state is not None:
@@ -253,10 +255,25 @@ def evaluate_cfi_directives(
                             "encountered .cfi_startproc already inside CFI "
                             "procedure"
                         )
+
+                    # No operand (or 0) is a plain `.cfi_startproc` and a
+                    # single operand of 1 is `.cfi_startproc simple`.
+                    if list(args) not in ([], [0], [1]):
+                        raise ValueError(
+                            f"unexpected .cfi_startproc operands: {args}"
+                        )
+
                     state = ProcedureState(
                         return_column=abi.default_dwarf_eh_return_column()
                     )
                     started_procedure = True
+                    # A single operand of 1 encodes `.cfi_startproc simple`.
+                    # Otherwise the assembler emits the ABI's default initial
+                    # directives, so evaluate them as if they came next.
+                    if list(args) != [1]:
+                        pending.extendleft(
+                            reversed(abi.default_cfi_initial_directives())
+                        )
                 elif state is None:
                     raise CFIStateError(
                         "encountered CFI instruction while not inside CFI "

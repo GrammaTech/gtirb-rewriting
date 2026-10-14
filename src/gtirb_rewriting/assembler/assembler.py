@@ -649,6 +649,11 @@ class Assembler:
             )
             is_implicit: bool = False
 
+            # Whether the procedure was started with `.cfi_startproc simple`,
+            # meaning the assembler should not emit the target's default
+            # initial CFI instructions for it.
+            is_simple: bool = False
+
             def _referenced_nodes(self) -> Iterator[gtirb.Block]:
                 if self.start_offset and isinstance(
                     self.start_offset.element_id, gtirb.Block
@@ -1464,6 +1469,7 @@ class _Streamer(mcasm.Streamer):
         )
         procedure = Assembler.Result.CFIProcedure(
             is_implicit=is_implicit,
+            is_simple=frame.is_simple,
         )
         if not is_implicit:
             procedure.start_offset = self._state.current_offset

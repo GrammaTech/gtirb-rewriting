@@ -1637,3 +1637,38 @@ def test_create_ir(use_gtirb_as: bool, tmp_path: pathlib.Path):
             (".cfi_endproc", [], NULL_UUID),
         ],
     }
+
+
+def _startproc_directives(result: gtirb_rewriting.Assembler.Result):
+    return [
+        directive
+        for directives in result.create_cfi_directives().values()
+        for directive in directives
+        if directive[0] == ".cfi_startproc"
+    ]
+
+
+def test_cfi_startproc_simple_assembly():
+    assembler = gtirb_rewriting.Assembler(
+        gtirb_rewriting.Assembler.Target(
+            gtirb.Module.ISA.X64,
+            gtirb.Module.FileFormat.ELF,
+            ["DYN"],
+            True,
+        )
+    )
+    assembler.assemble(
+        textwrap.dedent(
+            """\
+            .cfi_startproc simple
+            .cfi_def_cfa 7, 8
+            ud2
+            .cfi_endproc
+            """
+        )
+    )
+    result = assembler.finalize()
+
+    assert _startproc_directives(result) == [
+        (".cfi_startproc", [1], NULL_UUID)
+    ]

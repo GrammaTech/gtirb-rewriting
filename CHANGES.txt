@@ -1,3 +1,7 @@
+0.4.2 (Unreleased):
+- Support `.cfi_startproc simple`, encoded as `.cfi_startproc` with the
+  argument 1 in the cfiDirectives AuxData table.
+
 0.4.1:
 - Update symbolForwarding auxdata when a symbol is retargeted
 - Dropped support for Python 3.7

@@ -101,7 +101,7 @@ def create_ir(
             [
                 (
                     [
-                        (".cfi_startproc", [], NULL_UUID),
+                        (".cfi_startproc", [1], NULL_UUID),
                         (".cfi_personality", [0], PERSONALITY_SYMBOL),
                         (".cfi_lsda", [0], LSDA_SYMBOL),
                         (".cfi_return_column", [1], NULL_UUID),
@@ -130,7 +130,7 @@ def create_ir(
             [
                 (
                     [
-                        (".cfi_startproc", [], NULL_UUID),
+                        (".cfi_startproc", [1], NULL_UUID),
                         (".cfi_personality", [0xFF], NULL_UUID),
                         (".cfi_lsda", [0xFF], NULL_UUID),
                     ],
@@ -211,7 +211,7 @@ def create_ir(
             [
                 (
                     [
-                        (".cfi_startproc", [], NULL_UUID),
+                        (".cfi_startproc", [1], NULL_UUID),
                     ],
                     ProcedureState(16),
                 ),
@@ -253,7 +253,7 @@ def create_ir(
             [
                 (
                     [
-                        (".cfi_startproc", [], NULL_UUID),
+                        (".cfi_startproc", [1], NULL_UUID),
                     ],
                     ProcedureState(16),
                 ),
@@ -322,7 +322,7 @@ def create_ir(
             [
                 (
                     [
-                        (".cfi_startproc", [], NULL_UUID),
+                        (".cfi_startproc", [1], NULL_UUID),
                     ],
                     ProcedureState(16),
                 ),
@@ -374,7 +374,7 @@ def create_ir(
             [
                 (
                     [
-                        (".cfi_startproc", [], NULL_UUID),
+                        (".cfi_startproc", [1], NULL_UUID),
                     ],
                     ProcedureState(16),
                 ),
@@ -400,7 +400,7 @@ def create_ir(
             "errors-cfa-register",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -415,7 +415,7 @@ def create_ir(
             "errors-cfa-offset",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -430,7 +430,7 @@ def create_ir(
             "errors-cfa-adjust-offset",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -445,7 +445,7 @@ def create_ir(
             "errors-register-rules",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -459,7 +459,7 @@ def create_ir(
             "errors-state-underflow",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -473,7 +473,7 @@ def create_ir(
             "errors-unknown-directive",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -488,7 +488,7 @@ def create_ir(
             "errors-unhandled-instruction",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -503,7 +503,7 @@ def create_ir(
             "errors-invalid-instructions",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -518,7 +518,7 @@ def create_ir(
             "errors-unresolved-uuid",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -533,7 +533,7 @@ def create_ir(
             "errors-missing-symbol",
             [
                 (
-                    [(".cfi_startproc", [], NULL_UUID)],
+                    [(".cfi_startproc", [1], NULL_UUID)],
                     ProcedureState(16),
                 ),
                 (
@@ -639,3 +639,40 @@ def test_cfi_eval_copy():
         entry is not entry_copy
         for entry, entry_copy in zip(state.save_stack, state_copy.save_stack)
     )
+
+
+@pytest.mark.parametrize("simple", (False, True), ids=("default", "simple"))
+@pytest.mark.parametrize(
+    ("isa", "default_rules"),
+    (
+        (
+            gtirb.Module.ISA.X64,
+            RowState(
+                cfa=CFARegisterOffset(7, 8),
+                registers={16: RegisterOffset(-8)},
+            ),
+        ),
+        (gtirb.Module.ISA.ARM64, RowState(cfa=CFARegisterOffset(31, 0))),
+        (gtirb.Module.ISA.MIPS32, RowState(cfa=CFARegisterOffset(29, 0))),
+    ),
+    ids=("x64", "arm64", "mips32"),
+)
+def test_cfi_eval_default_rules(
+    isa: gtirb.Module.ISA, default_rules: RowState, simple: bool
+):
+    """
+    Test that a plain .cfi_startproc starts with the ABI's default initial
+    rules and that `.cfi_startproc simple` starts with no rules.
+    """
+    _, m = create_test_module(gtirb.Module.FileFormat.ELF, isa)
+    _, bi = add_text_section(m, address=0)
+    b = add_code_block(bi, b"\x00\x00\x00\x00")
+    m.aux_data["cfiDirectives"].data[gtirb.Offset(b, 0)] = [
+        (".cfi_startproc", [1] if simple else [], NULL_UUID)
+    ]
+
+    expected = RowState() if simple else default_rules
+    ((_, _, state),) = evaluate_cfi_directives(m, [b])
+    assert state is not None
+    assert state.current == expected
+    assert state.initial == expected
