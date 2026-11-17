@@ -96,6 +96,11 @@ source = [
     "*/site-packages",
 ]
 
+# Testing
+# See https://docs.pytest.org/en/stable/reference/customize.html
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 # Type checking
 # See https://github.com/microsoft/pyright/blob/main/docs/configuration.md
 [tool.pyright]
